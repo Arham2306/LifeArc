@@ -1,11 +1,13 @@
-import type { CharacterProfile, LifeEvent, StatEffects } from '../../../types/game'
+import type { CharacterProfile, LifeEvent, SiblingProfile, StatEffects } from '../../../types/game'
 import { applyEffects } from '../../character/services/statService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
+import { getSiblingOccupation } from '../../character/services/familyService'
+import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names'
 import type { ActiveBusinessProfile } from '../../business/types'
 import { createId } from '../../../utils/id'
-import { chance, randomInt } from '../../../utils/random'
+import { chance, pickRandom, randomInt } from '../../../utils/random'
 import { EARLY_MILESTONES, getMilestoneForAge } from '../data/milestones'
 
 /** Resolves the character's occupation label based on age, education stage, active job, and business. */
@@ -166,6 +168,56 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     age: rel.age + 1,
   }));
 
+  // Age up siblings alongside player
+  let updatedSiblings = (character.siblings || []).map((sib) => {
+    const nextSibAge = sib.age + 1;
+    return {
+      ...sib,
+      age: nextSibAge,
+      occupation: getSiblingOccupation(nextSibAge, sib.occupation),
+    };
+  });
+
+  // Early-childhood dynamic baby sibling birth chance (Option A)
+  const babySiblingEvents: LifeEvent[] = [];
+  let babyHappinessDelta = 0;
+  if (
+    nextAge >= 1 &&
+    nextAge <= 10 &&
+    fatherAlive &&
+    motherAlive &&
+    newMotherAge <= 42 &&
+    updatedSiblings.length < 4 &&
+    chance(0.09)
+  ) {
+    const isBabyBrother = Math.random() < 0.5;
+    const babyRole = isBabyBrother ? 'brother' : 'sister';
+    const babyName = isBabyBrother ? pickRandom(MALE_NAMES) : pickRandom(FEMALE_NAMES);
+    const newBabySibling: SiblingProfile = {
+      id: createId(),
+      role: babyRole,
+      firstName: babyName,
+      lastName: character.lastName,
+      age: 0,
+      gender: isBabyBrother ? 'male' : 'female',
+      relationship: randomInt(85, 98),
+      occupation: 'Infant',
+      isAlive: true,
+      birthOrder: 'younger',
+    };
+    updatedSiblings = [...updatedSiblings, newBabySibling];
+    babyHappinessDelta += 5;
+    babySiblingEvents.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: 'New Baby Sibling!',
+      message: `Your mother gave birth to a healthy baby ${babyRole}, ${babyName} ${character.lastName}! You are officially an older sibling.`,
+      category: 'milestone',
+      icon: '🍼',
+    });
+  }
+
   // Progress schooling (Elementary -> Middle -> High School -> University -> Professional)
   const eduProgress = progressEducationForYear(character, nextAge);
   const eduEffects = eduProgress.statEffects ?? {};
@@ -197,7 +249,8 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       (yearlyChanges.happiness ?? 0) +
       (eduEffects.happiness ?? 0) +
       (careerProgress.statEffects?.happiness ?? 0) +
-      griefHappinessDelta,
+      griefHappinessDelta +
+      babyHappinessDelta,
     health: (yearlyChanges.health ?? 0) + (eduEffects.health ?? 0),
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
     looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
@@ -217,7 +270,9 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         updatedBusiness?.name
       ),
       parents: updatedParents,
+      siblings: updatedSiblings,
       relationships: updatedRelationships,
+      yearlySocialActions: {},
       education: {
         ...eduProgress.education,
         studentDebt: careerProgress.remainingStudentDebt,
@@ -227,6 +282,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       timeline: [
         ...character.timeline,
         milestone,
+        ...babySiblingEvents,
         ...familyDeathEvents,
         ...eduProgress.events,
         ...careerProgress.events,

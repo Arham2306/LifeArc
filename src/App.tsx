@@ -18,6 +18,8 @@ import { SchoolMilestoneModal } from './modules/education/components/SchoolMiles
 import { CareerScreen } from './modules/career/components/CareerScreen'
 import { BusinessScreen } from './modules/business/components/BusinessScreen'
 import { FiscalYearReportModal } from './modules/business/components/FiscalYearReportModal'
+import { MenuScreen } from './components/layout/MenuScreen'
+import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
 import type { SchoolMilestoneNotice } from './modules/education/types'
@@ -41,11 +43,13 @@ export default function App() {
   const [isUniversityModalOpen, setIsUniversityModalOpen] = useState(false)
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
+  const [menuView, setMenuView] = useState<'hub' | 'relationships'>('hub')
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
     setActiveCharacter(newCharacter)
     setSelectedStage('childhood')
     setCurrentTab('life')
+    setMenuView('hub')
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
     setIsUniversityModalOpen(false)
@@ -112,6 +116,7 @@ export default function App() {
     setIsUniversityModalOpen(false)
     setIsDeathModalOpen(false)
     setIsMenuOpen(false)
+    setMenuView('hub')
   }
 
   // Filter journal by the selected life stage
@@ -243,26 +248,29 @@ export default function App() {
               />
             )}
 
-            {/* TAB CONTENT: MENU (upcoming Module 6 Profile & Relationships) */}
+            {/* TAB CONTENT: MENU & ACTIVITIES */}
             {currentTab === 'menu' && (
-              <div className="p-6 flex flex-col items-center justify-center text-center gap-3 bg-white min-h-[480px]">
-                <div className="w-16 h-16 rounded-3xl bg-amber-100 border-[2.5px] border-slate-900 flex items-center justify-center text-3xl shadow-[2px_3px_0_#0f172a]">
-                  📱
-                </div>
-                <h3 className="font-black text-slate-900 text-lg">
-                  Profile & Relationships
-                </h3>
-                <p className="text-xs font-bold text-slate-500 max-w-xs">
-                  Full character biography, earned credentials gallery, family tree, and
-                  interactive social & romance actions will unlock here in Module 6!
-                </p>
-                <CartoonButton variant="sky" size="sm" onClick={() => setCurrentTab('life')}>
-                  Back to Life
-                </CartoonButton>
-              </div>
+              menuView === 'relationships' ? (
+                <RelationshipsScreen
+                  character={activeCharacter}
+                  onUpdateCharacter={setActiveCharacter}
+                  onBackToMenu={() => setMenuView('hub')}
+                />
+              ) : (
+                <MenuScreen
+                  character={activeCharacter}
+                  onOpenRelationships={() => setMenuView('relationships')}
+                />
+              )
             )}
 
-            <BottomNav currentTab={currentTab} onTabChange={setCurrentTab} />
+            <BottomNav
+              currentTab={currentTab}
+              onTabChange={(tab) => {
+                setCurrentTab(tab);
+                if (tab === 'menu') setMenuView('hub');
+              }}
+            />
           </div>
         )}
       </main>

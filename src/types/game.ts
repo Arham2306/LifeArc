@@ -34,6 +34,19 @@ export interface ParentsInfo {
   wealth: FamilyWealth;
 }
 
+export interface SiblingProfile {
+  id: string;
+  role: 'brother' | 'sister';
+  firstName: string;
+  lastName: string;
+  age: number;
+  gender: 'male' | 'female';
+  relationship: number; // 0 - 100
+  occupation: string;
+  isAlive: boolean;
+  birthOrder: 'older' | 'younger' | 'twin';
+}
+
 /** A set of changes to apply to a character. All fields are optional deltas. */
 export type StatEffects = Partial<Record<StatKey, number>> & {
   cash?: number;
@@ -107,10 +120,13 @@ export interface CharacterProfile {
   causeOfDeath?: string;
   stats: CharacterStats;
   parents: ParentsInfo;
+  siblings?: SiblingProfile[];
   education: EducationProfile;
   career: PlayerCareerState;
   business?: ActiveBusinessProfile | null;
   relationships: PersonProfile[];
+  /** Track interactive social actions performed on people this year: personId -> actionType[] */
+  yearlySocialActions?: Record<string, string[]>;
   timeline: LifeEvent[];
   /** Ids of one-time interactive events this character has already experienced. */
   seenEventIds: string[];

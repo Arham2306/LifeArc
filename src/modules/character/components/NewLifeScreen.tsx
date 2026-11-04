@@ -10,7 +10,7 @@ import {
   pickRandomCity,
   type CountryItem,
 } from '../services/locationService'
-import { createBirthJournalEntry, generateParents } from '../services/familyService'
+import { createBirthJournalEntry, generateParents, generateSiblings } from '../services/familyService'
 import { createInitialEducation } from '../../education/services/educationService'
 import { createInitialCareerState } from '../../career/services/careerService'
 import { getRandomName, LAST_NAMES, MALE_NAMES, FEMALE_NAMES, NON_BINARY_NAMES } from '../data/names'
@@ -151,6 +151,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
 
     const birthYear = new Date().getFullYear();
     const parents = generateParents(trimmedLast);
+    const siblings = generateSiblings(trimmedLast, parents.mother.age);
     const birthEntry = createBirthJournalEntry({
       firstName: trimmedFirst,
       lastName: trimmedLast,
@@ -191,6 +192,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
         karma,
       },
       parents,
+      siblings,
       education: createInitialEducation(),
       career: createInitialCareerState(),
       relationships: [],

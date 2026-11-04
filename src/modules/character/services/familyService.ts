@@ -1,8 +1,65 @@
-import type { FamilyWealth, LifeEvent, ParentsInfo } from '../../../types/game'
+import type { FamilyWealth, LifeEvent, ParentsInfo, SiblingProfile } from '../../../types/game'
 import type { BadgeVariant } from '../../../components/ui/Badge'
 import { FEMALE_NAMES, MALE_NAMES } from '../data/names'
 import { createId } from '../../../utils/id'
 import { pickRandom, pickWeighted, randomInt } from '../../../utils/random'
+
+/** Resolves standard occupation / student status for a sibling based on their age. */
+export function getSiblingOccupation(age: number, currentOccupation?: string): string {
+  if (age <= 2) return 'Infant';
+  if (age <= 4) return 'Toddler';
+  if (age <= 10) return 'Elementary Student';
+  if (age <= 13) return 'Middle School Student';
+  if (age <= 17) return 'High School Student';
+  if (age <= 21) return 'University Student';
+  if (currentOccupation && !currentOccupation.endsWith('Student')) return currentOccupation;
+  return 'Employed';
+}
+
+/**
+ * Generates initial siblings (if any) for a newborn character.
+ */
+export function generateSiblings(familyLastName: string, motherAge: number): SiblingProfile[] {
+  const { count } = pickWeighted<{ count: number; weight: number }>([
+    { count: 0, weight: 40 }, // Only child
+    { count: 1, weight: 35 }, // 1 sibling
+    { count: 2, weight: 18 }, // 2 siblings
+    { count: 3, weight: 7 },  // 3 siblings
+  ]);
+
+  if (count === 0) return [];
+
+  const siblings: SiblingProfile[] = [];
+  const maxOlderAge = Math.min(12, Math.max(1, motherAge - 20));
+
+  for (let i = 0; i < count; i++) {
+    const isMale = Math.random() < 0.5;
+    const gender: 'male' | 'female' = isMale ? 'male' : 'female';
+    const role: 'brother' | 'sister' = isMale ? 'brother' : 'sister';
+    const firstName = isMale ? pickRandom(MALE_NAMES) : pickRandom(FEMALE_NAMES);
+    
+    // Older siblings or rare twin
+    const isTwin = count === 1 && Math.random() < 0.05;
+    const age = isTwin ? 0 : randomInt(1, maxOlderAge);
+    const birthOrder: 'older' | 'younger' | 'twin' = isTwin ? 'twin' : 'older';
+
+    siblings.push({
+      id: createId(),
+      role,
+      firstName,
+      lastName: familyLastName,
+      age,
+      gender,
+      relationship: randomInt(68, 94),
+      occupation: getSiblingOccupation(age),
+      isAlive: true,
+      birthOrder,
+    });
+  }
+
+  // Sort siblings by age descending (oldest first)
+  return siblings.sort((a, b) => b.age - a.age);
+}
 
 export interface WealthTierMeta {
   label: string;
