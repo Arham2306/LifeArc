@@ -85,16 +85,18 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           }
         : target;
     }
-    const friend = (character.relationships || []).find((r) => r.id === target.id);
+    const isPartnerTarget = character.partner?.id === target.id;
+    const partnerCandidate = isPartnerTarget ? character.partner : null;
+    const friend = (character.relationships || []).find((r) => r.id === target.id) || partnerCandidate;
     return friend
       ? {
           ...target,
           relationship: friend.relationship,
           age: friend.age,
           gender: friend.gender,
-          romanceUnlocked: friend.romanceUnlocked,
+          romanceUnlocked: isPartnerTarget || friend.romanceUnlocked,
           romanceMeter: friend.romanceMeter,
-          romanticStage: friend.romanticStage,
+          romanticStage: friend.romanticStage || (isPartnerTarget ? 'dating' : undefined),
           isAlive: true,
         }
       : target;
@@ -103,10 +105,15 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   // If liveTarget is an adult friend, get their full PersonProfile for romance interactions
   const friendTarget: PersonProfile | undefined = useMemo(() => {
     if (!liveTarget || liveTarget.type !== 'friend') return undefined;
+    if (character.partner && character.partner.id === liveTarget.id) {
+      return character.partner;
+    }
     return (character.relationships || []).find((r) => r.id === liveTarget.id);
   }, [character, liveTarget]);
 
   if (!liveTarget) return null;
+
+  const isPartner = character.partner?.id === liveTarget.id;
 
   const stage =
     character.age <= 12 ? 'childhood' : character.age <= 17 ? 'teens' : 'adulthood';
@@ -606,7 +613,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             </div>
 
             {/* Spark Romance Banner */}
-            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.relationship >= 50 && !liveTarget.romanceUnlocked && (
+            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.relationship >= 50 && !liveTarget.romanceUnlocked && !isPartner && (
               <div className="p-3 bg-rose-50 border-2 border-slate-900 rounded-2xl flex items-center justify-between shadow-[2px_2px_0_#0f172a] mt-2">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl">💖</span>
@@ -653,7 +660,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                       onClick={handleOpenFlirtPicker}
                       className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
                         pLimit || pFlirted
-                          ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                           ? 'bg-slate-100 opacity-60 cursor-not-allowed'
                           : 'bg-white hover:bg-rose-50 cursor-pointer'
                       }`}
                     >
@@ -686,8 +693,8 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     </button>
                   </div>
 
-                  {/* Milestone button: Ask Out */}
-                  {liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (() => {
+                  {/* Milestone button: Ask Out (only if not yet an official couple) */}
+                  {!isPartner && liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (() => {
                     const romanceVal = liveTarget.romanceMeter ?? 0;
                     const canAskOut = romanceVal >= 35 && liveTarget.relationship >= 50;
                     return (
@@ -713,6 +720,14 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                       </button>
                     );
                   })()}
+
+                  {/* Official Partner Badge */}
+                  {isPartner && (
+                    <div className="w-full p-2.5 rounded-2xl border-2 border-slate-900 bg-rose-100/90 font-black text-xs shadow-[1.5px_1.5px_0_#0f172a] flex items-center justify-center gap-2 text-rose-950">
+                      <Heart className="w-4 h-4 fill-rose-500 text-rose-500 shrink-0" />
+                      <span>Official Romantic Partner ({liveTarget.role || 'Partner'})</span>
+                    </div>
+                  )}
                 </div>
               );
             })()}

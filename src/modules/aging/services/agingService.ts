@@ -168,6 +168,22 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
   let spouseCashContribution = 0;
   let updatedPartner = character.partner ? { ...character.partner } : null;
 
+  if (!updatedPartner) {
+    const candidatePartner = (character.relationships || []).find(
+      (r) =>
+        r.romanticStage === 'dating' ||
+        r.romanticStage === 'engaged' ||
+        r.romanticStage === 'married' ||
+        r.relationshipType === 'dating' ||
+        r.relationshipType === 'partner' ||
+        r.relationshipType === 'spouse' ||
+        ['Girlfriend', 'Boyfriend', 'Fiancé', 'Fiancée', 'Wife', 'Husband', 'Partner'].includes(r.role)
+    );
+    if (candidatePartner) {
+      updatedPartner = { ...candidatePartner };
+    }
+  }
+
   if (updatedPartner) {
     const nextPartnerAge = updatedPartner.age + 1;
     const yearsTogether = (updatedPartner.partnerStats?.yearsTogether ?? 0) + 1;
@@ -208,12 +224,17 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
   // Age up friends, partners, and coworkers alongside player, and track neglect
   let agedRelationships = cohortService.ageContacts(character.relationships || [], character.age);
   if (updatedPartner) {
+    let partnerFound = false;
     agedRelationships = agedRelationships.map((rel) => {
       if (rel.id === updatedPartner?.id) {
+        partnerFound = true;
         return updatedPartner;
       }
       return rel;
     });
+    if (!partnerFound) {
+      agedRelationships.unshift(updatedPartner);
+    }
   }
 
   // Pregnancy resolution (Childbirth upon age up)

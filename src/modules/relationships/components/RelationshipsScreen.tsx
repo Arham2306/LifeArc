@@ -25,18 +25,60 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
   const { father, mother } = character.parents;
   const siblings = character.siblings || [];
   const friends = character.relationships || [];
-  const partner = character.partner;
+
+  // Check if a person profile represents an active romantic partner/dating/spouse
+  const isPartnerProfile = (p: PersonProfile) =>
+    p.romanticStage === 'dating' ||
+    p.romanticStage === 'engaged' ||
+    p.romanticStage === 'married' ||
+    p.relationshipType === 'dating' ||
+    p.relationshipType === 'partner' ||
+    p.relationshipType === 'spouse' ||
+    ['Girlfriend', 'Boyfriend', 'Fiancé', 'Fiancée', 'Wife', 'Husband', 'Partner'].includes(p.role);
+
+  // Resolve active partner: check character.partner first, fallback to relationships match
+  const partner =
+    character.partner ||
+    friends.find(isPartnerProfile) ||
+    null;
+
+  // Ensure friends list includes partner if partner exists
+  const allRelationships = React.useMemo(() => {
+    if (partner && !friends.some((f) => f.id === partner.id)) {
+      return [partner, ...friends];
+    }
+    return friends;
+  }, [friends, partner]);
+
+  // Self-healing synchronization: if character.partner was missing or relationships out of sync, sync it
+  React.useEffect(() => {
+    if (!character.partner && partner) {
+      onUpdateCharacter({
+        ...character,
+        partner,
+        relationships: allRelationships,
+      });
+    }
+  }, [character, partner, allRelationships, onUpdateCharacter]);
 
   // Categorize relationships
-  const closeFriends = friends.filter(
+  const romanticProspects = allRelationships.filter(
     (f) =>
       (!partner || f.id !== partner.id) &&
+      (f.romanticStage === 'flirting' || f.relationshipType === 'crush' || (f.romanceUnlocked && (f.romanceMeter ?? 0) > 0))
+  );
+
+  const closeFriends = allRelationships.filter(
+    (f) =>
+      (!partner || f.id !== partner.id) &&
+      !romanticProspects.some((p) => p.id === f.id) &&
       (f.relationship >= 60 || f.cohortType === 'friend' || f.cohortType === 'best_friend')
   );
 
-  const cohortPeers = friends.filter(
+  const cohortPeers = allRelationships.filter(
     (f) =>
       (!partner || f.id !== partner.id) &&
+      !romanticProspects.some((p) => p.id === f.id) &&
       f.relationship < 60 &&
       f.cohortType !== 'friend' &&
       f.cohortType !== 'best_friend'
@@ -77,6 +119,7 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
   };
 
   const handleOpenFriend = (friend: PersonProfile) => {
+    const isPartner = partner?.id === friend.id || isPartnerProfile(friend);
     setSelectedTarget({
       id: friend.id,
       name: `${friend.firstName} ${friend.lastName}`,
@@ -86,9 +129,9 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
       isAlive: true,
       age: friend.age,
       gender: friend.gender,
-      romanceUnlocked: friend.romanceUnlocked,
+      romanceUnlocked: isPartner || friend.romanceUnlocked,
       romanceMeter: friend.romanceMeter,
-      romanticStage: friend.romanticStage,
+      romanticStage: friend.romanticStage || (isPartner ? 'dating' : undefined),
     });
   };
 
@@ -151,7 +194,119 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
         </button>
       </div>
 
-      {/* SECTION 1: FAMILY */}
+      {/* SECTION 1: ROMANTIC PARTNER */}
+      {partner && (
+        <div className="flex flex-col gap-2 pt-1">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-black uppercase tracking-wider text-rose-600 flex items-center gap-1.5">
+              <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+              <span>Romantic Partner</span>
+            </span>
+            <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full border border-rose-300 uppercase">
+              {partner.romanticStage || 'Partner'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleOpenFriend(partner)}
+            className="w-full p-3.5 rounded-2xl border-2 border-slate-900 bg-rose-50/90 hover:bg-rose-100 text-left transition-all shadow-[2px_2.5px_0_#0f172a] flex items-center justify-between cursor-pointer group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl border-2 border-slate-900 bg-rose-200 flex items-center justify-center text-2xl shadow-[1px_1px_0_#0f172a]">
+                {partner.avatarEmoji || (partner.gender === 'female' ? '👩' : '👨')}
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-sm font-black text-slate-950 group-hover:text-rose-950">
+                    {partner.firstName} {partner.lastName}
+                  </span>
+                  <Badge variant="rose" size="xs">
+                    {partner.role || 'Partner'}
+                  </Badge>
+                  {partner.partnerStats?.yearsTogether ? (
+                    <span className="text-[9px] font-bold text-rose-800 bg-rose-200/70 border border-rose-300 px-1.5 py-0.5 rounded-full">
+                      {partner.partnerStats.yearsTogether} {partner.partnerStats.yearsTogether === 1 ? 'yr' : 'yrs'} together
+                    </span>
+                  ) : null}
+                </div>
+                <span className="text-[10px] font-bold text-slate-500">
+                  Age {partner.age} • {partner.partnerStats?.occupation || partner.role || 'Employed'}
+                </span>
+                <div className="flex flex-col gap-1 w-44 pt-1">
+                  <div className="flex items-center justify-between text-[9px] font-bold text-slate-600">
+                    <span>Relationship</span>
+                    <span className="font-mono text-emerald-700">{Math.round(partner.relationship)}%</span>
+                  </div>
+                  <ProgressBar value={partner.relationship} color="emerald" size="xs" />
+
+                  {partner.romanceMeter !== undefined && (
+                    <>
+                      <div className="flex items-center justify-between text-[9px] font-bold text-slate-600 pt-0.5">
+                        <span>Love Meter</span>
+                        <span className="font-mono text-rose-600">{partner.romanceMeter}%</span>
+                      </div>
+                      <ProgressBar value={partner.romanceMeter} color="rose" size="xs" />
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 stroke-[3] text-slate-400 group-hover:text-rose-900 group-hover:translate-x-0.5 transition-all" />
+          </button>
+        </div>
+      )}
+
+      {/* SECTION 2: ROMANTIC PROSPECTS & CRUSHES */}
+      {romanticProspects.length > 0 && (
+        <div className="flex flex-col gap-2 pt-1">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-black uppercase tracking-wider text-pink-700 flex items-center gap-1.5">
+              <span>💘</span>
+              <span>Dating Prospects & Crushes</span>
+            </span>
+            <span className="text-[11px] font-bold text-slate-500">
+              {romanticProspects.length} {romanticProspects.length === 1 ? 'person' : 'people'}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {romanticProspects.map((prospect) => (
+              <button
+                key={prospect.id}
+                type="button"
+                onClick={() => handleOpenFriend(prospect)}
+                className="w-full p-3 rounded-2xl border-2 border-slate-900 bg-pink-50/50 hover:bg-pink-100/60 text-left transition-all shadow-[2px_2px_0_#0f172a] flex items-center justify-between cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl border-2 border-slate-900 bg-pink-100 flex items-center justify-center text-lg shadow-[1px_1px_0_#0f172a]">
+                    {prospect.avatarEmoji || (prospect.gender === 'female' ? '👩' : '👨')}
+                  </div>
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-slate-950 group-hover:text-pink-950">
+                        {prospect.firstName} {prospect.lastName}
+                      </span>
+                      <Badge variant="rose" size="xs">
+                        {prospect.role || 'Crush'}
+                      </Badge>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      Age {prospect.age} • Chemistry: {prospect.romanceMeter ?? 0}%
+                    </span>
+                    <div className="w-32 pt-1">
+                      <ProgressBar value={prospect.relationship} color="emerald" size="xs" />
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 stroke-[3] text-slate-400 group-hover:text-slate-900 group-hover:translate-x-0.5 transition-all" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 3: IMMEDIATE FAMILY */}
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between px-1">
           <span className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
@@ -275,50 +430,6 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
           })}
         </div>
       </div>
-
-      {/* SECTION 2: ROMANTIC PARTNER */}
-      {partner && (
-        <div className="flex flex-col gap-2 pt-1">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-xs font-black uppercase tracking-wider text-rose-600 flex items-center gap-1.5">
-              <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
-              <span>Romantic Partner</span>
-            </span>
-            <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300 uppercase">
-              {partner.romanticStage || 'Partner'}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => handleOpenFriend(partner)}
-            className="w-full p-3 rounded-2xl border-2 border-slate-900 bg-rose-50/70 hover:bg-rose-100/70 text-left transition-all shadow-[2px_2px_0_#0f172a] flex items-center justify-between cursor-pointer group"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl border-2 border-slate-900 bg-rose-200 flex items-center justify-center text-lg shadow-[1px_1px_0_#0f172a]">
-                {partner.avatarEmoji || (partner.gender === 'female' ? '👩' : '👨')}
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-black text-slate-950 group-hover:text-rose-950">
-                    {partner.firstName} {partner.lastName}
-                  </span>
-                  <Badge variant="rose" size="xs">
-                    {partner.role || 'Partner'}
-                  </Badge>
-                </div>
-                <span className="text-[10px] font-bold text-slate-500">
-                  Age {partner.age} • Love: {partner.romanceMeter ?? 20}%
-                </span>
-                <div className="w-32 pt-1">
-                  <ProgressBar value={partner.relationship} color="emerald" size="xs" />
-                </div>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 stroke-[3] text-slate-400 group-hover:text-rose-900 group-hover:translate-x-0.5 transition-all" />
-          </button>
-        </div>
-      )}
 
       {/* SECTION 3: CLOSE FRIENDS */}
       {closeFriends.length > 0 && (

@@ -225,6 +225,7 @@ export function executeSocialAction(
   let updatedParents = character.parents;
   let updatedSiblings = character.siblings;
   let updatedRelationships = character.relationships;
+  let updatedPartner = character.partner ? { ...character.partner } : null;
 
   if (target.type === 'parent') {
     if (target.id === character.parents.father.id) {
@@ -254,6 +255,12 @@ export function executeSocialAction(
           }
         : rel
     );
+    if (updatedPartner && updatedPartner.id === target.id) {
+      updatedPartner = {
+        ...updatedPartner,
+        relationship: newRelScore,
+      };
+    }
   }
 
   // Create Life Timeline Journal entry
@@ -274,6 +281,7 @@ export function executeSocialAction(
       parents: updatedParents,
       siblings: updatedSiblings,
       relationships: updatedRelationships,
+      partner: updatedPartner,
       yearlySocialActions: updatedYearlyActions,
       timeline: [...character.timeline, journalEntry],
     },

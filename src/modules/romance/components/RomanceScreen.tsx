@@ -124,7 +124,28 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     deltas?: RomanceReactionDeltas;
   } | null>(null);
 
-  const partner = character.partner;
+  const isPartnerProfile = (p: PersonProfile) =>
+    p.romanticStage === 'dating' ||
+    p.romanticStage === 'engaged' ||
+    p.romanticStage === 'married' ||
+    p.relationshipType === 'dating' ||
+    p.relationshipType === 'partner' ||
+    p.relationshipType === 'spouse' ||
+    ['Girlfriend', 'Boyfriend', 'Fiancé', 'Fiancée', 'Wife', 'Husband', 'Partner'].includes(p.role);
+
+  const partner =
+    character.partner ||
+    (character.relationships || []).find(isPartnerProfile) ||
+    null;
+
+  React.useEffect(() => {
+    if (!character.partner && partner) {
+      onUpdateCharacter({
+        ...character,
+        partner,
+      });
+    }
+  }, [character, partner, onUpdateCharacter]);
 
   /**
    * Helper to display outcome in ActionOutcomeModal popup AND log it into character.timeline

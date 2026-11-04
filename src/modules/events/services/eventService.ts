@@ -240,9 +240,30 @@ export function resolveEventChoice(
   // Manage relationships: introduce new persons or modify relationship scores
   const updatedRelationships: PersonProfile[] = [...(updated.relationships || [])];
   let resolvedPerson: PersonProfile | undefined;
+  let updatedPartner = updated.partner ? { ...updated.partner } : null;
 
   if (outcome.personIntroduced) {
     const p = outcome.personIntroduced;
+    const isRomantic =
+      p.relationshipType === 'dating' ||
+      p.romanticStage === 'dating' ||
+      p.role === 'Girlfriend' ||
+      p.role === 'Boyfriend' ||
+      p.role === 'Partner' ||
+      p.role?.toLowerCase().includes('sweetheart') ||
+      p.role?.toLowerCase().includes('date');
+
+    const defaultPartnerStats = {
+      craziness: Math.floor(Math.random() * 40) + 20,
+      generosity: Math.floor(Math.random() * 50) + 40,
+      looks: Math.floor(Math.random() * 40) + 50,
+      smarts: Math.floor(Math.random() * 40) + 50,
+      fertility: Math.floor(Math.random() * 40) + 50,
+      yearsTogether: 0,
+      annualIncome: character.age >= 18 ? Math.floor(Math.random() * 35000) + 30000 : 0,
+      occupation: character.age >= 18 ? 'Employed' : 'Student',
+    };
+
     const existingIndex = updatedRelationships.findIndex(
       (r) =>
         r.firstName.toLowerCase() === p.firstName.toLowerCase() &&
@@ -257,9 +278,16 @@ export function resolveEventChoice(
         relationshipType: p.relationshipType || existing.relationshipType,
         relationship: Math.min(100, Math.max(0, p.relationship ?? existing.relationship)),
         avatarEmoji: p.avatarEmoji || existing.avatarEmoji,
+        romanceUnlocked: isRomantic ? true : existing.romanceUnlocked,
+        romanceMeter: isRomantic ? (existing.romanceMeter ?? 50) : existing.romanceMeter,
+        romanticStage: isRomantic ? 'dating' : existing.romanticStage,
+        partnerStats: isRomantic ? (existing.partnerStats || defaultPartnerStats) : existing.partnerStats,
       };
       updatedRelationships[existingIndex] = updatedPerson;
       resolvedPerson = updatedPerson;
+      if (isRomantic && !updatedPartner) {
+        updatedPartner = updatedPerson;
+      }
     } else {
       const newPerson: PersonProfile = {
         id: p.id || createId(),
@@ -273,9 +301,16 @@ export function resolveEventChoice(
         originStory: p.originStory || `Met during "${event.title}" at age ${character.age}`,
         stageMet: p.stageMet,
         avatarEmoji: p.avatarEmoji,
+        romanceUnlocked: isRomantic ? true : undefined,
+        romanceMeter: isRomantic ? 50 : undefined,
+        romanticStage: isRomantic ? 'dating' : undefined,
+        partnerStats: isRomantic ? defaultPartnerStats : undefined,
       };
       updatedRelationships.push(newPerson);
       resolvedPerson = newPerson;
+      if (isRomantic && !updatedPartner) {
+        updatedPartner = newPerson;
+      }
     }
   }
 
@@ -289,17 +324,40 @@ export function resolveEventChoice(
     );
     if (targetIdx >= 0) {
       const target = updatedRelationships[targetIdx];
-      updatedRelationships[targetIdx] = {
+      const isNewDating = newType === 'dating';
+      const updatedTarget: PersonProfile = {
         ...target,
         relationship: Math.min(100, Math.max(0, target.relationship + delta)),
         ...(newType ? { relationshipType: newType } : {}),
+        ...(isNewDating
+          ? {
+              romanticStage: 'dating' as const,
+              romanceUnlocked: true,
+              romanceMeter: target.romanceMeter ?? 50,
+              partnerStats: target.partnerStats || {
+                craziness: 30,
+                generosity: 50,
+                looks: 60,
+                smarts: 60,
+                fertility: 50,
+                yearsTogether: 0,
+                annualIncome: character.age >= 18 ? 35000 : 0,
+                occupation: character.age >= 18 ? 'Employed' : 'Student',
+              },
+            }
+          : {}),
       };
+      updatedRelationships[targetIdx] = updatedTarget;
+      if (isNewDating && !updatedPartner) {
+        updatedPartner = updatedTarget;
+      }
     }
   }
 
   return {
     character: {
       ...updated,
+      partner: updatedPartner,
       relationships: updatedRelationships,
       seenEventIds: [...updated.seenEventIds, event.id],
       timeline: newTimeline,

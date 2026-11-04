@@ -278,4 +278,64 @@ for (let trial = 0; trial < 15 && !babySiblingBorn; trial++) {
 assert(babySiblingBorn === true, 'Dynamic baby sibling successfully born during early childhood across trials (Option A)');
 console.log(`✅ Dynamic Sibling Birth: Successfully welcomed a baby sibling during childhood!`);
 
+// Test 10: Partner Synchronization & Social Action Sync
+const partnerProfile = {
+  id: 'partner_test_1',
+  firstName: 'Elena',
+  lastName: 'Rostova',
+  gender: 'female' as const,
+  age: 17,
+  role: 'Girlfriend',
+  relationshipType: 'dating' as const,
+  romanticStage: 'dating' as const,
+  relationship: 75,
+  romanceUnlocked: true,
+  romanceMeter: 60,
+  originStory: 'Met at homecoming dance.',
+  stageMet: 'high_school' as const,
+};
+
+const charWithPartner = createMockCharacter({
+  partner: partnerProfile,
+  relationships: [partnerProfile],
+});
+
+const targetPartnerRef = {
+  id: partnerProfile.id,
+  name: 'Elena Rostova',
+  role: 'Girlfriend',
+  type: 'friend' as const,
+  relationship: partnerProfile.relationship,
+  isAlive: true,
+  age: partnerProfile.age,
+  romanceUnlocked: true,
+  romanceMeter: 60,
+  romanticStage: 'dating' as const,
+};
+
+const { character: afterPartnerHangout } = executeSocialAction(
+  charWithPartner,
+  targetPartnerRef,
+  'spend_time',
+  undefined,
+  'hangout_pizza'
+);
+
+assert(afterPartnerHangout.partner !== null, 'Partner profile preserved');
+assert(afterPartnerHangout.partner?.relationship! > 75, 'Partner relationship in character.partner updated by social action');
+assert(
+  afterPartnerHangout.relationships.find((r) => r.id === partnerProfile.id)?.relationship! > 75,
+  'Partner relationship in character.relationships updated in sync'
+);
+
+// Test auto-recovery of partner upon aging if character.partner was missing but relationships has dating partner
+const charWithOrphanPartner = createMockCharacter({
+  partner: null,
+  relationships: [partnerProfile],
+});
+const agedRecovered = ageUpCharacter(charWithOrphanPartner);
+assert(agedRecovered.partner !== null, 'Auto-recovered partner upon Age-Up from relationships');
+assert(agedRecovered.partner?.firstName === 'Elena', 'Recovered correct partner details');
+console.log(`✅ Partner Synchronization: Partner social actions and auto-recovery verified!`);
+
 console.log('--- ALL MODULE 6 RELATIONSHIPS & SOCIAL HUB TESTS PASSED PERFECTLY! ---');
