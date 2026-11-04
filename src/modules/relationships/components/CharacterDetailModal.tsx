@@ -123,8 +123,8 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleSparkRomance = () => {
-    if (!friendTarget) return;
-    const sparked = romanceService.sparkRomance(friendTarget);
+    if (!friendTarget || character.age < 16) return;
+    const sparked = romanceService.sparkRomance(friendTarget, character.age);
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === sparked.id ? sparked : r
     );
@@ -144,7 +144,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleFlirt = (flirt: FlirtOption) => {
-    if (!friendTarget) return;
+    if (!friendTarget || character.age < 16) return;
     const { updatedTarget, result } = romanceService.executeFlirt(character, friendTarget, flirt);
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
@@ -172,7 +172,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleDate = (venue: DateVenue) => {
-    if (!friendTarget) return;
+    if (!friendTarget || character.age < 16) return;
     const { updatedTarget, result } = romanceService.executeDate(character, friendTarget, venue);
     if (!result.success && result.relationshipDelta === 0) {
       return;
@@ -204,7 +204,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleAskOut = () => {
-    if (!friendTarget) return;
+    if (!friendTarget || character.age < 16) return;
     const { updatedTarget, result } = romanceService.executeAskOut(character, friendTarget);
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
@@ -280,10 +280,10 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           </div>
 
           {/* Real-Time Relationship Gauge & Romance Dual Meter */}
-          {liveTarget.romanceUnlocked ? (
+          {liveTarget.romanceUnlocked && character.age >= 16 ? (
             <DualMeterDisplay
               relationship={liveTarget.relationship}
-              romanceMeter={liveTarget.romanceMeter ?? 20}
+              romanceMeter={liveTarget.romanceMeter ?? 0}
               romanceUnlocked={true}
             />
           ) : (
@@ -720,7 +720,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             )}
 
             {/* Spark Romance Banner */}
-            {liveTarget.type === 'friend' && character.age >= 13 && liveTarget.relationship >= 60 && !liveTarget.romanceUnlocked && (
+            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.relationship >= 50 && !liveTarget.romanceUnlocked && (
               <div className="p-3 bg-rose-50 border-2 border-slate-900 rounded-2xl flex items-center justify-between shadow-[2px_2px_0_#0f172a] mt-2">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl">💖</span>
@@ -736,7 +736,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             )}
 
             {/* Romance Actions if unlocked */}
-            {liveTarget.type === 'friend' && liveTarget.romanceUnlocked && (
+            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.romanceUnlocked && (
               <div className="flex flex-col gap-2 pt-2 border-t-2 border-rose-200 mt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-rose-900 uppercase tracking-wider flex items-center gap-1.5">
@@ -775,16 +775,32 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                 </div>
 
                 {/* Milestone button: Ask Out */}
-                {liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (
-                  <button
-                    type="button"
-                    onClick={() => setRomanceModal('ask_out')}
-                    className="w-full p-2.5 rounded-2xl border-2 border-slate-900 bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <Heart className="w-4 h-4 fill-white" />
-                    Ask to Become Official Partners
-                  </button>
-                )}
+                {liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (() => {
+                  const romanceVal = liveTarget.romanceMeter ?? 0;
+                  const canAskOut = romanceVal >= 35 && liveTarget.relationship >= 50;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setRomanceModal('ask_out')}
+                      disabled={!canAskOut}
+                      className={`w-full p-2.5 rounded-2xl border-2 border-slate-900 font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all flex flex-col items-center justify-center gap-0.5 ${
+                        canAskOut
+                          ? 'bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white cursor-pointer active:translate-y-0.5'
+                          : 'bg-slate-100 text-slate-400 border-slate-300 cursor-not-allowed opacity-75'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Heart className={`w-4 h-4 ${canAskOut ? 'fill-white' : 'fill-slate-400'}`} />
+                        <span>Ask to Become Official Partners</span>
+                      </div>
+                      {!canAskOut && (
+                        <span className="text-[10px] font-bold text-slate-500">
+                          Requires 35% Love (Now: {romanceVal}%) & 50% Rel (Now: {Math.round(liveTarget.relationship)}%)
+                        </span>
+                      )}
+                    </button>
+                  );
+                })()}
               </div>
             )}
           </div>

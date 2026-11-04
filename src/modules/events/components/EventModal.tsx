@@ -1,7 +1,7 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import type { CharacterProfile, PersonProfile, StatEffects } from '../../../types/game'
 import type { EventChoice, LifeEventTemplate } from '../types'
-import { formatEventText } from '../services/eventService'
+import { formatEventText, findContextualPeer } from '../services/eventService'
 import { Modal } from '../../../components/ui/Modal'
 import { CartoonButton } from '../../../components/ui/CartoonButton'
 import { Badge } from '../../../components/ui/Badge'
@@ -19,7 +19,7 @@ interface EventModalProps {
   character: CharacterProfile;
   /** When set, the modal shows the outcome instead of the choices. */
   result: EventResult | null;
-  onChoose: (choice: EventChoice) => void;
+  onChoose: (choice: EventChoice, boundPerson?: PersonProfile) => void;
   onContinue: () => void;
 }
 
@@ -37,6 +37,14 @@ export const EventModal: React.FC<EventModalProps> = ({
 }) => {
   if (!event) return null;
 
+  const boundPerson = useMemo(() => {
+    if (!event) return undefined;
+    if (event.category === 'career' || event.requiresEmployed || event.requiredCareerField) {
+      return findContextualPeer(character, 'coworker');
+    }
+    return findContextualPeer(character, 'classmate');
+  }, [event, character]);
+
   const actions = result ? (
     <CartoonButton variant="emerald" size="md" fullWidth onClick={onContinue}>
       Continue
@@ -49,9 +57,9 @@ export const EventModal: React.FC<EventModalProps> = ({
         size="md"
         fullWidth
         icon={<span className="text-base leading-none">{choice.icon}</span>}
-        onClick={() => onChoose(choice)}
+        onClick={() => onChoose(choice, boundPerson)}
       >
-        {formatEventText(choice.label, character)}
+        {formatEventText(choice.label, character, boundPerson)}
       </CartoonButton>
     ))
   );
@@ -59,14 +67,14 @@ export const EventModal: React.FC<EventModalProps> = ({
   return (
     <Modal
       isOpen
-      title={formatEventText(event.title, character)}
+      title={formatEventText(event.title, character, boundPerson)}
       icon={event.icon}
       actions={actions}
     >
       {result ? (
         <>
           <Badge variant="sky" size="xs" icon={<span>{result.choice.icon}</span>}>
-            {formatEventText(result.choice.label, character)}
+            {formatEventText(result.choice.label, character, boundPerson)}
           </Badge>
           <p className="text-slate-800 leading-relaxed">{result.message}</p>
           {result.personIntroduced && (
@@ -94,7 +102,7 @@ export const EventModal: React.FC<EventModalProps> = ({
       ) : (
         <>
           <p className="text-slate-800 leading-relaxed">
-            {formatEventText(event.description, character)}
+            {formatEventText(event.description, character, boundPerson)}
           </p>
           <p className="text-xs font-black uppercase tracking-wider text-slate-400">
             What will you do?

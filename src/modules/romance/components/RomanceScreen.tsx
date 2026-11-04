@@ -16,6 +16,8 @@ import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { DualMeterDisplay } from './DualMeterDisplay';
 import { FlirtModal } from './FlirtModal';
 import { DatePlannerModal } from './DatePlannerModal';
+import { RomanticTalkModal } from './RomanticTalkModal';
+import { RomanticGiftModal } from './RomanticGiftModal';
 import { IntimacyModal } from './IntimacyModal';
 import { AskOutModal } from './AskOutModal';
 import { ProposalModal } from './ProposalModal';
@@ -24,14 +26,17 @@ import { FamilyPlanningModal } from './FamilyPlanningModal';
 import { ChildDetailModal } from './ChildDetailModal';
 import { DivorceModal } from './DivorceModal';
 import { DatingAppModal } from './DatingAppModal';
+import { RomanceReactionModal, type RomanceReactionDeltas } from './RomanceReactionModal';
 import { romanceService } from '../services/romanceService';
 import { reproductionService } from '../services/reproductionService';
 import { divorceService } from '../services/divorceService';
-import { ROMANTIC_GIFTS, ROMANTIC_TALK_TOPICS } from '../data/romanticInteractions';
-import type { CharacterProfile, PersonProfile, ChildProfile } from '../../../types/game';
+import { createId } from '../../../utils/id';
+import type { CharacterProfile, PersonProfile, ChildProfile, LifeEvent } from '../../../types/game';
 import type {
   FlirtOption,
   DateVenue,
+  RomanticTalkOption,
+  RomanticGift,
   EngagementRing,
   ProposalVenue,
   WeddingVenue,
@@ -51,11 +56,42 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   onBackToMenu,
   onOpenRelationships,
 }) => {
+  if (character.age < 16) {
+    return (
+      <div className="p-4 flex flex-col gap-4 bg-white min-h-[480px]">
+        <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
+          <button
+            type="button"
+            onClick={onBackToMenu}
+            className="flex items-center gap-1.5 text-xs font-black text-slate-700 hover:text-slate-950 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl border-2 border-slate-900 shadow-[1.5px_1.5px_0_#0f172a] transition-all cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 stroke-[3]" />
+            <span>Menu</span>
+          </button>
+          <span className="text-xs font-black text-slate-800">Romance & Dating</span>
+        </div>
+
+        <div className="p-6 rounded-2xl border-2 border-slate-900 bg-rose-50 text-center flex flex-col items-center gap-3 shadow-[2px_2.5px_0_#0f172a] my-auto">
+          <span className="text-4xl">🔒</span>
+          <h3 className="text-base font-black text-rose-950">Romance Unlocks at Age 16</h3>
+          <p className="text-xs font-bold text-slate-600 max-w-xs leading-relaxed">
+            Dating, partners, and romantic interactions are reserved for age 16 and older. Focus on school and friendships for now!
+          </p>
+          <CartoonButton variant="rose" onClick={onBackToMenu}>
+            Back to Activities
+          </CartoonButton>
+        </div>
+      </div>
+    );
+  }
+
   const [activeModal, setActiveModal] = useState<
     | null
     | 'dating_app'
     | 'flirt'
     | 'date'
+    | 'romantic_talk'
+    | 'romantic_gift'
     | 'intimacy'
     | 'ask_out'
     | 'proposal'
@@ -65,20 +101,81 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     | 'divorce'
   >(null);
 
+  const [activeTarget, setActiveTarget] = useState<PersonProfile | null>(null);
   const [selectedChild, setSelectedChild] = useState<ChildProfile | null>(null);
   const [datingCandidates, setDatingCandidates] = useState<DatingCandidate[]>([]);
   const [datingPref, setDatingPref] = useState<'women' | 'men' | 'everyone'>(
     character.datingPreference || 'everyone'
   );
-  const [feedbackToast, setFeedbackToast] = useState<{ message: string; type: 'success' | 'danger' | 'info' } | null>(null);
+  const [reactionModal, setReactionModal] = useState<{
+    title: string;
+    icon?: string;
+    partnerName?: string;
+    avatarEmoji?: string;
+    message: string;
+    deltas?: RomanceReactionDeltas;
+  } | null>(null);
 
   const partner = character.partner;
 
-  const showToast = (message: string, type: 'success' | 'danger' | 'info' = 'info') => {
-    setFeedbackToast({ message, type });
-    setTimeout(() => {
-      setFeedbackToast(null);
-    }, 4500);
+  /**
+   * Helper to display outcome in RomanceReactionModal popup AND log it into character.timeline
+   */
+  const triggerRomanceReaction = (
+    baseChar: CharacterProfile,
+    reaction: {
+      title: string;
+      icon?: string;
+      partnerName?: string;
+      avatarEmoji?: string;
+      message: string;
+      deltas?: RomanceReactionDeltas;
+      skipJournal?: boolean;
+      actionKey?: string;
+      targetId?: string;
+    }
+  ) => {
+    let finalChar = baseChar;
+
+    if (reaction.actionKey && reaction.targetId) {
+      const currentActions = finalChar.yearlySocialActions?.[reaction.targetId] || [];
+      if (!currentActions.includes(reaction.actionKey)) {
+        finalChar = {
+          ...finalChar,
+          yearlySocialActions: {
+            ...(finalChar.yearlySocialActions || {}),
+            [reaction.targetId]: [...currentActions, reaction.actionKey],
+          },
+        };
+      }
+    }
+
+    if (!reaction.skipJournal) {
+      const journalEntry: LifeEvent = {
+        id: createId(),
+        age: character.age,
+        year: character.birthYear + character.age,
+        title: reaction.title,
+        message: reaction.message,
+        category: 'relationship',
+        icon: reaction.icon || '💖',
+      };
+
+      finalChar = {
+        ...finalChar,
+        timeline: [...(finalChar.timeline || []), journalEntry],
+      };
+    }
+
+    onUpdateCharacter(finalChar);
+    setReactionModal({
+      title: reaction.title,
+      icon: reaction.icon,
+      partnerName: reaction.partnerName,
+      avatarEmoji: reaction.avatarEmoji,
+      message: reaction.message,
+      deltas: reaction.deltas,
+    });
   };
 
   // Open Dating App
@@ -96,14 +193,14 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       lastName: candidate.lastName,
       gender: candidate.gender,
       age: candidate.age,
-      role: 'Romantic Interest',
+      role: 'Dating Prospect',
       relationshipType: 'crush',
-      relationship: 70,
-      originStory: 'Met through ArcDate dating app',
+      relationship: 45,
+      originStory: 'Matched on ArcDate dating app',
       stageMet: 'adulthood',
       avatarEmoji: candidate.avatarEmoji,
       romanceUnlocked: true,
-      romanceMeter: 45,
+      romanceMeter: 0,
       romanticStage: 'flirting',
       partnerStats: {
         craziness: candidate.craziness,
@@ -121,18 +218,30 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     const updatedChar: CharacterProfile = {
       ...character,
       relationships: [newPerson, ...existingRel],
-      partner: newPerson, // Set as active dating interest
     };
 
-    onUpdateCharacter(updatedChar);
     setActiveModal(null);
-    showToast(`You and ${candidate.firstName} hit it off on ArcDate! You are now dating! ❤️`, 'success');
+    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+    triggerRomanceReaction(updatedChar, {
+      title: 'ArcDate Match',
+      icon: '📱',
+      partnerName: candidate.firstName,
+      avatarEmoji: candidate.avatarEmoji,
+      message: `You matched with ${candidateName} on ArcDate! You can now chat, flirt, and plan dates together. 📱✨`,
+      deltas: {
+        customBadge: 'New Match',
+      },
+    });
   };
 
   // Meet Someone In Real Life
   const handleMeetIRL = () => {
     if (character.cash < 40) {
-      showToast('You need at least $40 to go out socializing.', 'danger');
+      setReactionModal({
+        title: 'Not Enough Cash',
+        icon: '💵',
+        message: 'You need at least $40 to go out socializing.',
+      });
       return;
     }
 
@@ -143,14 +252,14 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       lastName: candidate.lastName,
       gender: candidate.gender,
       age: candidate.age,
-      role: 'Crush',
+      role: 'Romantic Interest',
       relationshipType: 'crush',
-      relationship: 60,
+      relationship: 40,
       originStory: 'Struck up a conversation at a downtown coffee lounge',
       stageMet: 'adulthood',
       avatarEmoji: candidate.avatarEmoji,
       romanceUnlocked: true,
-      romanceMeter: 35,
+      romanceMeter: 0,
       romanticStage: 'flirting',
       partnerStats: {
         craziness: candidate.craziness,
@@ -168,25 +277,37 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       ...character,
       cash: character.cash - 40,
       relationships: [newPerson, ...(character.relationships || [])],
-      partner: character.partner ? character.partner : newPerson,
     };
 
-    onUpdateCharacter(updatedChar);
-    showToast(`You met ${candidate.firstName} at a cozy lounge! There was an undeniable romantic spark. ✨`, 'success');
+    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+    triggerRomanceReaction(updatedChar, {
+      title: 'Lounge Encounter',
+      icon: '✨',
+      partnerName: candidate.firstName,
+      avatarEmoji: candidate.avatarEmoji,
+      message: `You met ${candidateName} at a cozy lounge! You exchanged numbers and felt an initial spark. ✨`,
+      deltas: {
+        cashDelta: -40,
+        customBadge: 'New Spark',
+      },
+    });
   };
 
   // Execute Flirt
   const handleExecuteFlirt = (flirt: FlirtOption) => {
-    if (!partner) return;
-    const { updatedTarget, result } = romanceService.executeFlirt(character, partner, flirt);
+    const currentTarget = activeTarget || partner;
+    if (!currentTarget) return;
+    const { updatedTarget, result } = romanceService.executeFlirt(character, currentTarget, flirt);
 
     const updatedRelationships = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
+    const isCurrentPartner = partner?.id === updatedTarget.id;
+
     const updatedChar: CharacterProfile = {
       ...character,
-      partner: updatedTarget,
+      partner: isCurrentPartner ? updatedTarget : character.partner,
       relationships: updatedRelationships,
       stats: {
         ...character.stats,
@@ -194,18 +315,39 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       },
     };
 
-    onUpdateCharacter(updatedChar);
     setActiveModal(null);
-    showToast(result.message, result.success ? 'success' : 'danger');
+    setActiveTarget(null);
+
+    const fullMessage = `You tried ${flirt.label.toLowerCase()} with ${currentTarget.firstName}. ${result.message}`;
+    triggerRomanceReaction(updatedChar, {
+      title: result.success ? `Flirting with ${currentTarget.firstName}` : 'Awkward Flirt',
+      icon: flirt.style === 'bold' ? '🔥' : '✨',
+      partnerName: currentTarget.firstName,
+      avatarEmoji: currentTarget.avatarEmoji,
+      message: fullMessage,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+      },
+      actionKey: 'romance_flirt',
+      targetId: currentTarget.id,
+    });
   };
 
   // Execute Date
   const handleExecuteDate = (venue: DateVenue) => {
-    if (!partner) return;
-    const { updatedTarget, result } = romanceService.executeDate(character, partner, venue);
+    const currentTarget = activeTarget || partner;
+    if (!currentTarget) return;
+    const { updatedTarget, result } = romanceService.executeDate(character, currentTarget, venue);
 
     if (!result.success && result.relationshipDelta === 0) {
-      showToast(result.message, 'danger');
+      setReactionModal({
+        title: 'Date Cancelled',
+        icon: '⚠️',
+        partnerName: currentTarget.firstName,
+        message: result.message,
+      });
       return;
     }
 
@@ -213,10 +355,12 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
+    const isCurrentPartner = partner?.id === updatedTarget.id;
+
     const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
-      partner: updatedTarget,
+      partner: isCurrentPartner ? updatedTarget : character.partner,
       relationships: updatedRelationships,
       stats: {
         ...character.stats,
@@ -224,60 +368,117 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       },
     };
 
-    onUpdateCharacter(updatedChar);
     setActiveModal(null);
-    showToast(result.message, result.success ? 'success' : 'danger');
+    setActiveTarget(null);
+
+    triggerRomanceReaction(updatedChar, {
+      title: `Date at ${venue.name}`,
+      icon: venue.emoji || '🍷',
+      partnerName: currentTarget.firstName,
+      avatarEmoji: currentTarget.avatarEmoji,
+      message: result.message,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+        cashDelta: result.cashDelta,
+      },
+      actionKey: 'romance_date',
+      targetId: currentTarget.id,
+    });
   };
 
   // Execute Romantic Talk
-  const handleExecuteRomanticTalk = () => {
-    if (!partner) return;
-    const talk = ROMANTIC_TALK_TOPICS[Math.floor(Math.random() * ROMANTIC_TALK_TOPICS.length)];
-    const { updatedTarget, result } = romanceService.executeRomanticTalk(character, partner, talk);
+  const handleExecuteRomanticTalk = (talk: RomanticTalkOption) => {
+    const currentTarget = activeTarget || partner;
+    if (!currentTarget) return;
+    const { updatedTarget, result } = romanceService.executeRomanticTalk(character, currentTarget, talk);
 
     const updatedRelationships = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    onUpdateCharacter({
+    const isCurrentPartner = partner?.id === updatedTarget.id;
+
+    const updatedChar: CharacterProfile = {
       ...character,
-      partner: updatedTarget,
+      partner: isCurrentPartner ? updatedTarget : character.partner,
       relationships: updatedRelationships,
       stats: {
         ...character.stats,
         happiness: Math.min(100, character.stats.happiness + (result.happinessDelta ?? 0)),
       },
-    });
+    };
 
-    showToast(result.message, 'success');
+    setActiveModal(null);
+    setActiveTarget(null);
+
+    triggerRomanceReaction(updatedChar, {
+      title: `Deep Talk with ${currentTarget.firstName}`,
+      icon: '💬',
+      partnerName: currentTarget.firstName,
+      avatarEmoji: currentTarget.avatarEmoji,
+      message: result.message,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+      },
+      actionKey: 'romance_talk',
+      targetId: currentTarget.id,
+    });
   };
 
   // Execute Romantic Gift
-  const handleExecuteRomanticGift = () => {
-    if (!partner) return;
-    const gift = ROMANTIC_GIFTS[1]; // Red roses default
+  const handleExecuteRomanticGift = (gift: RomanticGift) => {
+    const currentTarget = activeTarget || partner;
+    if (!currentTarget) return;
     if (character.cash < gift.cost) {
-      showToast(`You need at least $${gift.cost} for ${gift.name}.`, 'danger');
+      setReactionModal({
+        title: 'Not Enough Cash',
+        icon: '💰',
+        partnerName: currentTarget.firstName,
+        message: `You need at least $${gift.cost.toLocaleString()} for ${gift.name}.`,
+      });
       return;
     }
 
-    const { updatedTarget, result } = romanceService.executeRomanticGift(character, partner, gift);
+    const { updatedTarget, result } = romanceService.executeRomanticGift(character, currentTarget, gift);
     const updatedRelationships = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    onUpdateCharacter({
+    const isCurrentPartner = partner?.id === updatedTarget.id;
+
+    const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
-      partner: updatedTarget,
+      partner: isCurrentPartner ? updatedTarget : character.partner,
       relationships: updatedRelationships,
       stats: {
         ...character.stats,
         happiness: Math.min(100, character.stats.happiness + (result.happinessDelta ?? 0)),
       },
-    });
+    };
 
-    showToast(result.message, 'success');
+    setActiveModal(null);
+    setActiveTarget(null);
+
+    triggerRomanceReaction(updatedChar, {
+      title: `Gift for ${currentTarget.firstName}`,
+      icon: gift.emoji || '🎁',
+      partnerName: currentTarget.firstName,
+      avatarEmoji: currentTarget.avatarEmoji,
+      message: result.message,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+        cashDelta: result.cashDelta,
+      },
+      actionKey: 'romance_gift',
+      targetId: currentTarget.id,
+    });
   };
 
   // Execute Intimacy
@@ -285,10 +486,26 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     if (!partner) return;
     const res = reproductionService.executeIntimacy(character, partner, protection);
 
+    const partnerConceived = partner.gender === 'female' && res.conceptionOccurred;
     const updatedTarget: PersonProfile = {
       ...partner,
       relationship: Math.min(100, partner.relationship + res.relationshipDelta),
-      romanceMeter: Math.min(100, (partner.romanceMeter ?? 50) + res.romanceDelta),
+      romanceMeter: Math.min(100, (partner.romanceMeter ?? 0) + res.romanceDelta),
+      partnerStats: partner.partnerStats
+        ? {
+            ...partner.partnerStats,
+            isPregnant: partnerConceived || !!partner.partnerStats.isPregnant,
+          }
+        : partnerConceived
+        ? {
+            craziness: 30,
+            generosity: 70,
+            looks: 75,
+            smarts: 75,
+            fertility: 75,
+            isPregnant: true,
+          }
+        : undefined,
     };
 
     const updatedRelationships = (character.relationships || []).map((r) =>
@@ -306,56 +523,107 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       },
     };
 
-    onUpdateCharacter(updatedChar);
     setActiveModal(null);
-    showToast(res.message, res.conceptionOccurred ? 'info' : 'success');
+
+    triggerRomanceReaction(updatedChar, {
+      title: `Intimacy with ${partner.firstName}`,
+      icon: '💋',
+      partnerName: partner.firstName,
+      avatarEmoji: partner.avatarEmoji,
+      message: res.message,
+      deltas: {
+        romanceDelta: res.romanceDelta,
+        relationshipDelta: res.relationshipDelta,
+        happinessDelta: res.happinessDelta,
+        isConception: res.conceptionOccurred,
+      },
+      actionKey: 'romance_intimacy',
+      targetId: partner.id,
+    });
   };
 
   // Confirm Ask Out
   const handleConfirmAskOut = () => {
-    if (!partner) return;
-    const { updatedTarget, result } = romanceService.executeAskOut(character, partner);
+    const currentTarget = activeTarget || partner;
+    if (!currentTarget) return;
+    const { updatedTarget, result } = romanceService.executeAskOut(character, currentTarget);
 
     const updatedRelationships = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    onUpdateCharacter({
+    const newPartner = result.success
+      ? updatedTarget
+      : partner?.id === updatedTarget.id
+      ? updatedTarget
+      : partner;
+
+    const updatedChar: CharacterProfile = {
       ...character,
-      partner: updatedTarget,
+      partner: newPartner,
       relationships: updatedRelationships,
       stats: {
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    });
+    };
 
     setActiveModal(null);
-    showToast(result.message, result.success ? 'success' : 'danger');
+    setActiveTarget(null);
+
+    triggerRomanceReaction(updatedChar, {
+      title: result.success ? `Now Dating ${currentTarget.firstName}! 💖` : 'Ask Out Declined',
+      icon: result.success ? '💖' : '💔',
+      partnerName: currentTarget.firstName,
+      avatarEmoji: currentTarget.avatarEmoji,
+      message: result.message,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+      },
+    });
   };
 
   // Confirm Proposal
   const handleConfirmProposal = (ring: EngagementRing, venue: ProposalVenue) => {
-    if (!partner) return;
-    const { updatedTarget, result } = romanceService.executeProposal(character, partner, ring, venue);
+    const currentTarget = activeTarget || partner;
+    if (!currentTarget) return;
+    const { updatedTarget, result } = romanceService.executeProposal(character, currentTarget, ring, venue);
 
     const updatedRelationships = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    onUpdateCharacter({
+    const isCurrentPartner = partner?.id === updatedTarget.id;
+
+    const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
-      partner: updatedTarget.romanticStage === 'ex' ? null : updatedTarget,
+      partner: updatedTarget.romanticStage === 'ex' ? null : (isCurrentPartner ? updatedTarget : character.partner),
       relationships: updatedRelationships,
       stats: {
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    });
+    };
 
     setActiveModal(null);
-    showToast(result.message, result.success ? 'success' : 'danger');
+    setActiveTarget(null);
+
+    triggerRomanceReaction(updatedChar, {
+      title: result.success ? `Engaged to ${currentTarget.firstName}! 💍` : 'Proposal Declined',
+      icon: '💍',
+      partnerName: currentTarget.firstName,
+      avatarEmoji: currentTarget.avatarEmoji,
+      message: result.message,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+        cashDelta: result.cashDelta,
+      },
+    });
   };
 
   // Confirm Wedding
@@ -367,7 +635,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    onUpdateCharacter({
+    const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       partner: updatedTarget,
@@ -376,10 +644,24 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    });
+    };
 
     setActiveModal(null);
-    showToast(result.message, result.success ? 'success' : 'danger');
+
+    triggerRomanceReaction(updatedChar, {
+      title: `Married to ${partner.firstName}! 💒`,
+      icon: '💒',
+      partnerName: partner.firstName,
+      avatarEmoji: partner.avatarEmoji,
+      message: result.message,
+      deltas: {
+        romanceDelta: result.romanceDelta,
+        relationshipDelta: result.relationshipDelta,
+        happinessDelta: result.happinessDelta,
+        cashDelta: result.cashDelta,
+        customBadge: demandPrenup ? 'Prenup Signed' : undefined,
+      },
+    });
   };
 
   // Break Up
@@ -392,7 +674,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    onUpdateCharacter({
+    const updatedChar: CharacterProfile = {
       ...character,
       partner: null,
       exPartners: [...exList, updatedTarget],
@@ -401,9 +683,18 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         ...character.stats,
         happiness: Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0)),
       },
-    });
+    };
 
-    showToast(result.message, 'danger');
+    triggerRomanceReaction(updatedChar, {
+      title: `Broke Up with ${partner.firstName}`,
+      icon: '💔',
+      partnerName: partner.firstName,
+      avatarEmoji: partner.avatarEmoji,
+      message: result.message,
+      deltas: {
+        happinessDelta: result.happinessDelta,
+      },
+    });
   };
 
   // Confirm Divorce
@@ -411,9 +702,18 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     if (!partner) return;
     const { updatedCharacter, settlement } = divorceService.executeDivorce(character, partner, attorneyTier);
 
-    onUpdateCharacter(updatedCharacter);
     setActiveModal(null);
-    showToast(settlement.summaryMessage, 'info');
+    onUpdateCharacter(updatedCharacter);
+    setReactionModal({
+      title: 'Divorce Finalized',
+      icon: '⚖️',
+      partnerName: partner.firstName,
+      avatarEmoji: partner.avatarEmoji,
+      message: settlement.summaryMessage,
+      deltas: {
+        cashDelta: settlement.partnerShareCash > 0 ? -settlement.partnerShareCash : 0,
+      },
+    });
   };
 
   // Family Planning Handlers
@@ -426,25 +726,69 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     if (!partner) return;
     const res = reproductionService.executeIVF(character, partner);
     if (!res.success && res.cashDelta === 0) {
-      showToast(res.message, 'danger');
+      setReactionModal({
+        title: 'Not Enough Cash',
+        icon: '💵',
+        message: res.message,
+      });
       return;
     }
+
+    const partnerConceived = partner.gender === 'female' && res.success;
+    const updatedTarget: PersonProfile = {
+      ...partner,
+      partnerStats: partner.partnerStats
+        ? {
+            ...partner.partnerStats,
+            isPregnant: partnerConceived || !!partner.partnerStats.isPregnant,
+          }
+        : partnerConceived
+        ? {
+            craziness: 30,
+            generosity: 70,
+            looks: 75,
+            smarts: 75,
+            fertility: 75,
+            isPregnant: true,
+          }
+        : undefined,
+    };
+
+    const updatedRelationships = (character.relationships || []).map((r) =>
+      r.id === updatedTarget.id ? updatedTarget : r
+    );
 
     const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash + res.cashDelta,
-      isPregnant: res.success ? true : character.isPregnant,
+      partner: updatedTarget,
+      relationships: updatedRelationships,
+      isPregnant: character.gender === 'female' ? res.success || character.isPregnant : false,
     };
 
-    onUpdateCharacter(updatedChar);
     setActiveModal(null);
-    showToast(res.message, res.success ? 'success' : 'danger');
+
+    triggerRomanceReaction(updatedChar, {
+      title: res.success ? 'IVF Success! 🔬' : 'IVF Treatment Attempted',
+      icon: '🔬',
+      partnerName: partner.firstName,
+      avatarEmoji: partner.avatarEmoji,
+      message: res.message,
+      deltas: {
+        cashDelta: res.cashDelta,
+        isConception: res.success,
+      },
+    });
   };
 
   const handleAdopt = (ageGroup: 'infant' | 'toddler' | 'child') => {
     const res = reproductionService.executeAdoption(character, ageGroup);
     if (!res.success) {
-      showToast(res.message, 'danger');
+      setReactionModal({
+        title: 'Adoption Notice',
+        icon: '🏠',
+        message: res.message,
+      });
       return;
     }
 
@@ -455,9 +799,17 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       children: [...currentChildren, res.child!],
     };
 
-    onUpdateCharacter(updatedChar);
     setActiveModal(null);
-    showToast(res.message, 'success');
+
+    triggerRomanceReaction(updatedChar, {
+      title: `Adopted ${res.child!.firstName}! 👶`,
+      icon: '👶',
+      message: res.message,
+      deltas: {
+        cashDelta: res.cashDelta,
+        customBadge: 'New Family Member',
+      },
+    });
   };
 
   // Child Parenting Actions
@@ -465,43 +817,78 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     const updatedChildren = (character.children || []).map((c) =>
       c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 12), happiness: Math.min(100, c.happiness + 10) } : c
     );
-    onUpdateCharacter({
+    const updatedChar: CharacterProfile = {
       ...character,
       children: updatedChildren,
       stats: { ...character.stats, happiness: Math.min(100, character.stats.happiness + 5) },
-    });
-    showToast(`You spent memorable quality time with ${child.firstName}!`, 'success');
+    };
     setActiveModal(null);
+    triggerRomanceReaction(updatedChar, {
+      title: `Quality Time with ${child.firstName}`,
+      icon: '🧸',
+      partnerName: child.firstName,
+      message: `You spent memorable quality time with ${child.firstName}! Their relationship and happiness blossomed.`,
+      deltas: {
+        relationshipDelta: 12,
+        happinessDelta: 5,
+      },
+    });
   };
 
   const handleChildPraise = (child: ChildProfile) => {
     const updatedChildren = (character.children || []).map((c) =>
       c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 8), smarts: Math.min(100, c.smarts + 4) } : c
     );
-    onUpdateCharacter({
+    const updatedChar: CharacterProfile = {
       ...character,
       children: updatedChildren,
-    });
-    showToast(`You praised ${child.firstName} for their efforts! Their confidence soared.`, 'success');
+    };
     setActiveModal(null);
+    triggerRomanceReaction(updatedChar, {
+      title: `Praised ${child.firstName}`,
+      icon: '⭐',
+      partnerName: child.firstName,
+      message: `You praised ${child.firstName} for their efforts! Their confidence and smarts soared.`,
+      deltas: {
+        relationshipDelta: 8,
+      },
+    });
   };
 
   const handleChildAllowance = (child: ChildProfile, amount: number) => {
     if (character.cash < amount) {
-      showToast('You do not have enough cash.', 'danger');
+      setReactionModal({
+        title: 'Not Enough Cash',
+        icon: '💵',
+        message: 'You do not have enough cash.',
+      });
       return;
     }
     const updatedChildren = (character.children || []).map((c) =>
       c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 10), happiness: Math.min(100, c.happiness + 15) } : c
     );
-    onUpdateCharacter({
+    const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash - amount,
       children: updatedChildren,
-    });
-    showToast(`You gave ${child.firstName} a $${amount} allowance!`, 'success');
+    };
     setActiveModal(null);
+    triggerRomanceReaction(updatedChar, {
+      title: `Allowance for ${child.firstName}`,
+      icon: '💵',
+      partnerName: child.firstName,
+      message: `You gave ${child.firstName} a $${amount} allowance!`,
+      deltas: {
+        cashDelta: -amount,
+        relationshipDelta: 10,
+        happinessDelta: 5,
+      },
+    });
   };
+
+  const datingProspects = (character.relationships || []).filter(
+    (r) => r.romanceUnlocked && r.romanticStage === 'flirting' && r.id !== partner?.id
+  );
 
   return (
     <div className="p-4 flex flex-col gap-3.5 bg-white min-h-[480px]">
@@ -521,21 +908,6 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           <span>Romance & Family</span>
         </div>
       </div>
-
-      {/* Feedback Toast */}
-      {feedbackToast && (
-        <div
-          className={`p-3 rounded-xl border-2 border-slate-900 text-xs font-black shadow-[2px_2px_0_#0f172a] animate-in fade-in transition-all ${
-            feedbackToast.type === 'success'
-              ? 'bg-emerald-100 text-emerald-950'
-              : feedbackToast.type === 'danger'
-              ? 'bg-rose-100 text-rose-950'
-              : 'bg-sky-100 text-sky-950'
-          }`}
-        >
-          {feedbackToast.message}
-        </div>
-      )}
 
       {/* Pregnancy Status Notification */}
       {character.isPregnant && (
@@ -586,7 +958,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
             {/* Dual Meters */}
             <DualMeterDisplay
               relationship={partner.relationship}
-              romanceMeter={partner.romanceMeter ?? 50}
+              romanceMeter={partner.romanceMeter ?? 0}
               romanceUnlocked={true}
             />
 
@@ -611,101 +983,196 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                 </span>
               </div>
             </div>
+
+            {/* Interactive Romance Actions Grid */}
+            <div className="flex flex-col gap-2">
+            {(() => {
+              const partnerYearlyActions = character.yearlySocialActions?.[partner.id] || [];
+              const partnerRomanceActions = partnerYearlyActions.filter((a) => a.startsWith('romance_'));
+              const romanceCount = partnerRomanceActions.length;
+              const isLimitReached = romanceCount >= 2;
+
+              const hasDated = partnerRomanceActions.includes('romance_date');
+              const hasFlirted = partnerRomanceActions.includes('romance_flirt');
+              const hasTalked = partnerRomanceActions.includes('romance_talk');
+              const hasGifted = partnerRomanceActions.includes('romance_gift');
+              const hasIntimacy = partnerRomanceActions.includes('romance_intimacy');
+
+              return (
+                <>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                      Romantic Interactions
+                    </h4>
+                    <span
+                      className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                        isLimitReached
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                      }`}
+                    >
+                      {romanceCount}/2 Actions This Year
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <CartoonButton
+                      variant={isLimitReached || hasDated ? 'slate' : 'white'}
+                      size="sm"
+                      disabled={isLimitReached || hasDated}
+                      className="flex items-center justify-center gap-1.5"
+                      onClick={() => {
+                        setActiveTarget(partner);
+                        setActiveModal('date');
+                      }}
+                    >
+                      <Wine className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>{hasDated ? 'Date (Done)' : 'Plan a Date'}</span>
+                    </CartoonButton>
+
+                    <CartoonButton
+                      variant={isLimitReached || hasFlirted ? 'slate' : 'white'}
+                      size="sm"
+                      disabled={isLimitReached || hasFlirted}
+                      className="flex items-center justify-center gap-1.5"
+                      onClick={() => {
+                        setActiveTarget(partner);
+                        setActiveModal('flirt');
+                      }}
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>{hasFlirted ? 'Flirt (Done)' : 'Flirt'}</span>
+                    </CartoonButton>
+
+                    <CartoonButton
+                      variant={isLimitReached || hasTalked ? 'slate' : 'white'}
+                      size="sm"
+                      disabled={isLimitReached || hasTalked}
+                      className="flex items-center justify-center gap-1.5"
+                      onClick={() => {
+                        setActiveTarget(partner);
+                        setActiveModal('romantic_talk');
+                      }}
+                    >
+                      <MessageCircle className="w-4 h-4 text-sky-500 shrink-0" />
+                      <span>{hasTalked ? 'Deep Talk (Done)' : 'Deep Talk'}</span>
+                    </CartoonButton>
+
+                    <CartoonButton
+                      variant={isLimitReached || hasGifted ? 'slate' : 'white'}
+                      size="sm"
+                      disabled={isLimitReached || hasGifted}
+                      className="flex items-center justify-center gap-1.5"
+                      onClick={() => {
+                        setActiveTarget(partner);
+                        setActiveModal('romantic_gift');
+                      }}
+                    >
+                      <Gift className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <span>{hasGifted ? 'Gift (Done)' : 'Give Gift'}</span>
+                    </CartoonButton>
+
+                    {/* Intimacy: Gated behind 60% Love & 70% Relationship, plus annual limits */}
+                    {(() => {
+                      const meetsStats = (partner.romanceMeter ?? 0) >= 60 && partner.relationship >= 70;
+                      const canMakeLove = meetsStats && !isLimitReached && !hasIntimacy;
+                      return (
+                        <CartoonButton
+                          variant={canMakeLove ? 'white' : 'slate'}
+                          size="sm"
+                          disabled={!canMakeLove}
+                          className={`flex items-center justify-center gap-1.5 ${!canMakeLove ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          onClick={() => {
+                            if (canMakeLove) setActiveModal('intimacy');
+                          }}
+                        >
+                          <Flame className={`w-4 h-4 shrink-0 ${canMakeLove ? 'text-rose-600' : 'text-slate-400'}`} />
+                          <span>
+                            {hasIntimacy
+                              ? 'Make Love (Done)'
+                              : isLimitReached
+                              ? 'Make Love (Limit 2/2)'
+                              : meetsStats
+                              ? 'Make Love'
+                              : 'Make Love (60% Love)'}
+                          </span>
+                        </CartoonButton>
+                      );
+                    })()}
+
+                    {/* Family Planning: Gated behind Marriage & 60% Love */}
+                    {(() => {
+                      const isMarried = partner.romanticStage === 'married';
+                      const meetsRomance = (partner.romanceMeter ?? 0) >= 60 && partner.relationship >= 70;
+                      const canFamily = isMarried && meetsRomance;
+                      return (
+                        <CartoonButton
+                          variant={canFamily ? 'white' : 'slate'}
+                          size="sm"
+                          disabled={!canFamily}
+                          className={`flex items-center justify-center gap-1.5 ${!canFamily ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          onClick={() => {
+                            if (canFamily) setActiveModal('family_planning');
+                          }}
+                        >
+                          <Baby className={`w-4 h-4 shrink-0 ${canFamily ? 'text-amber-600' : 'text-slate-400'}`} />
+                          <span>
+                            {!isMarried ? 'Family (Married Only)' : !meetsRomance ? 'Family (60% Love)' : 'Family Planning'}
+                          </span>
+                        </CartoonButton>
+                      );
+                    })()}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
-          {/* Interactive Romance Actions Grid */}
-          <div className="flex flex-col gap-2">
-            <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-              Romantic Interactions
-            </h4>
-
-            <div className="grid grid-cols-2 gap-2">
+          {/* Stage-Based Milestones */}
+          <div className="flex flex-col gap-2 pt-2 border-t border-slate-200">
+            {partner.romanticStage === 'flirting' && (
               <CartoonButton
-                variant="white"
+                variant="rose"
                 size="sm"
-                className="flex items-center justify-center gap-1.5"
-                onClick={() => setActiveModal('date')}
+                className="w-full flex items-center justify-center gap-2"
+                onClick={() => {
+                  setActiveTarget(partner);
+                  setActiveModal('ask_out');
+                }}
               >
-                <Wine className="w-4 h-4 text-rose-500" />
-                Plan a Date
+                <Heart className="w-4 h-4 fill-white shrink-0" />
+                <span>Ask to Become Official Partners</span>
               </CartoonButton>
+            )}
 
-              <CartoonButton
-                variant="white"
-                size="sm"
-                className="flex items-center justify-center gap-1.5"
-                onClick={() => setActiveModal('flirt')}
-              >
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                Flirt
-              </CartoonButton>
+            {partner.romanticStage === 'dating' && (() => {
+              const yearsDating = partner.partnerStats?.yearsTogether ?? 0;
+              const meetsTenure = yearsDating >= 2;
+              const meetsStats = (partner.romanceMeter ?? 0) >= 75 && partner.relationship >= 80;
+              const canPropose = meetsTenure && meetsStats;
 
-              <CartoonButton
-                variant="white"
-                size="sm"
-                className="flex items-center justify-center gap-1.5"
-                onClick={handleExecuteRomanticTalk}
-              >
-                <MessageCircle className="w-4 h-4 text-sky-500" />
-                Deep Talk
-              </CartoonButton>
+              let proposalLabel = '💍 Propose Marriage (Ring Shop)';
+              if (!meetsTenure) {
+                proposalLabel = `💍 Propose (Requires 2 Yrs Dating: Currently ${yearsDating} ${yearsDating === 1 ? 'Yr' : 'Yrs'})`;
+              } else if (!meetsStats) {
+                proposalLabel = `💍 Propose (Req. 75% Love [${partner.romanceMeter ?? 0}%] & 80% Rel [${Math.round(partner.relationship)}%])`;
+              }
 
-              <CartoonButton
-                variant="white"
-                size="sm"
-                className="flex items-center justify-center gap-1.5"
-                onClick={handleExecuteRomanticGift}
-              >
-                <Gift className="w-4 h-4 text-emerald-500" />
-                Give Gift ($50)
-              </CartoonButton>
-
-              <CartoonButton
-                variant="white"
-                size="sm"
-                className="flex items-center justify-center gap-1.5"
-                onClick={() => setActiveModal('intimacy')}
-              >
-                <Flame className="w-4 h-4 text-rose-600" />
-                Make Love
-              </CartoonButton>
-
-              <CartoonButton
-                variant="white"
-                size="sm"
-                className="flex items-center justify-center gap-1.5"
-                onClick={() => setActiveModal('family_planning')}
-              >
-                <Baby className="w-4 h-4 text-amber-600" />
-                Family Planning
-              </CartoonButton>
-            </div>
-
-            {/* Stage-Based Milestones */}
-            <div className="flex flex-col gap-2 pt-2 border-t border-slate-200">
-              {partner.romanticStage === 'flirting' && (
+              return (
                 <CartoonButton
-                  variant="rose"
+                  variant={canPropose ? 'rose' : 'white'}
                   size="sm"
-                  className="w-full flex items-center justify-center gap-2"
-                  onClick={() => setActiveModal('ask_out')}
+                  disabled={!canPropose}
+                  className={`w-full flex items-center justify-center gap-2 ${!canPropose ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  onClick={() => {
+                    setActiveTarget(partner);
+                    setActiveModal('proposal');
+                  }}
                 >
-                  <Heart className="w-4 h-4 fill-white" />
-                  Ask to Become Official Partners
+                  <span>{proposalLabel}</span>
                 </CartoonButton>
-              )}
-
-              {partner.romanticStage === 'dating' && (
-                <CartoonButton
-                  variant="rose"
-                  size="sm"
-                  className="w-full flex items-center justify-center gap-2"
-                  onClick={() => setActiveModal('proposal')}
-                >
-                  <span className="text-sm">💍</span>
-                  Propose Marriage (Ring Shop)
-                </CartoonButton>
-              )}
+              );
+            })()}
 
               {partner.romanticStage === 'engaged' && (
                 <CartoonButton
@@ -714,8 +1181,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                   className="w-full flex items-center justify-center gap-2"
                   onClick={() => setActiveModal('wedding')}
                 >
-                  <Church className="w-4 h-4 text-white" />
-                  Plan Wedding Ceremony 💒
+                  <Church className="w-4 h-4 text-white shrink-0" />
+                  <span>Plan Wedding Ceremony 💒</span>
                 </CartoonButton>
               )}
 
@@ -726,8 +1193,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                   className="w-full flex items-center justify-center gap-2"
                   onClick={() => setActiveModal('divorce')}
                 >
-                  <UserX className="w-4 h-4" />
-                  File for Divorce
+                  <UserX className="w-4 h-4 shrink-0" />
+                  <span>File for Divorce</span>
                 </CartoonButton>
               ) : (
                 <CartoonButton
@@ -736,8 +1203,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                   className="w-full flex items-center justify-center gap-2"
                   onClick={handleBreakup}
                 >
-                  <UserX className="w-4 h-4" />
-                  Break Up
+                  <UserX className="w-4 h-4 shrink-0" />
+                  <span>Break Up</span>
                 </CartoonButton>
               )}
             </div>
@@ -755,10 +1222,183 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                 Currently Single
               </h3>
               <p className="text-[11px] font-semibold text-slate-600">
-                You are not currently dating anyone. Look for love or connect with an acquaintance!
+                {datingProspects.length > 0
+                  ? `You have ${datingProspects.length} active dating prospect${datingProspects.length > 1 ? 's' : ''}! Build chemistry through flirting and dates.`
+                  : 'You are not currently dating anyone. Look for love or connect with an acquaintance!'}
               </p>
             </div>
           </div>
+
+          {/* Active Dating Prospects (Matches / Crushes / Romantic Interests) */}
+          {datingProspects.length > 0 && (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                  <span>Dating Prospects & Matches ({datingProspects.length})</span>
+                </h4>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {datingProspects.map((prospect) => {
+                  const romanceVal = prospect.romanceMeter ?? 0;
+                  const canAskOut = romanceVal >= 35 && prospect.relationship >= 50;
+
+                  return (
+                    <div
+                      key={prospect.id}
+                      className="p-3.5 rounded-2xl border-2 border-slate-900 bg-white shadow-[2px_2.5px_0_#0f172a] flex flex-col gap-2.5"
+                    >
+                      {/* Top Info */}
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-11 h-11 rounded-xl bg-rose-200 border-2 border-slate-900 flex items-center justify-center text-2xl shadow-[1px_1px_0_#0f172a]">
+                            {prospect.avatarEmoji || '💘'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-black text-slate-950">
+                                {prospect.firstName} {prospect.lastName}
+                              </span>
+                              <span className="text-[9px] font-black uppercase text-rose-800 bg-rose-100 px-1.5 py-0.5 rounded-full border border-rose-300">
+                                {prospect.role || 'Prospect'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-500 block">
+                              {prospect.age} yrs • {prospect.partnerStats?.occupation || 'Employed'}
+                            </span>
+                            {prospect.originStory && (
+                              <span className="text-[9px] font-semibold text-slate-400 italic block line-clamp-1">
+                                {prospect.originStory}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <span className="text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                          Courtship
+                        </span>
+                      </div>
+
+                      {/* Dual Meter */}
+                      <DualMeterDisplay
+                        relationship={prospect.relationship}
+                        romanceMeter={romanceVal}
+                        romanceUnlocked={true}
+                      />
+
+                      {/* Courtship Action Buttons */}
+                      {(() => {
+                        const pYearlyActions = character.yearlySocialActions?.[prospect.id] || [];
+                        const pRomanceActions = pYearlyActions.filter((a) => a.startsWith('romance_'));
+                        const pCount = pRomanceActions.length;
+                        const pLimit = pCount >= 2;
+
+                        const pDated = pRomanceActions.includes('romance_date');
+                        const pFlirted = pRomanceActions.includes('romance_flirt');
+                        const pTalked = pRomanceActions.includes('romance_talk');
+                        const pGifted = pRomanceActions.includes('romance_gift');
+
+                        return (
+                          <>
+                            <div className="flex items-center justify-between text-[11px] font-black text-slate-600 px-0.5">
+                              <span>Courting Actions</span>
+                              <span
+                                className={`font-mono ${
+                                  pLimit ? 'text-amber-700 bg-amber-100' : 'text-emerald-700 bg-emerald-100'
+                                } px-1.5 py-0.5 rounded text-[10px]`}
+                              >
+                                {pCount}/2 this year
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <CartoonButton
+                                variant={pLimit || pFlirted ? 'slate' : 'white'}
+                                size="sm"
+                                disabled={pLimit || pFlirted}
+                                className="flex items-center justify-center gap-1.5"
+                                onClick={() => {
+                                  setActiveTarget(prospect);
+                                  setActiveModal('flirt');
+                                }}
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                <span>{pFlirted ? 'Flirt (Done)' : 'Flirt'}</span>
+                              </CartoonButton>
+
+                              <CartoonButton
+                                variant={pLimit || pDated ? 'slate' : 'white'}
+                                size="sm"
+                                disabled={pLimit || pDated}
+                                className="flex items-center justify-center gap-1.5"
+                                onClick={() => {
+                                  setActiveTarget(prospect);
+                                  setActiveModal('date');
+                                }}
+                              >
+                                <Wine className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                                <span>{pDated ? 'Date (Done)' : 'Plan Date'}</span>
+                              </CartoonButton>
+
+                              <CartoonButton
+                                variant={pLimit || pTalked ? 'slate' : 'white'}
+                                size="sm"
+                                disabled={pLimit || pTalked}
+                                className="flex items-center justify-center gap-1.5"
+                                onClick={() => {
+                                  setActiveTarget(prospect);
+                                  setActiveModal('romantic_talk');
+                                }}
+                              >
+                                <MessageCircle className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                <span>{pTalked ? 'Talk (Done)' : 'Deep Talk'}</span>
+                              </CartoonButton>
+
+                              <CartoonButton
+                                variant={pLimit || pGifted ? 'slate' : 'white'}
+                                size="sm"
+                                disabled={pLimit || pGifted}
+                                className="flex items-center justify-center gap-1.5"
+                                onClick={() => {
+                                  setActiveTarget(prospect);
+                                  setActiveModal('romantic_gift');
+                                }}
+                              >
+                                <Gift className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                <span>{pGifted ? 'Gift (Done)' : 'Give Gift'}</span>
+                              </CartoonButton>
+                            </div>
+                          </>
+                        );
+                      })()}
+
+                      {/* Milestone Ask to be Partner */}
+                      <CartoonButton
+                        variant={canAskOut ? 'rose' : 'white'}
+                        size="sm"
+                        disabled={!canAskOut}
+                        className={`w-full flex items-center justify-center gap-2 ${
+                          !canAskOut ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
+                        onClick={() => {
+                          setActiveTarget(prospect);
+                          setActiveModal('ask_out');
+                        }}
+                      >
+                        <Heart className={`w-3.5 h-3.5 shrink-0 ${canAskOut ? 'fill-white' : 'text-slate-400'}`} />
+                        <span>
+                          {canAskOut
+                            ? `Ask ${prospect.firstName} to be Partner ❤️`
+                            : `Ask Out (Needs 35% Love [${romanceVal}%] & 50% Rel [${Math.round(prospect.relationship)}%])`}
+                        </span>
+                      </CartoonButton>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Dating Options Hub */}
           <div className="flex flex-col gap-2.5">
@@ -826,7 +1466,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                     Date an Existing Friend or Coworker
                   </span>
                   <span className="text-[11px] font-semibold text-slate-500 block">
-                    Open your Relationships list and ignite a romantic spark with a friend (≥60% Rel).
+                    Open your Relationships list and ignite a romantic spark with a friend (≥50% Rel).
                   </span>
                 </div>
               </div>
@@ -900,22 +1540,53 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         />
       )}
 
-      {activeModal === 'flirt' && partner && (
+      {activeModal === 'flirt' && (activeTarget || partner) && (
         <FlirtModal
           isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
+          onClose={() => {
+            setActiveModal(null);
+            setActiveTarget(null);
+          }}
+          target={activeTarget || partner!}
           onSelectFlirt={handleExecuteFlirt}
         />
       )}
 
-      {activeModal === 'date' && partner && (
+      {activeModal === 'date' && (activeTarget || partner) && (
         <DatePlannerModal
           isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
+          onClose={() => {
+            setActiveModal(null);
+            setActiveTarget(null);
+          }}
+          target={activeTarget || partner!}
           playerCash={character.cash}
           onSelectVenue={handleExecuteDate}
+        />
+      )}
+
+      {activeModal === 'romantic_talk' && (activeTarget || partner) && (
+        <RomanticTalkModal
+          isOpen={true}
+          onClose={() => {
+            setActiveModal(null);
+            setActiveTarget(null);
+          }}
+          target={activeTarget || partner!}
+          onSelectTopic={handleExecuteRomanticTalk}
+        />
+      )}
+
+      {activeModal === 'romantic_gift' && (activeTarget || partner) && (
+        <RomanticGiftModal
+          isOpen={true}
+          onClose={() => {
+            setActiveModal(null);
+            setActiveTarget(null);
+          }}
+          target={activeTarget || partner!}
+          playerCash={character.cash}
+          onSelectGift={handleExecuteRomanticGift}
         />
       )}
 
@@ -928,20 +1599,26 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         />
       )}
 
-      {activeModal === 'ask_out' && partner && (
+      {activeModal === 'ask_out' && (activeTarget || partner) && (
         <AskOutModal
           isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
+          onClose={() => {
+            setActiveModal(null);
+            setActiveTarget(null);
+          }}
+          target={activeTarget || partner!}
           onConfirmAskOut={handleConfirmAskOut}
         />
       )}
 
-      {activeModal === 'proposal' && partner && (
+      {activeModal === 'proposal' && (activeTarget || partner) && (
         <ProposalModal
           isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
+          onClose={() => {
+            setActiveModal(null);
+            setActiveTarget(null);
+          }}
+          target={activeTarget || partner!}
           playerCash={character.cash}
           onConfirmProposal={handleConfirmProposal}
         />
@@ -957,7 +1634,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         />
       )}
 
-      {activeModal === 'family_planning' && partner && (
+      {activeModal === 'family_planning' && partner && partner.romanticStage === 'married' && (
         <FamilyPlanningModal
           isOpen={true}
           onClose={() => setActiveModal(null)}
@@ -983,19 +1660,32 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           onGiveAllowance={(amt) => handleChildAllowance(selectedChild, amt)}
           onPayTuition={() => {
             if (character.cash < 15000) {
-              showToast('Insufficient cash for college tuition.', 'danger');
+              setReactionModal({
+                title: 'Insufficient Cash',
+                icon: '🎓',
+                message: 'Insufficient cash for college tuition ($15,000).',
+              });
               return;
             }
             const updatedChildren = (character.children || []).map((c) =>
               c.id === selectedChild.id ? { ...c, relationship: 100, occupation: 'College Graduate' } : c
             );
-            onUpdateCharacter({
+            const updatedChar: CharacterProfile = {
               ...character,
               cash: character.cash - 15000,
               children: updatedChildren,
-            });
-            showToast(`You paid $15,000 for ${selectedChild.firstName}'s college tuition!`, 'success');
+            };
             setActiveModal(null);
+            triggerRomanceReaction(updatedChar, {
+              title: `College Tuition for ${selectedChild.firstName}`,
+              icon: '🎓',
+              partnerName: selectedChild.firstName,
+              message: `You paid $15,000 for ${selectedChild.firstName}'s college tuition! They graduated and are deeply grateful!`,
+              deltas: {
+                cashDelta: -15000,
+                relationshipDelta: 20,
+              },
+            });
           }}
         />
       )}
@@ -1007,6 +1697,20 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           target={partner}
           playerCash={character.cash}
           onConfirmDivorce={handleConfirmDivorce}
+        />
+      )}
+
+      {/* Romance Reaction Modal Popup */}
+      {reactionModal && (
+        <RomanceReactionModal
+          isOpen={true}
+          onClose={() => setReactionModal(null)}
+          title={reactionModal.title}
+          icon={reactionModal.icon}
+          partnerName={reactionModal.partnerName}
+          avatarEmoji={reactionModal.avatarEmoji}
+          message={reactionModal.message}
+          deltas={reactionModal.deltas}
         />
       )}
     </div>

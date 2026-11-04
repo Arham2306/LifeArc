@@ -19,7 +19,7 @@ export const AskOutModal: React.FC<AskOutModalProps> = ({
 }) => {
   const rel = target.relationship;
   const romance = target.romanceMeter ?? 0;
-  const isEligible = rel >= 55 && romance >= 35;
+  const isEligible = rel >= 50 && romance >= 35;
 
   let roleLabel = 'Partner';
   if (target.gender === 'female') roleLabel = 'Girlfriend';
@@ -57,8 +57,8 @@ export const AskOutModal: React.FC<AskOutModalProps> = ({
         <div className="text-[11px] font-bold text-slate-600 bg-white border border-slate-300 p-2.5 rounded-lg flex flex-col gap-1">
           <div className="flex justify-between items-center">
             <span>Required Relationship:</span>
-            <span className={rel >= 55 ? 'text-emerald-700' : 'text-rose-600'}>
-              {rel}% / 55% min
+            <span className={rel >= 50 ? 'text-emerald-700' : 'text-rose-600'}>
+              {Math.round(rel)}% / 50% min
             </span>
           </div>
           <div className="flex justify-between items-center">

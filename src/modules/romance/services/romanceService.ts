@@ -17,7 +17,11 @@ export class RomanceService {
   /**
    * Unlocks the romance / love meter for an eligible acquaintance or friend.
    */
-  sparkRomance(target: PersonProfile): PersonProfile {
+  sparkRomance(target: PersonProfile, playerAge?: number): PersonProfile {
+    if (playerAge !== undefined && playerAge < 16) {
+      return target;
+    }
+
     const defaultStats = target.partnerStats || {
       craziness: Math.floor(Math.random() * 50) + 15,
       generosity: Math.floor(Math.random() * 60) + 30,
@@ -30,7 +34,7 @@ export class RomanceService {
     return {
       ...target,
       romanceUnlocked: true,
-      romanceMeter: target.romanceMeter && target.romanceMeter > 0 ? target.romanceMeter : 20,
+      romanceMeter: target.romanceMeter && target.romanceMeter > 0 ? target.romanceMeter : 0,
       romanticStage: target.romanticStage && target.romanticStage !== 'none' ? target.romanticStage : 'flirting',
       partnerStats: defaultStats,
     };
@@ -44,8 +48,20 @@ export class RomanceService {
     target: PersonProfile,
     flirt: FlirtOption
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
+    if (character.age < 16) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You must be at least 16 years old to pursue romance.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+        },
+      };
+    }
+
     const currentRel = target.relationship;
-    const currentRomance = target.romanceMeter ?? 15;
+    const currentRomance = target.romanceMeter ?? 0;
     const playerAppeal = (character.stats.looks * 0.6) + (character.stats.smarts * 0.4);
 
     // Roll difficulty
@@ -60,20 +76,20 @@ export class RomanceService {
     if (roll >= successThreshold) {
       // Big success
       success = true;
-      relationshipDelta = Math.floor(Math.random() * 6) + 4;
-      romanceDelta = Math.floor(Math.random() * 10) + 10;
+      relationshipDelta = Math.floor(Math.random() * 3) + 2; // +2 to +4
+      romanceDelta = flirt.style === 'bold' ? Math.floor(Math.random() * 2) + 3 : Math.floor(Math.random() * 2) + 2; // +2 to +4
       message = `${target.firstName} ${flirt.successMessage}`;
     } else if (roll >= successThreshold - 20) {
       // Awkward but safe
       success = true;
-      relationshipDelta = 2;
-      romanceDelta = 4;
+      relationshipDelta = 1;
+      romanceDelta = 1;
       message = `${target.firstName} ${flirt.awkwardMessage}`;
     } else {
       // Rejected
       success = false;
-      relationshipDelta = -5;
-      romanceDelta = -4;
+      relationshipDelta = -3;
+      romanceDelta = -2;
       message = `${target.firstName} ${flirt.rejectionMessage}`;
     }
 
@@ -105,6 +121,18 @@ export class RomanceService {
     target: PersonProfile,
     venue: DateVenue
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
+    if (character.age < 16) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You must be at least 16 years old to go on romantic dates.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+        },
+      };
+    }
+
     if (character.cash < venue.cost) {
       return {
         updatedTarget: target,
@@ -136,7 +164,7 @@ export class RomanceService {
       ...target,
       romanceUnlocked: true,
       relationship: Math.min(100, target.relationship + relationshipDelta),
-      romanceMeter: Math.min(100, (target.romanceMeter ?? 20) + romanceDelta),
+      romanceMeter: Math.min(100, (target.romanceMeter ?? 0) + romanceDelta),
     };
 
     return {
@@ -160,14 +188,14 @@ export class RomanceService {
     target: PersonProfile,
     talk: RomanticTalkOption
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
-    const relationshipDelta = Math.floor(Math.random() * 5) + 6;
-    const romanceDelta = Math.floor(Math.random() * 6) + 8;
+    const relationshipDelta = Math.floor(Math.random() * 3) + 3; // +3 to +5
+    const romanceDelta = Math.floor(Math.random() * 3) + 2; // +2 to +4
     const message = `You discussed "${talk.topic}" with ${target.firstName}. They ${talk.reaction}`;
 
     const updatedTarget: PersonProfile = {
       ...target,
       relationship: Math.min(100, target.relationship + relationshipDelta),
-      romanceMeter: Math.min(100, (target.romanceMeter ?? 20) + romanceDelta),
+      romanceMeter: Math.min(100, (target.romanceMeter ?? 0) + romanceDelta),
     };
 
     return {
@@ -205,7 +233,7 @@ export class RomanceService {
     const updatedTarget: PersonProfile = {
       ...target,
       relationship: Math.min(100, target.relationship + gift.relationshipDelta),
-      romanceMeter: Math.min(100, (target.romanceMeter ?? 20) + gift.romanceDelta),
+      romanceMeter: Math.min(100, (target.romanceMeter ?? 0) + gift.romanceDelta),
     };
 
     return {
@@ -229,18 +257,30 @@ export class RomanceService {
     character: CharacterProfile,
     target: PersonProfile
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
-    const rel = target.relationship;
-    const romance = target.romanceMeter ?? 0;
-
-    if (rel < 55 || romance < 35) {
+    if (character.age < 16) {
       return {
         updatedTarget: target,
         result: {
           success: false,
-          message: `${target.firstName} smiled gently and said: "I really value our connection, but I don't think we're quite there yet as partners."`,
-          relationshipDelta: -5,
-          romanceDelta: -5,
-          happinessDelta: -10,
+          message: 'You must be at least 16 years old to ask someone to be your romantic partner.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+        },
+      };
+    }
+
+    const rel = target.relationship;
+    const romance = target.romanceMeter ?? 0;
+
+    if (rel < 50 || romance < 35) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: `${target.firstName} smiled gently and said: "I really value our connection, but I don't think we're quite there yet as partners. Let's keep hanging out and see where things go!"`,
+          relationshipDelta: -2,
+          romanceDelta: -2,
+          happinessDelta: -5,
         },
       };
     }
@@ -276,9 +316,9 @@ export class RomanceService {
       result: {
         success: true,
         message: `With butterflies in your stomach, you asked ${target.firstName} to be your ${roleTitle}. With a bright blush and a joyful kiss, they said YES!`,
-        relationshipDelta: 15,
-        romanceDelta: 25,
-        happinessDelta: 25,
+        relationshipDelta: 8,
+        romanceDelta: 8,
+        happinessDelta: 15,
         newRomanticStage: 'dating',
       },
     };
@@ -309,6 +349,34 @@ export class RomanceService {
     const rel = target.relationship;
     const romance = target.romanceMeter ?? 0;
     const craziness = target.partnerStats?.craziness ?? 30;
+    const yearsDating = target.partnerStats?.yearsTogether ?? 0;
+
+    // Gate 1: Must be in dating stage, with at least 2 full years of dating
+    if (yearsDating < 2) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: `${target.firstName} blushes and hugs you affectionately: "I love you so much, but we've only been dating for ${yearsDating === 0 ? 'less than a year' : '1 year'}! Let's enjoy being together before rushing into marriage."`,
+          relationshipDelta: -2,
+          romanceDelta: 0,
+          happinessDelta: -5,
+        },
+      };
+    }
+
+    if (target.romanticStage === 'flirting' || rel < 75 || romance < 70) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: `${target.firstName} was caught completely off guard: "A proposal?! We haven't built a deep, committed partnership yet for that step!"`,
+          relationshipDelta: -10,
+          romanceDelta: -10,
+          happinessDelta: -15,
+        },
+      };
+    }
 
     // Proposal acceptance score
     const score = (rel * 0.35) + (romance * 0.35) + (ring.tierScore * 0.25) + (venue.atmosphereScore * 0.1) - (craziness * 0.1);
@@ -514,6 +582,10 @@ export class RomanceService {
     count: number = 3,
     preference?: 'women' | 'men' | 'everyone'
   ): DatingCandidate[] {
+    if (character.age < 16) {
+      return [];
+    }
+
     const pref = preference || character.datingPreference || 'everyone';
     const occupations = [
       'Graphic Designer',

@@ -70,8 +70,8 @@ export const ChildDetailModal: React.FC<ChildDetailModalProps> = ({
             className="w-full flex items-center justify-center gap-2"
             onClick={onSpendTime}
           >
-            <Users className="w-4 h-4 text-emerald-600" />
-            Spend Quality Time Together
+            <Users className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Spend Quality Time Together</span>
           </CartoonButton>
 
           <CartoonButton
@@ -80,8 +80,8 @@ export const ChildDetailModal: React.FC<ChildDetailModalProps> = ({
             className="w-full flex items-center justify-center gap-2"
             onClick={onPraise}
           >
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            Praise & Encourage Child
+            <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>Praise & Encourage Child</span>
           </CartoonButton>
 
           <div className="grid grid-cols-2 gap-2">

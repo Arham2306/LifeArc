@@ -12,13 +12,54 @@ export const EVENT_TRIGGER_CHANCE = 0.7;
 /** Characters younger than this don't get interactive events. */
 export const MIN_EVENT_AGE = 1;
 
-/** Replaces placeholders like {firstName}, {fatherName}, {motherName}, {jobTitle}, and {companyName} in event text. */
-export function formatEventText(text: string, character: CharacterProfile): string {
+export function findContextualPeer(
+  character: CharacterProfile,
+  context?: 'classmate' | 'coworker' | 'friend'
+): PersonProfile | undefined {
+  const rels = character.relationships || [];
+  if (rels.length === 0) return undefined;
+
+  if (context === 'coworker') {
+    return (
+      rels.find((r) => r.cohortType === 'coworker' || r.role.toLowerCase().includes('coworker')) ||
+      rels[0]
+    );
+  }
+  if (context === 'classmate') {
+    return (
+      rels.find((r) => r.cohortType === 'classmate' || r.role.toLowerCase().includes('classmate')) ||
+      rels[0]
+    );
+  }
+  return rels[0];
+}
+
+/** Replaces placeholders like {firstName}, {fatherName}, {motherName}, {jobTitle}, {companyName}, {peerName}, {classmateName}, {coworkerName} in event text. */
+export function formatEventText(
+  text: string,
+  character: CharacterProfile,
+  boundPerson?: PersonProfile
+): string {
   const currentJob = character.career?.currentJob;
   const companyName =
     currentJob?.companyName || character.business?.name || 'your workplace';
   const jobTitle =
     currentJob?.title || (character.business ? 'Founder & CEO' : 'worker');
+
+  let peer = boundPerson;
+  if (!peer) {
+    if (text.includes('{coworkerName}')) {
+      peer = findContextualPeer(character, 'coworker');
+    } else if (text.includes('{classmateName}') || text.includes('{peerName}') || text.includes('{peerFirstName}')) {
+      peer = findContextualPeer(character, 'classmate');
+    }
+  }
+
+  const peerFullName = peer ? `${peer.firstName} ${peer.lastName}` : 'your peer';
+  const peerFirstName = peer ? peer.firstName : 'your friend';
+  const peerPronoun = peer?.gender === 'female' ? 'she' : 'he';
+  const peerPossessive = peer?.gender === 'female' ? 'her' : 'his';
+  const peerObjective = peer?.gender === 'female' ? 'her' : 'him';
 
   return text
     .replace(/\{firstName\}/g, character.firstName)
@@ -26,7 +67,14 @@ export function formatEventText(text: string, character: CharacterProfile): stri
     .replace(/\{fatherName\}/g, character.parents.father.firstName)
     .replace(/\{motherName\}/g, character.parents.mother.firstName)
     .replace(/\{jobTitle\}/g, jobTitle)
-    .replace(/\{companyName\}/g, companyName);
+    .replace(/\{companyName\}/g, companyName)
+    .replace(/\{peerName\}/g, peerFullName)
+    .replace(/\{peerFirstName\}/g, peerFirstName)
+    .replace(/\{classmateName\}/g, peerFullName)
+    .replace(/\{coworkerName\}/g, peerFullName)
+    .replace(/\{peerPronoun\}/g, peerPronoun)
+    .replace(/\{peerPossessive\}/g, peerPossessive)
+    .replace(/\{peerObjective\}/g, peerObjective);
 }
 
 /** All events that can currently happen to this character. */
@@ -157,11 +205,12 @@ export interface EventResolution {
 export function resolveEventChoice(
   character: CharacterProfile,
   event: LifeEventTemplate,
-  choice: EventChoice
+  choice: EventChoice,
+  boundPerson?: PersonProfile
 ): EventResolution {
   const weightedOutcomes = weightOutcomesForParents(choice.outcomes, character);
   const outcome = pickWeighted(weightedOutcomes);
-  const message = formatEventText(outcome.message, character);
+  const message = formatEventText(outcome.message, character, boundPerson);
   const { character: updated, applied } = applyEffects(character, outcome.effects);
 
   const journalEntry: LifeEvent = {
@@ -233,7 +282,10 @@ export function resolveEventChoice(
   if (outcome.relationshipDelta) {
     const { personName, delta, newType } = outcome.relationshipDelta;
     const targetIdx = updatedRelationships.findIndex(
-      (r) => `${r.firstName} ${r.lastName}`.toLowerCase() === personName.toLowerCase()
+      (r) =>
+        (boundPerson && r.id === boundPerson.id) ||
+        (personName && `${r.firstName} ${r.lastName}`.toLowerCase() === personName.toLowerCase()) ||
+        (personName && r.firstName.toLowerCase() === personName.toLowerCase())
     );
     if (targetIdx >= 0) {
       const target = updatedRelationships[targetIdx];

@@ -28,7 +28,8 @@ import { ageUpCharacter } from './modules/aging/services/agingService'
 import { rollEventForCharacter, resolveEventChoice } from './modules/events/services/eventService'
 import { EventModal, type EventResult } from './modules/events/components/EventModal'
 import type { EventChoice, LifeEventTemplate } from './modules/events/types'
-import type { CharacterProfile } from './types/game'
+import { BabyNamingModal } from './modules/romance/components/BabyNamingModal'
+import type { CharacterProfile, PersonProfile, ChildProfile } from './types/game'
 
 export default function App() {
   const [activeCharacter, setActiveCharacter] = useState<CharacterProfile | null>(null)
@@ -44,6 +45,7 @@ export default function App() {
   const [isUniversityModalOpen, setIsUniversityModalOpen] = useState(false)
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
+  const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
   const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance'>('hub')
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
@@ -53,13 +55,14 @@ export default function App() {
     setMenuView('hub')
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
+    setPendingNewbornBirth(null)
     setIsUniversityModalOpen(false)
     setIsProfessionalModalOpen(false)
     setActiveFiscalReport(null)
   }
 
   const handleAgeUp = () => {
-    if (!activeCharacter || !activeCharacter.isAlive || pendingEvent || schoolMilestone || activeFiscalReport) return
+    if (!activeCharacter || !activeCharacter.isAlive || pendingEvent || schoolMilestone || activeFiscalReport || pendingNewbornBirth) return
 
     const agedCharacter = ageUpCharacter(activeCharacter)
     setActiveCharacter(agedCharacter)
@@ -67,6 +70,12 @@ export default function App() {
 
     if (!agedCharacter.isAlive) {
       setIsDeathModalOpen(true)
+      return
+    }
+
+    // Prioritize baby birth announcement modal if pregnancy resolved
+    if (agedCharacter.newbornAnnouncement) {
+      setPendingNewbornBirth(agedCharacter.newbornAnnouncement)
       return
     }
 
@@ -87,10 +96,55 @@ export default function App() {
     if (event) setPendingEvent(event)
   }
 
-  const handleChooseOption = (choice: EventChoice) => {
+  const handleConfirmBabyNaming = (firstName: string, lastName: string) => {
+    if (!activeCharacter || !pendingNewbornBirth) return
+
+    const updatedChildren = (activeCharacter.children || []).map((child) =>
+      child.id === pendingNewbornBirth.id
+        ? { ...child, firstName, lastName }
+        : child
+    )
+
+    // Update the timeline birth event message with the chosen name
+    const updatedTimeline = activeCharacter.timeline.map((evt) => {
+      if (evt.title === 'Baby Born! 👶' && evt.age === activeCharacter.age) {
+        return {
+          ...evt,
+          message: `You welcomed a beautiful newborn ${pendingNewbornBirth.gender === 'female' ? 'daughter' : 'son'}, ${firstName} ${lastName}, into the world! Welcome to parenthood! 🍼✨`,
+        }
+      }
+      return evt
+    })
+
+    const updatedCharacter: CharacterProfile = {
+      ...activeCharacter,
+      children: updatedChildren,
+      timeline: updatedTimeline,
+      newbornAnnouncement: undefined,
+    }
+
+    setActiveCharacter(updatedCharacter)
+    setPendingNewbornBirth(null)
+
+    // Resume age-up milestone checks after naming baby
+    const schoolNotice = getSchoolMilestoneNotice(updatedCharacter)
+    if (schoolNotice) {
+      setSchoolMilestone(schoolNotice)
+      return
+    }
+
+    if (updatedCharacter.business?.lastFiscalReport) {
+      setActiveFiscalReport(updatedCharacter.business.lastFiscalReport)
+    }
+
+    const event = rollEventForCharacter(updatedCharacter)
+    if (event) setPendingEvent(event)
+  }
+
+  const handleChooseOption = (choice: EventChoice, boundPerson?: PersonProfile) => {
     if (!activeCharacter || !pendingEvent) return
 
-    const resolution = resolveEventChoice(activeCharacter, pendingEvent, choice)
+    const resolution = resolveEventChoice(activeCharacter, pendingEvent, choice, boundPerson)
     setActiveCharacter(resolution.character)
     setEventResult({
       choice,
@@ -114,6 +168,7 @@ export default function App() {
     setPendingEvent(null)
     setEventResult(null)
     setSchoolMilestone(null)
+    setPendingNewbornBirth(null)
     setIsUniversityModalOpen(false)
     setIsDeathModalOpen(false)
     setIsMenuOpen(false)
@@ -257,7 +312,7 @@ export default function App() {
                   onUpdateCharacter={setActiveCharacter}
                   onBackToMenu={() => setMenuView('hub')}
                 />
-              ) : menuView === 'romance' ? (
+              ) : menuView === 'romance' && activeCharacter.age >= 16 ? (
                 <RomanceScreen
                   character={activeCharacter}
                   onUpdateCharacter={setActiveCharacter}
@@ -268,7 +323,11 @@ export default function App() {
                 <MenuScreen
                   character={activeCharacter}
                   onOpenRelationships={() => setMenuView('relationships')}
-                  onOpenRomance={() => setMenuView('romance')}
+                  onOpenRomance={() => {
+                    if (activeCharacter.age >= 16) {
+                      setMenuView('romance');
+                    }
+                  }}
                 />
               )
             )}
@@ -307,6 +366,17 @@ export default function App() {
             setSchoolMilestone(null)
             setCurrentTab('careers')
           }}
+        />
+      )}
+
+      {/* Baby Birth Announcement & Naming Modal */}
+      {pendingNewbornBirth && activeCharacter && (
+        <BabyNamingModal
+          isOpen={true}
+          baby={pendingNewbornBirth}
+          playerLastName={activeCharacter.lastName}
+          partnerLastName={activeCharacter.partner?.lastName}
+          onConfirm={handleConfirmBabyNaming}
         />
       )}
 

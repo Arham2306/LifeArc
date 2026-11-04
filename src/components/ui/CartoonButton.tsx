@@ -52,7 +52,7 @@ export const CartoonButton: React.FC<CartoonButtonProps> = ({
       {...props}
     >
       {icon && <span className="flex-shrink-0 text-current">{icon}</span>}
-      <span>{children}</span>
+      {children}
     </button>
   );
 };

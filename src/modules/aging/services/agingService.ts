@@ -4,6 +4,7 @@ import { progressEducationForYear } from '../../education/services/educationServ
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
 import { reproductionService } from '../../romance/services/reproductionService'
+import { cohortService } from '../../relationships/services/cohortService'
 import { getSiblingOccupation } from '../../character/services/familyService'
 import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names'
 import type { ActiveBusinessProfile } from '../../business/types'
@@ -177,9 +178,20 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       spouseCashContribution = Math.floor(spouseSalary * 0.2); // 20% household contribution
     }
 
+    // Subtle annual relationship decay if neglected (0 interactions this year)
+    const actionsDoneWithPartner = (character.yearlySocialActions?.[updatedPartner.id] || []).length;
+    let relDecay = 0;
+    let romanceDecay = 0;
+    if (actionsDoneWithPartner === 0) {
+      relDecay = 3;
+      romanceDecay = 3;
+    }
+
     updatedPartner = {
       ...updatedPartner,
       age: nextPartnerAge,
+      relationship: Math.max(10, updatedPartner.relationship - relDecay),
+      romanceMeter: Math.max(0, (updatedPartner.romanceMeter ?? 0) - romanceDecay),
       partnerStats: {
         ...(updatedPartner.partnerStats || {
           craziness: 30,
@@ -193,16 +205,16 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     };
   }
 
-  // Age up friends, partners, and coworkers alongside player
-  const updatedRelationships = (character.relationships || []).map((rel) => {
-    if (updatedPartner && rel.id === updatedPartner.id) {
-      return updatedPartner;
-    }
-    return {
-      ...rel,
-      age: rel.age + 1,
-    };
-  });
+  // Age up friends, partners, and coworkers alongside player, and track neglect
+  let agedRelationships = cohortService.ageContacts(character.relationships || [], character.age);
+  if (updatedPartner) {
+    agedRelationships = agedRelationships.map((rel) => {
+      if (rel.id === updatedPartner?.id) {
+        return updatedPartner;
+      }
+      return rel;
+    });
+  }
 
   // Pregnancy resolution (Childbirth upon age up)
   const babyChildBirthEvents: LifeEvent[] = [];
@@ -225,12 +237,25 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
 
   let childBirthHappinessDelta = 0;
   let isPregnantResolved = false;
+  let newbornToAnnounce: ChildProfile | undefined = undefined;
 
-  if (character.isPregnant) {
+  const partnerIsPregnant = !!updatedPartner?.partnerStats?.isPregnant;
+  if (character.isPregnant || partnerIsPregnant) {
     const newborn = reproductionService.generateBaby(character, updatedPartner || undefined);
     updatedChildren = [...updatedChildren, newborn];
     childBirthHappinessDelta += 25;
     isPregnantResolved = true;
+    newbornToAnnounce = newborn;
+
+    if (updatedPartner?.partnerStats?.isPregnant) {
+      updatedPartner = {
+        ...updatedPartner,
+        partnerStats: {
+          ...updatedPartner.partnerStats,
+          isPregnant: false,
+        },
+      };
+    }
 
     babyChildBirthEvents.push({
       id: createId(),
@@ -319,6 +344,95 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     businessEvents = bizProgress.events;
   }
 
+  // Stage Cohort Management & Drifting Apart
+  const cohortEvents: LifeEvent[] = [];
+
+  const existingClassmates = agedRelationships.filter(
+    (r) => r.cohortType === 'classmate' || r.role.toLowerCase().includes('classmate')
+  );
+
+  const isElementaryEntry =
+    (nextAge === 5 || nextAge === 6) && existingClassmates.length === 0;
+  const isMiddleSchoolEntry = nextAge === 11;
+  const isHighSchoolEntry = nextAge === 14;
+  const isUniversityEntry =
+    nextAge >= 18 &&
+    eduProgress.education.currentStage === 'university' &&
+    agedRelationships.filter((r) => r.stageMet === 'university').length === 0;
+  const isPeriodicDriftCheck =
+    !isMiddleSchoolEntry && !isHighSchoolEntry && nextAge > 6 && nextAge % 3 === 0;
+
+  if (isElementaryEntry) {
+    const classmates = cohortService.generateStageCohort(character, 'elementary', 6);
+    agedRelationships = [...agedRelationships, ...classmates];
+    cohortEvents.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: 'Elementary School Classmates! 🎒',
+      message: `You started school and joined a homeroom class with ${classmates.slice(0, 3).map((c) => c.firstName).join(', ')}, and others!`,
+      category: 'relationship',
+      icon: '🎒',
+    });
+  } else if (isMiddleSchoolEntry) {
+    const driftResult = cohortService.evaluateDriftingApart(
+      { ...character, relationships: agedRelationships, partner: updatedPartner },
+      true
+    );
+    agedRelationships = driftResult.updatedRelationships;
+    cohortEvents.push(...driftResult.departedEvents);
+
+    const newClassmates = cohortService.generateStageCohort(character, 'middle_school', 4);
+    agedRelationships = [...agedRelationships, ...newClassmates];
+    cohortEvents.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: 'New Middle School Classmates! 🏫',
+      message: `You started middle school and were introduced to new classmates including ${newClassmates.slice(0, 2).map((c) => c.firstName).join(' and ')}!`,
+      category: 'relationship',
+      icon: '🏫',
+    });
+  } else if (isHighSchoolEntry) {
+    const driftResult = cohortService.evaluateDriftingApart(
+      { ...character, relationships: agedRelationships, partner: updatedPartner },
+      true
+    );
+    agedRelationships = driftResult.updatedRelationships;
+    cohortEvents.push(...driftResult.departedEvents);
+
+    const newClassmates = cohortService.generateStageCohort(character, 'high_school', 4);
+    agedRelationships = [...agedRelationships, ...newClassmates];
+    cohortEvents.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: 'High School Peers! 🎓',
+      message: `You entered high school! You were assigned homeroom with new peers including ${newClassmates.slice(0, 2).map((c) => c.firstName).join(' and ')}!`,
+      category: 'relationship',
+      icon: '🎓',
+    });
+  } else if (isUniversityEntry) {
+    const uniPeers = cohortService.generateStageCohort(character, 'university', 4);
+    agedRelationships = [...agedRelationships, ...uniPeers];
+    cohortEvents.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: 'Campus Life & Roommates! 🏛️',
+      message: `You arrived on campus and met fellow students, including your dorm roommate ${uniPeers[0].firstName} ${uniPeers[0].lastName}!`,
+      category: 'relationship',
+      icon: '🏛️',
+    });
+  } else if (isPeriodicDriftCheck) {
+    const driftResult = cohortService.evaluateDriftingApart(
+      { ...character, relationships: agedRelationships, partner: updatedPartner },
+      false
+    );
+    agedRelationships = driftResult.updatedRelationships;
+    cohortEvents.push(...driftResult.departedEvents);
+  }
+
   const combinedChanges: StatEffects = {
     happiness:
       (yearlyChanges.happiness ?? 0) +
@@ -347,10 +461,11 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       ),
       parents: updatedParents,
       siblings: updatedSiblings,
-      relationships: updatedRelationships,
+      relationships: agedRelationships,
       partner: updatedPartner,
       children: updatedChildren,
       isPregnant: isPregnantResolved ? false : character.isPregnant,
+      newbornAnnouncement: newbornToAnnounce,
       yearlySocialActions: {},
       education: {
         ...eduProgress.education,
@@ -367,6 +482,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...eduProgress.events,
         ...careerProgress.events,
         ...businessEvents,
+        ...cohortEvents,
       ],
     },
     combinedChanges

@@ -148,8 +148,8 @@ export const DatingAppModal: React.FC<DatingAppModalProps> = ({
         {/* Action Controls */}
         <div className="flex items-center justify-between pt-1">
           <CartoonButton variant="white" size="sm" onClick={handlePrev}>
-            <ChevronLeft className="w-4 h-4" />
-            Previous
+            <ChevronLeft className="w-4 h-4 shrink-0" />
+            <span>Previous</span>
           </CartoonButton>
 
           <CartoonButton
@@ -157,13 +157,13 @@ export const DatingAppModal: React.FC<DatingAppModalProps> = ({
             size="sm"
             onClick={() => onAskOutCandidate(current)}
           >
-            <Heart className="w-4 h-4 fill-white" />
-            Date {current.firstName}
+            <Heart className="w-4 h-4 fill-white shrink-0" />
+            <span>Match with {current.firstName}</span>
           </CartoonButton>
 
           <CartoonButton variant="white" size="sm" onClick={handleNext}>
-            Next
-            <ChevronRight className="w-4 h-4" />
+            <span>Next</span>
+            <ChevronRight className="w-4 h-4 shrink-0" />
           </CartoonButton>
         </div>
       </div>

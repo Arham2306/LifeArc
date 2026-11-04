@@ -48,7 +48,7 @@ export interface RomanticTalkOption {
   topic: string;
   dialogue: string;
   minRomance: number;
-  traitRevealed?: 'craziness' | 'generosity' | 'fertility' | 'marriageReadiness';
+  traitRevealed?: 'craziness' | 'generosity' | 'fertility' | 'marriageReadiness' | 'smarts' | 'looks';
   reaction: string;
 }
 

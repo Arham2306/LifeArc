@@ -32,9 +32,12 @@ interface MenuTile {
 }
 
 export const MenuScreen: React.FC<MenuScreenProps> = ({
+  character,
   onOpenRelationships,
   onOpenRomance,
 }) => {
+  const isRomanceUnlocked = character.age >= 16;
+
   const menuTiles: MenuTile[] = [
     {
       id: 'relationships',
@@ -42,21 +45,21 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       subtitle: 'Parents, siblings, and friends across your life',
       icon: <Users className="w-5 h-5 stroke-[2.5] text-amber-950" />,
       iconBg: 'bg-amber-400',
-      badgeLabel: 'Active',
-      badgeVariant: 'emerald',
       isAvailable: true,
       onClick: onOpenRelationships,
     },
     {
       id: 'romance',
       title: 'Romance & Dating',
-      subtitle: 'Dating apps, partners, proposals, marriage, and kids',
+      subtitle: isRomanceUnlocked
+        ? 'Dating apps, partners, proposals, marriage, and kids'
+        : 'Unlocks at age 16 (Dating, partners & romance)',
       icon: <Heart className="w-5 h-5 stroke-[2.5] text-rose-950" />,
-      iconBg: 'bg-rose-400',
-      badgeLabel: 'Active',
-      badgeVariant: 'rose',
-      isAvailable: true,
-      onClick: onOpenRomance,
+      iconBg: isRomanceUnlocked ? 'bg-rose-400' : 'bg-rose-300',
+      badgeLabel: isRomanceUnlocked ? undefined : 'Age 16',
+      badgeVariant: isRomanceUnlocked ? undefined : 'slate',
+      isAvailable: isRomanceUnlocked,
+      onClick: isRomanceUnlocked ? onOpenRomance : undefined,
     },
     {
       id: 'assets',

@@ -18,6 +18,7 @@ import {
 } from '../data/jobCatalog';
 import { getPromotionLadderForJob } from '../data/careerLadders';
 import { applyEffects } from '../../character/services/statService';
+import { cohortService } from '../../relationships/services/cohortService';
 import { createId } from '../../../utils/id';
 import { chance, randomInt } from '../../../utils/random';
 
@@ -353,6 +354,12 @@ export function applyForJob(
     icon: job.icon,
   };
 
+  const coworkerCohort = cohortService.generateStageCohort(
+    { ...afterHire, career: { ...afterHire.career, currentJob: newJobProfile } },
+    'workplace',
+    4
+  );
+
   return {
     hired: true,
     character: {
@@ -363,6 +370,7 @@ export function applyForJob(
         currentJob: newJobProfile,
         history: updatedHistory,
       },
+      relationships: [...(afterHire.relationships || []), ...coworkerCohort],
       timeline: [...afterHire.timeline, hireEvent],
     },
     title: 'You’re Hired!',

@@ -244,7 +244,15 @@ export function executeSocialAction(
     );
   } else {
     updatedRelationships = (character.relationships || []).map((rel) =>
-      rel.id === target.id ? { ...rel, relationship: newRelScore } : rel
+      rel.id === target.id
+        ? {
+            ...rel,
+            relationship: newRelScore,
+            lastInteractedAge: character.age,
+            yearsNeglected: 0,
+            cohortType: newRelScore >= 80 ? 'best_friend' : newRelScore >= 60 ? 'friend' : rel.cohortType,
+          }
+        : rel
     );
   }
 

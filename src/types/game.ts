@@ -112,6 +112,7 @@ export interface PartnerStats {
     value: number;
   };
   weddingVenue?: string;
+  isPregnant?: boolean;
 }
 
 export interface ChildProfile {
@@ -149,6 +150,12 @@ export interface PersonProfile {
   romanceMeter?: number; // 0 - 100 (Romantic Chemistry & Love)
   romanticStage?: RomanticStage;
   partnerStats?: PartnerStats;
+
+  // Cohort & Lifecycle Tracking
+  cohortType?: 'classmate' | 'coworker' | 'friend' | 'best_friend';
+  lastInteractedAge?: number;
+  yearsNeglected?: number;
+  personalityArchetype?: 'class_clown' | 'studious' | 'popular' | 'rebel' | 'quiet' | 'athletic';
 }
 
 export interface CharacterProfile {
@@ -184,6 +191,8 @@ export interface CharacterProfile {
   isPregnant?: boolean;
   pregnancyPartnerId?: string;
   datingPreference?: 'women' | 'men' | 'everyone';
+  /** Temporary payload when a baby is born on age up, awaiting player naming */
+  newbornAnnouncement?: ChildProfile;
   /** Track interactive social actions performed on people this year: personId -> actionType[] */
   yearlySocialActions?: Record<string, string[]>;
   timeline: LifeEvent[];

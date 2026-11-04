@@ -43,3 +43,4 @@ export const DualMeterDisplay: React.FC<DualMeterDisplayProps> = ({
     </div>
   );
 };
+
