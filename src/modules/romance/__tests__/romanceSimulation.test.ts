@@ -317,6 +317,38 @@ const wife = createMockFriend({
   },
 });
 
+// 7a. Dedicated Try for a Baby Naturally
+const maleChar = createMockCharacter({ gender: 'male', age: 26, cash: 30000 });
+let naturalConception = false;
+for (let i = 0; i < 20; i++) {
+  const tryRes = reproductionService.executeTryForBaby(maleChar, wife);
+  if (tryRes.conceptionOccurred) {
+    naturalConception = true;
+    assert(tryRes.message.includes('Positive! 🍼'), 'Positive pregnancy message returned');
+    break;
+  }
+}
+assert(naturalConception === true, 'Deliberate try for baby results in conception within reasonable attempts');
+
+// 7b. Attempting to try for baby while already pregnant is blocked gracefully
+const pregnantWife = createMockFriend({
+  ...wife,
+  partnerStats: {
+    ...wife.partnerStats!,
+    isPregnant: true,
+  },
+});
+const blockedTry = reproductionService.executeTryForBaby(maleChar, pregnantWife);
+assert(blockedTry.alreadyPregnant === true, 'Blocked when already expecting a baby');
+assert(blockedTry.conceptionOccurred === false, 'Conception not repeated while expecting');
+
+// 7c. Same-sex natural conception returns notViable guidance
+const malePartner = createMockFriend({ gender: 'male', age: 26 });
+const nonViableTry = reproductionService.executeTryForBaby(maleChar, malePartner);
+assert(nonViableTry.notViable === true, 'Same-sex natural conception flagged as not viable');
+assert(nonViableTry.message.includes('IVF Treatment or Adoption'), 'Guides to IVF/Adoption');
+console.log(`✅ Try for a Baby: Deliberate conception, already-pregnant block, and viability guidance verified!`);
+
 const ivfRes = reproductionService.executeIVF(familyChar, wife);
 assert(ivfRes.cashDelta === -15000, 'IVF cost applied');
 console.log(`✅ Fertility Clinic: IVF cycle attempted (Cost: $15,000)`);
@@ -518,10 +550,12 @@ assert(prospectTarget.romanticStage === 'dating', 'Became official girlfriend');
 assert((prospectTarget.romanceMeter ?? 0) >= 50, 'Ask out boosted romance over 50%');
 
 // Unlock Tier 4 Intimacy once Love reaches 60%
-// Gift 1
-const gift1 = romanceService.executeRomanticGift(pChar, prospectTarget, ROMANTIC_GIFTS[1]); // Flowers
+// Gifts (2x permitted per year)
+const gift1 = romanceService.executeRomanticGift(pChar, prospectTarget, ROMANTIC_GIFTS[1]); // Chocolates
 prospectTarget = gift1.updatedTarget;
-assert((prospectTarget.romanceMeter ?? 0) >= 60, 'Flowers unlocked Tier 4 Intimacy (>=60%)');
+const gift2 = romanceService.executeRomanticGift(pChar, prospectTarget, ROMANTIC_GIFTS[3]); // Red Roses
+prospectTarget = gift2.updatedTarget;
+assert((prospectTarget.romanceMeter ?? 0) >= 60, 'Gifts unlocked Tier 4 Intimacy (>=60%)');
 
 // Intimacy (2x)
 const intimate1 = reproductionService.executeIntimacy(pChar, prospectTarget, 'condom');

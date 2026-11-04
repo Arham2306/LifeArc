@@ -2,7 +2,123 @@ import type { CharacterProfile, PersonProfile, ChildProfile } from '../../../typ
 import { createId } from '../../../utils/id';
 import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names';
 
+export interface TryForBabyResult {
+  success: boolean;
+  conceptionOccurred: boolean;
+  alreadyPregnant?: boolean;
+  notViable?: boolean;
+  message: string;
+  relationshipDelta: number;
+  romanceDelta: number;
+  happinessDelta: number;
+}
+
 export class ReproductionService {
+  /**
+   * Deliberately attempts natural conception with partner.
+   * Evaluates pregnancy status, biological viability, maternal age, and fertility.
+   */
+  executeTryForBaby(
+    character: CharacterProfile,
+    partner: PersonProfile
+  ): TryForBabyResult {
+    // 1. Check if already expecting
+    const playerPregnant = !!character.isPregnant;
+    const partnerPregnant = !!partner.partnerStats?.isPregnant;
+    if (playerPregnant || partnerPregnant) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        alreadyPregnant: true,
+        message: `You and ${partner.firstName} are already expecting a baby! The little one will arrive when you age up (+1 Year). 🍼`,
+        relationshipDelta: 0,
+        romanceDelta: 0,
+        happinessDelta: 0,
+      };
+    }
+
+    // 2. Check biological viability (both male or both female)
+    if (
+      (character.gender === 'male' && partner.gender === 'male') ||
+      (character.gender === 'female' && partner.gender === 'female')
+    ) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        notViable: true,
+        message: `Natural biological conception requires male and female biological parents. You and ${partner.firstName} can start a beautiful family through IVF Treatment or Adoption! 🔬🍼`,
+        relationshipDelta: 2,
+        romanceDelta: 2,
+        happinessDelta: 0,
+      };
+    }
+
+    // 3. Determine maternal age & fertility
+    const isPlayerMother = character.gender === 'female';
+    const isPartnerMother = partner.gender === 'female';
+    const femaleAge = isPlayerMother ? character.age : isPartnerMother ? partner.age : partner.age;
+    const femaleFertility = isPlayerMother ? 75 : (partner.partnerStats?.fertility ?? 70);
+
+    // 4. Check maternal age feasibility
+    if (femaleAge < 16) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        message: 'Must be at least 16 years old to try for a family.',
+        relationshipDelta: 0,
+        romanceDelta: 0,
+        happinessDelta: 0,
+      };
+    }
+
+    if (femaleAge > 46) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        message: `At ${femaleAge} years old, natural conception is no longer biologically feasible. Consider Adoption to grow your family! 🍼`,
+        relationshipDelta: 2,
+        romanceDelta: 2,
+        happinessDelta: -5,
+      };
+    }
+
+    // 5. Active Conception Probability
+    // Deliberate attempts have a high base probability so the action feels responsive and effective
+    let baseChance = 0.60; // 60% base for prime reproductive years
+    if (femaleAge > 35) baseChance = 0.45;
+    if (femaleAge > 40) baseChance = 0.25;
+    if (femaleAge > 44) baseChance = 0.10;
+
+    const fertilityMod = Math.max(0.6, femaleFertility / 100);
+    const finalChance = Math.min(0.85, Math.max(0.35, baseChance * fertilityMod));
+
+    const roll = Math.random();
+    const conceptionOccurred = roll < finalChance;
+
+    const relDelta = Math.floor(Math.random() * 3) + 4; // +4 to +6
+    const romanceDelta = Math.floor(Math.random() * 3) + 4; // +4 to +6
+
+    if (conceptionOccurred) {
+      return {
+        success: true,
+        conceptionOccurred: true,
+        message: `You and ${partner.firstName} spent a tender and hopeful night trying for a baby. A few weeks later, a pregnancy test confirms: Positive! 🍼 Two pink lines appear—you are officially expecting a baby!`,
+        relationshipDelta: relDelta + 5,
+        romanceDelta: romanceDelta + 5,
+        happinessDelta: 25,
+      };
+    }
+
+    return {
+      success: true,
+      conceptionOccurred: false,
+      message: `You and ${partner.firstName} spent a loving night trying for a baby. The home pregnancy test came back negative this time. Don't lose heart—you can try again next time or explore fertility treatments!`,
+      relationshipDelta: relDelta,
+      romanceDelta,
+      happinessDelta: -2,
+    };
+  }
+
   /**
    * Executes intimate encounter with chosen protection style.
    */

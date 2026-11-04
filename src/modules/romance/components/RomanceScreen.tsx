@@ -501,30 +501,44 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Open Family Planning Picker
   const handleOpenFamilyPlanningPicker = (targetPartner: PersonProfile) => {
+    const isExpecting = character.isPregnant || !!targetPartner.partnerStats?.isPregnant;
+
     setActionPicker({
       title: `Family Planning with ${targetPartner.firstName}`,
       icon: '👶',
-      subtitle: 'Explore paths to starting or growing your family:',
+      subtitle: isExpecting
+        ? '🎉 Congratulations! You are currently expecting a baby next year.'
+        : 'Explore paths to starting or growing your family:',
       target: targetPartner,
       items: [
         {
           id: 'natural',
           title: 'Try for a Baby Naturally',
-          subtitle: 'Unprotected intimacy with your partner',
-          description: 'Subject to natural biological fertility and age curve.',
+          subtitle: isExpecting
+            ? 'Currently expecting a baby!'
+            : 'Passionate night trying to conceive',
+          description: isExpecting
+            ? 'You are already expecting! Your child will arrive when you age up (+1 Year).'
+            : 'Take a home pregnancy test together to see if you conceived.',
           emoji: '👶',
           cost: 0,
+          disabled: isExpecting,
+          disabledReason: 'Already Expecting a Baby',
           data: 'natural' as const,
         },
         {
           id: 'ivf',
           title: 'Fertility Clinic (IVF Treatment)',
           subtitle: 'Medical reproductive technology',
-          description: 'Advanced clinical implantation with ~65% success rate.',
+          description: isExpecting
+            ? 'You are already expecting a baby.'
+            : 'Advanced clinical implantation with ~65% success rate.',
           emoji: '🔬',
           cost: 15000,
-          disabled: character.cash < 15000,
-          disabledReason: "Can't afford ($15,000)",
+          disabled: isExpecting || character.cash < 15000,
+          disabledReason: isExpecting
+            ? 'Already Expecting a Baby'
+            : "Can't afford ($15,000)",
           data: 'ivf' as const,
         },
         {
@@ -1052,8 +1066,91 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Family Planning Handlers
   const handleTryNatural = () => {
-    handleExecuteIntimacy('unprotected');
+    if (!partner) return;
+    const res = reproductionService.executeTryForBaby(character, partner);
+
+    if (res.alreadyPregnant) {
+      setReactionModal({
+        title: 'Already Expecting! 🍼',
+        icon: '🍼',
+        partnerName: partner.firstName,
+        avatarEmoji: partner.avatarEmoji,
+        message: res.message,
+      });
+      return;
+    }
+
+    if (res.notViable) {
+      setReactionModal({
+        title: 'Family Planning Options 🍼',
+        icon: '👶',
+        partnerName: partner.firstName,
+        avatarEmoji: partner.avatarEmoji,
+        message: res.message,
+      });
+      return;
+    }
+
+    const partnerConceived =
+      character.gender === 'male' || partner.gender === 'female'
+        ? partner.gender === 'female' && res.conceptionOccurred
+        : false;
+
+    const playerConceived = character.gender === 'female' && res.conceptionOccurred;
+
+    const updatedTarget: PersonProfile = {
+      ...partner,
+      relationship: Math.min(100, partner.relationship + res.relationshipDelta),
+      romanceMeter: Math.min(100, (partner.romanceMeter ?? 0) + res.romanceDelta),
+      partnerStats: partner.partnerStats
+        ? {
+            ...partner.partnerStats,
+            isPregnant: partnerConceived || !!partner.partnerStats.isPregnant,
+          }
+        : partnerConceived
+        ? {
+            craziness: 30,
+            generosity: 70,
+            looks: 75,
+            smarts: 75,
+            fertility: 75,
+            isPregnant: true,
+          }
+        : undefined,
+    };
+
+    const updatedRelationships = (character.relationships || []).map((r) =>
+      r.id === updatedTarget.id ? updatedTarget : r
+    );
+
+    const updatedChar: CharacterProfile = {
+      ...character,
+      partner: updatedTarget,
+      relationships: updatedRelationships,
+      isPregnant: playerConceived || character.isPregnant,
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, Math.max(0, character.stats.happiness + res.happinessDelta)),
+      },
+    };
+
     setActiveModal(null);
+
+    triggerRomanceReaction(updatedChar, {
+      title: res.conceptionOccurred ? 'Baby on the Way! 🍼' : 'Trying for a Baby 👶',
+      icon: res.conceptionOccurred ? '🍼' : '👶',
+      partnerName: partner.firstName,
+      avatarEmoji: partner.avatarEmoji,
+      message: res.message,
+      deltas: {
+        romanceDelta: res.romanceDelta,
+        relationshipDelta: res.relationshipDelta,
+        happinessDelta: res.happinessDelta,
+        isConception: res.conceptionOccurred,
+      },
+      actionKey: 'romance_try_baby',
+      targetId: partner.id,
+    });
   };
 
   const handleTryIVF = () => {
@@ -1244,15 +1341,17 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       </div>
 
       {/* Pregnancy Status Notification */}
-      {character.isPregnant && (
-        <div className="p-3 bg-amber-100 border-2 border-slate-900 rounded-2xl flex items-center gap-3 shadow-[2px_2px_0_#0f172a]">
-          <span className="text-2xl">🍼</span>
-          <div>
-            <span className="text-xs font-black text-amber-950 block">
-              Expecting a Baby!
+      {(character.isPregnant || !!partner?.partnerStats?.isPregnant) && (
+        <div className="p-3.5 bg-gradient-to-r from-rose-100 to-amber-100 border-2 border-slate-900 rounded-2xl flex items-center gap-3 shadow-[2px_2.5px_0_#0f172a]">
+          <span className="text-3xl animate-bounce">🍼</span>
+          <div className="flex-1">
+            <span className="text-xs font-black text-rose-950 block">
+              Expecting a Baby! 🎉
             </span>
-            <span className="text-[11px] font-semibold text-amber-900 leading-tight block">
-              You are currently pregnant. Your child will be born upon aging up (+1 Year)!
+            <span className="text-[11px] font-bold text-slate-700 leading-tight block">
+              {character.isPregnant
+                ? `You are currently pregnant with ${partner?.firstName ? partner.firstName + "'s" : 'a'} baby! Your child will arrive upon aging up (+1 Year)!`
+                : `${partner?.firstName || 'Your partner'} is currently pregnant with your baby! Your child will arrive upon aging up (+1 Year)!`}
             </span>
           </div>
         </div>
@@ -1276,6 +1375,11 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                     <span className="text-[10px] font-black uppercase text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full border border-rose-400">
                       {partner.role}
                     </span>
+                    {partner.partnerStats?.isPregnant && (
+                      <span className="text-[10px] font-black uppercase text-amber-900 bg-amber-200 px-2 py-0.5 rounded-full border border-amber-400 flex items-center gap-1">
+                        <span>🤰 Expecting Baby</span>
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs font-bold text-slate-600">
                     {partner.age} yrs old • {partner.partnerStats?.occupation || 'Employed'}
@@ -1418,14 +1522,18 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       );
                     })()}
 
-                    {/* Family Planning: Gated behind Marriage & 60% Love */}
+                    {/* Family Planning: Gated behind Committed Relationship & 40% Love */}
                     {(() => {
-                      const isMarried = partner.romanticStage === 'married';
-                      const meetsRomance = (partner.romanceMeter ?? 0) >= 60 && partner.relationship >= 70;
-                      const canFamily = isMarried && meetsRomance;
+                      const isCommitted =
+                        partner.romanticStage === 'dating' ||
+                        partner.romanticStage === 'engaged' ||
+                        partner.romanticStage === 'married';
+                      const meetsRomance = (partner.romanceMeter ?? 0) >= 40 && partner.relationship >= 50;
+                      const isExpecting = character.isPregnant || !!partner.partnerStats?.isPregnant;
+                      const canFamily = isCommitted && meetsRomance;
                       return (
                         <CartoonButton
-                          variant={canFamily ? 'white' : 'slate'}
+                          variant={canFamily ? (isExpecting ? 'amber' : 'white') : 'slate'}
                           size="sm"
                           disabled={!canFamily}
                           className={`flex items-center justify-center gap-1.5 ${!canFamily ? 'opacity-60 cursor-not-allowed' : ''}`}
@@ -1435,7 +1543,13 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                         >
                           <Baby className={`w-4 h-4 shrink-0 ${canFamily ? 'text-amber-600' : 'text-slate-400'}`} />
                           <span>
-                            {!isMarried ? 'Family (Married Only)' : !meetsRomance ? 'Family (60% Love)' : 'Family Planning'}
+                            {!isCommitted
+                              ? 'Family (Partners Only)'
+                              : !meetsRomance
+                              ? 'Family (40% Love)'
+                              : isExpecting
+                              ? 'Expecting Baby 🍼'
+                              : 'Family Planning'}
                           </span>
                         </CartoonButton>
                       );

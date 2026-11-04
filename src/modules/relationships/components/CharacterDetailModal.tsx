@@ -722,9 +722,14 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
 
                   {/* Official Partner Badge */}
                   {isPartner && (
-                    <div className="w-full p-2.5 rounded-2xl border-2 border-slate-900 bg-rose-100/90 font-black text-xs shadow-[1.5px_1.5px_0_#0f172a] flex items-center justify-center gap-2 text-rose-950">
+                    <div className="w-full p-2.5 rounded-2xl border-2 border-slate-900 bg-rose-100/90 font-black text-xs shadow-[1.5px_1.5px_0_#0f172a] flex items-center justify-center gap-2 text-rose-950 flex-wrap">
                       <Heart className="w-4 h-4 fill-rose-500 text-rose-500 shrink-0" />
                       <span>Official Romantic Partner ({liveTarget.role || 'Partner'})</span>
+                      {friendTarget?.partnerStats?.isPregnant && (
+                        <span className="bg-amber-200 text-amber-900 border border-amber-400 px-2 py-0.5 rounded-full text-[10px]">
+                          🤰 Expecting Baby
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

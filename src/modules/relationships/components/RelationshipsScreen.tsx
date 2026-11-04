@@ -224,6 +224,11 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
                   <Badge variant="rose" size="xs">
                     {partner.role || 'Partner'}
                   </Badge>
+                  {partner.partnerStats?.isPregnant && (
+                    <span className="text-[9px] font-bold text-amber-900 bg-amber-200 border border-amber-400 px-1.5 py-0.5 rounded-full">
+                      🤰 Expecting Baby
+                    </span>
+                  )}
                   {partner.partnerStats?.yearsTogether ? (
                     <span className="text-[9px] font-bold text-rose-800 bg-rose-200/70 border border-rose-300 px-1.5 py-0.5 rounded-full">
                       {partner.partnerStats.yearsTogether} {partner.partnerStats.yearsTogether === 1 ? 'yr' : 'yrs'} together
