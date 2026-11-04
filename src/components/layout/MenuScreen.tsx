@@ -26,20 +26,12 @@ interface MenuTile {
   badgeLabel?: string;
   badgeVariant?: 'emerald' | 'amber' | 'sky' | 'slate' | 'rose';
   isAvailable: boolean;
-  countLabel?: string;
   onClick?: () => void;
 }
 
 export const MenuScreen: React.FC<MenuScreenProps> = ({
-  character,
   onOpenRelationships,
 }) => {
-  const livingParentsCount =
-    (character.parents.father.isAlive ? 1 : 0) + (character.parents.mother.isAlive ? 1 : 0);
-  const siblingsCount = (character.siblings || []).filter((s) => s.isAlive).length;
-  const friendsCount = (character.relationships || []).length;
-  const totalLivingConnections = livingParentsCount + siblingsCount + friendsCount;
-
   const menuTiles: MenuTile[] = [
     {
       id: 'relationships',
@@ -50,7 +42,6 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       badgeLabel: 'Active',
       badgeVariant: 'emerald',
       isAvailable: true,
-      countLabel: `${totalLivingConnections} ${totalLivingConnections === 1 ? 'person' : 'people'}`,
       onClick: onOpenRelationships,
     },
     {
@@ -146,16 +137,9 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
                     {tile.icon}
                   </div>
                   <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-black text-slate-950 group-hover:text-amber-950">
-                        {tile.title}
-                      </span>
-                      {tile.countLabel && (
-                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300">
-                          {tile.countLabel}
-                        </span>
-                      )}
-                    </div>
+                    <span className="text-xs font-black text-slate-950 group-hover:text-amber-950">
+                      {tile.title}
+                    </span>
                     <span className="text-[11px] font-bold text-slate-500 line-clamp-1">
                       {tile.subtitle}
                     </span>
