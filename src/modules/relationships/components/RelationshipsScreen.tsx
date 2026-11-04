@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import { ArrowLeft, UserPlus, ChevronRight, Heart } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
-import type { CharacterProfile, PersonProfile, SiblingProfile } from '../../../types/game';
+import type { CharacterProfile, PersonProfile, SiblingProfile, ChildProfile, LifeEvent } from '../../../types/game';
 import { CharacterDetailModal } from './CharacterDetailModal';
 import { FindFriendModal } from './FindFriendModal';
+import { ChildDetailModal } from '../../romance/components/ChildDetailModal';
+import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
 import type { TargetPersonRef } from '../services/relationshipService';
 import { ARCHETYPE_LABELS } from '../services/cohortService';
+import { createId } from '../../../utils/id';
 
 interface RelationshipsScreenProps {
   character: CharacterProfile;
@@ -20,11 +23,19 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
   onBackToMenu,
 }) => {
   const [selectedTarget, setSelectedTarget] = useState<TargetPersonRef | null>(null);
+  const [selectedChild, setSelectedChild] = useState<ChildProfile | null>(null);
+  const [childOutcome, setChildOutcome] = useState<{
+    title: string;
+    message: string;
+    icon?: string;
+    deltas?: Array<{ label: string; delta: string | number; color?: 'emerald' | 'rose' | 'amber' | 'sky' | 'slate' }>;
+  } | null>(null);
   const [isFindFriendOpen, setIsFindFriendOpen] = useState(false);
 
   const { father, mother } = character.parents;
   const siblings = character.siblings || [];
   const friends = character.relationships || [];
+  const children = character.children || [];
 
   // Check if a person profile represents an active romantic partner/dating/spouse
   const isPartnerProfile = (p: PersonProfile) =>
@@ -132,6 +143,187 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
       romanceUnlocked: isPartner || friend.romanceUnlocked,
       romanceMeter: friend.romanceMeter,
       romanticStage: friend.romanticStage || (isPartner ? 'dating' : undefined),
+    });
+  };
+
+  // Child Parenting Actions
+  const handleChildSpendTime = (child: ChildProfile) => {
+    const updatedChildren = (character.children || []).map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: Math.min(100, c.relationship + 12),
+            happiness: Math.min(100, c.happiness + 10),
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year: character.birthYear + character.age,
+      title: `Quality Time with ${child.firstName}`,
+      message: `You spent memorable quality time with ${child.firstName}! Your bond and their happiness blossomed.`,
+      category: 'relationship',
+      icon: '🧸',
+    };
+    const updatedChar: CharacterProfile = {
+      ...character,
+      children: updatedChildren,
+      timeline: [...(character.timeline || []), journalEntry],
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, character.stats.happiness + 5),
+      },
+    };
+    onUpdateCharacter(updatedChar);
+    setSelectedChild(null);
+    setChildOutcome({
+      title: `Quality Time with ${child.firstName}`,
+      message: `You spent quality time with ${child.firstName}. They smiled and laughed, feeling loved and supported!`,
+      icon: '🧸',
+      deltas: [
+        { label: 'Relationship', delta: '+12%', color: 'emerald' },
+        { label: 'Happiness', delta: '+5%', color: 'amber' },
+      ],
+    });
+  };
+
+  const handleChildPraise = (child: ChildProfile) => {
+    const updatedChildren = (character.children || []).map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: Math.min(100, c.relationship + 8),
+            smarts: Math.min(100, c.smarts + 4),
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year: character.birthYear + character.age,
+      title: `Praised ${child.firstName}`,
+      message: `You praised ${child.firstName} for their efforts! Their confidence and smarts soared.`,
+      category: 'relationship',
+      icon: '⭐',
+    };
+    const updatedChar: CharacterProfile = {
+      ...character,
+      children: updatedChildren,
+      timeline: [...(character.timeline || []), journalEntry],
+    };
+    onUpdateCharacter(updatedChar);
+    setSelectedChild(null);
+    setChildOutcome({
+      title: `Praised ${child.firstName}`,
+      message: `You praised ${child.firstName}. Their face lit up with pride!`,
+      icon: '⭐',
+      deltas: [
+        { label: 'Relationship', delta: '+8%', color: 'emerald' },
+        { label: 'Smarts', delta: '+4%', color: 'sky' },
+      ],
+    });
+  };
+
+  const handleChildAllowance = (child: ChildProfile, amount: number) => {
+    if (character.cash < amount) {
+      setChildOutcome({
+        title: 'Insufficient Cash',
+        message: `You need at least $${amount} to give an allowance.`,
+        icon: '💵',
+      });
+      return;
+    }
+    const updatedChildren = (character.children || []).map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: Math.min(100, c.relationship + 10),
+            happiness: Math.min(100, c.happiness + 15),
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year: character.birthYear + character.age,
+      title: `Allowance for ${child.firstName}`,
+      message: `You gave ${child.firstName} a $${amount} allowance!`,
+      category: 'relationship',
+      icon: '💵',
+    };
+    const updatedChar: CharacterProfile = {
+      ...character,
+      cash: character.cash - amount,
+      children: updatedChildren,
+      timeline: [...(character.timeline || []), journalEntry],
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, character.stats.happiness + 5),
+      },
+    };
+    onUpdateCharacter(updatedChar);
+    setSelectedChild(null);
+    setChildOutcome({
+      title: `Allowance Given`,
+      message: `You gave ${child.firstName} $${amount}! They beamed with joy and thanked you warmly.`,
+      icon: '💵',
+      deltas: [
+        { label: 'Cash', delta: `-$${amount}`, color: 'slate' },
+        { label: 'Relationship', delta: '+10%', color: 'emerald' },
+        { label: 'Happiness', delta: '+5%', color: 'amber' },
+      ],
+    });
+  };
+
+  const handleChildPayTuition = (child: ChildProfile) => {
+    if (character.cash < 15000) {
+      setChildOutcome({
+        title: 'Insufficient Cash',
+        message: 'You need at least $15,000 for college tuition.',
+        icon: '🎓',
+      });
+      return;
+    }
+    const updatedChildren = (character.children || []).map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: 100,
+            occupation: 'College Graduate',
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year: character.birthYear + character.age,
+      title: `College Tuition for ${child.firstName}`,
+      message: `You paid $15,000 for ${child.firstName}'s college tuition! They graduated and are deeply grateful!`,
+      category: 'milestone',
+      icon: '🎓',
+    };
+    const updatedChar: CharacterProfile = {
+      ...character,
+      cash: character.cash - 15000,
+      children: updatedChildren,
+      timeline: [...(character.timeline || []), journalEntry],
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, character.stats.happiness + 20),
+      },
+    };
+    onUpdateCharacter(updatedChar);
+    setSelectedChild(null);
+    setChildOutcome({
+      title: `College Tuition Paid! 🎓`,
+      message: `You paid $15,000 for ${child.firstName}'s college degree! They graduated with honors and will never forget your generosity.`,
+      icon: '🎓',
+      deltas: [
+        { label: 'Cash', delta: '-$15,000', color: 'slate' },
+        { label: 'Relationship', delta: 'Max 100%', color: 'emerald' },
+        { label: 'Happiness', delta: '+20%', color: 'amber' },
+      ],
     });
   };
 
@@ -262,7 +454,60 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
         </div>
       )}
 
-      {/* SECTION 2: ROMANTIC PROSPECTS & CRUSHES */}
+      {/* SECTION 2: YOUR CHILDREN */}
+      {children.length > 0 && (
+        <div className="flex flex-col gap-2 pt-1">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-black uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
+              <span>👶</span>
+              <span>Your Children</span>
+            </span>
+            <span className="text-[11px] font-bold text-slate-500">
+              {children.length} {children.length === 1 ? 'child' : 'children'}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {children.map((child) => (
+              <button
+                key={child.id}
+                type="button"
+                onClick={() => setSelectedChild(child)}
+                className="w-full p-3.5 rounded-2xl border-2 border-slate-900 bg-amber-50/70 hover:bg-amber-100 text-left transition-all shadow-[2px_2.5px_0_#0f172a] flex items-center justify-between cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl border-2 border-slate-900 bg-amber-200 flex items-center justify-center text-2xl shadow-[1px_1px_0_#0f172a]">
+                    {child.gender === 'female' ? '👧' : '👦'}
+                  </div>
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-black text-slate-950 group-hover:text-amber-950">
+                        {child.firstName} {child.lastName}
+                      </span>
+                      <Badge variant="amber" size="xs">
+                        {child.gender === 'female' ? 'Daughter' : 'Son'} {child.isAdopted ? '(Adopted)' : ''}
+                      </Badge>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      Age {child.age} • {child.occupation}
+                    </span>
+                    <div className="flex flex-col gap-1 w-44 pt-1">
+                      <div className="flex items-center justify-between text-[9px] font-bold text-slate-600">
+                        <span>Relationship</span>
+                        <span className="font-mono text-emerald-700">{Math.round(child.relationship)}%</span>
+                      </div>
+                      <ProgressBar value={child.relationship} color="emerald" size="xs" />
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 stroke-[3] text-slate-400 group-hover:text-amber-900 group-hover:translate-x-0.5 transition-all" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 3: ROMANTIC PROSPECTS & CRUSHES */}
       {romanticProspects.length > 0 && (
         <div className="flex flex-col gap-2 pt-1">
           <div className="flex items-center justify-between px-1">
@@ -578,6 +823,32 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
         character={character}
         onUpdateCharacter={onUpdateCharacter}
       />
+
+      {/* Child Detail Modal */}
+      {selectedChild && (
+        <ChildDetailModal
+          isOpen={true}
+          onClose={() => setSelectedChild(null)}
+          child={selectedChild}
+          playerCash={character.cash}
+          onSpendTime={() => handleChildSpendTime(selectedChild)}
+          onPraise={() => handleChildPraise(selectedChild)}
+          onGiveAllowance={(amt) => handleChildAllowance(selectedChild, amt)}
+          onPayTuition={() => handleChildPayTuition(selectedChild)}
+        />
+      )}
+
+      {/* Child Action Outcome Modal */}
+      {childOutcome && (
+        <ActionOutcomeModal
+          isOpen={true}
+          onClose={() => setChildOutcome(null)}
+          title={childOutcome.title}
+          message={childOutcome.message}
+          icon={childOutcome.icon}
+          customDeltas={childOutcome.deltas}
+        />
+      )}
     </div>
   );
 };

@@ -338,4 +338,34 @@ assert(agedRecovered.partner !== null, 'Auto-recovered partner upon Age-Up from 
 assert(agedRecovered.partner?.firstName === 'Elena', 'Recovered correct partner details');
 console.log(`✅ Partner Synchronization: Partner social actions and auto-recovery verified!`);
 
+// Test 11: Children in Family Relationships
+const testChild: ChildProfile = {
+  id: 'child_1',
+  firstName: 'Oliver',
+  lastName: 'Sterling',
+  age: 4,
+  gender: 'male',
+  relationship: 85,
+  smarts: 75,
+  looks: 80,
+  happiness: 90,
+  health: 95,
+  isAdopted: false,
+  occupation: 'Preschooler',
+  isAlive: true,
+};
+
+const charWithChildren = createMockCharacter({
+  children: [testChild],
+});
+assert(charWithChildren.children !== undefined, 'Children array exists on character');
+assert(charWithChildren.children!.length === 1, '1 Child in character household');
+assert(charWithChildren.children![0].firstName === 'Oliver', 'Child name matches');
+
+// Test aging up preserves child and increments age
+const agedParent = ageUpCharacter(charWithChildren);
+assert(agedParent.children !== undefined, 'Children preserved after age-up');
+assert(agedParent.children![0].age === 5, 'Child aged from 4 to 5');
+console.log(`✅ Children in Family: Oliver properly tracked, aged, and recognized in family relationships!`);
+
 console.log('--- ALL MODULE 6 RELATIONSHIPS & SOCIAL HUB TESTS PASSED PERFECTLY! ---');
