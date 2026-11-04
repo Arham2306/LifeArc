@@ -10,11 +10,11 @@ import { createId } from '../../../utils/id';
 import { pickRandom, randomInt } from '../../../utils/random';
 import { MALE_NAMES, FEMALE_NAMES, LAST_NAMES } from '../../character/data/names';
 import {
-  COMPLIMENT_LINES,
-  CONVERSATION_TOPICS,
+  CHAT_OPTIONS,
+  COMPLIMENT_OPTIONS,
   GIFT_CATALOG,
-  HANGOUT_ACTIVITIES_BY_STAGE,
-  INSULT_LINES,
+  getHangoutOptions,
+  INSULT_OPTIONS,
 } from '../data/socialInteractions';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
 
@@ -52,7 +52,8 @@ export function executeSocialAction(
   character: CharacterProfile,
   target: TargetPersonRef,
   actionType: SocialActionType,
-  giftOption?: GiftOption
+  giftOption?: GiftOption,
+  selectedOptionId?: string
 ): { character: CharacterProfile; outcome: SocialActionOutcome } {
   if (!target.isAlive) {
     return {
@@ -81,58 +82,66 @@ export function executeSocialAction(
 
   switch (actionType) {
     case 'spend_time': {
-      const activities = HANGOUT_ACTIVITIES_BY_STAGE[stage] || HANGOUT_ACTIVITIES_BY_STAGE.adulthood;
-      const activity = pickRandom(activities);
+      const hangoutOptions = getHangoutOptions(stage);
+      const option = selectedOptionId
+        ? hangoutOptions.find((o) => o.id === selectedOptionId) || hangoutOptions[0]
+        : pickRandom(hangoutOptions);
       relationshipDelta = randomInt(8, 15);
       statChanges.happiness = randomInt(4, 9);
-      headline = 'Quality Time';
-      narrative = `You spent quality time with ${target.name} and ${activity}`;
+      headline = option.title;
+      narrative = `You spent quality time with ${target.name} and ${option.activityNarrative}`;
       break;
     }
 
     case 'conversation': {
-      const topicObj = pickRandom(CONVERSATION_TOPICS);
-      const isPositive = target.relationship >= 30 || Math.random() > 0.35;
+      const option = selectedOptionId
+        ? CHAT_OPTIONS.find((o) => o.id === selectedOptionId) || CHAT_OPTIONS[0]
+        : pickRandom(CHAT_OPTIONS);
+      const isPositive = target.relationship >= 25 || Math.random() > 0.3;
       if (isPositive) {
-        relationshipDelta = randomInt(5, 12);
+        relationshipDelta = randomInt(6, 12);
         statChanges.happiness = randomInt(3, 7);
-        headline = 'Engaging Conversation';
-        narrative = `You had an enjoyable chat with ${target.name}, ${topicObj.positiveLine}`;
+        headline = option.title;
+        narrative = `You had an engaging conversation with ${target.name}, ${option.positiveLine}`;
       } else {
         success = false;
-        relationshipDelta = randomInt(-7, -2);
+        relationshipDelta = randomInt(-6, -2);
         statChanges.happiness = randomInt(-4, -1);
         headline = 'Awkward Silence';
-        narrative = `You tried talking with ${target.name} about ${topicObj.topic}, but ended up ${topicObj.awkwardLine}`;
+        narrative = `You tried talking with ${target.name} about ${option.title.toLowerCase()}, but ended up ${option.awkwardLine}`;
       }
       break;
     }
 
     case 'compliment': {
-      const compliment = pickRandom(COMPLIMENT_LINES);
-      const wellReceived = target.relationship >= 20 || Math.random() > 0.25;
+      const option = selectedOptionId
+        ? COMPLIMENT_OPTIONS.find((o) => o.id === selectedOptionId) || COMPLIMENT_OPTIONS[0]
+        : pickRandom(COMPLIMENT_OPTIONS);
+      const wellReceived = target.relationship >= 20 || Math.random() > 0.2;
       if (wellReceived) {
-        relationshipDelta = randomInt(6, 13);
+        relationshipDelta = randomInt(7, 14);
         statChanges.happiness = randomInt(3, 6);
         headline = 'Flattered!';
-        narrative = `You warmly ${compliment} ${target.name} beamed with genuine appreciation.`;
+        narrative = `You warmly ${option.complimentText} ${target.name} beamed with genuine appreciation.`;
       } else {
         success = false;
         relationshipDelta = randomInt(-3, 1);
         headline = 'Skeptical Reaction';
-        narrative = `You gave a compliment to ${target.name}, but they looked at you suspiciously and asked what you wanted.`;
+        narrative = `You complimented ${target.name} on their ${option.title.toLowerCase()}, but they looked at you suspiciously and wondered if you were mocking them.`;
       }
       break;
     }
 
     case 'insult': {
-      const insult = pickRandom(INSULT_LINES);
+      const option = selectedOptionId
+        ? INSULT_OPTIONS.find((o) => o.id === selectedOptionId) || INSULT_OPTIONS[0]
+        : pickRandom(INSULT_OPTIONS);
       relationshipDelta = randomInt(-28, -15);
       statChanges.happiness = randomInt(-6, -2);
       statChanges.karma = -5;
       success = false;
       headline = 'Heated Clash!';
-      narrative = `You confronted ${target.name} and ${insult} Things became intensely bitter between you two.`;
+      narrative = `You confronted ${target.name} and ${option.insultText} Things became intensely bitter between you two.`;
       break;
     }
 

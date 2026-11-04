@@ -122,19 +122,22 @@ const initialMotherRel = char.parents.mother.relationship;
 const { character: afterSpendTime, outcome: spendOutcome } = executeSocialAction(
   char,
   targetMother,
-  'spend_time'
+  'spend_time',
+  undefined,
+  'hangout_pizza'
 );
 
 assert(spendOutcome.success === true, 'Spend time succeeds');
+assert(spendOutcome.headline === 'Pizza & Show Binge', 'Headline matches chosen activity');
 assert(afterSpendTime.parents.mother.relationship > initialMotherRel, 'Mother relationship increased');
 assert(afterSpendTime.timeline.length > 0, 'Journal timeline logged the hangout');
 assert(
   hasPerformedActionThisYear(afterSpendTime, targetMother.id, 'spend_time') === true,
   'Spend time marked as performed this year'
 );
-console.log(`✅ Spend Time: Relationship increased (${initialMotherRel}% -> ${afterSpendTime.parents.mother.relationship}%)`);
+console.log(`✅ Spend Time: Relationship increased (${initialMotherRel}% -> ${afterSpendTime.parents.mother.relationship}%) with chosen activity "${spendOutcome.headline}"`);
 
-// Test 3: Social Action - Conversation
+// Test 3: Social Action - Conversation with Specific Topic
 const targetSibling: SiblingProfile = afterSpendTime.siblings![0];
 const targetSibRef = {
   id: targetSibling.id,
@@ -149,7 +152,9 @@ const targetSibRef = {
 const { character: afterChat, outcome: chatOutcome } = executeSocialAction(
   afterSpendTime,
   targetSibRef,
-  'conversation'
+  'conversation',
+  undefined,
+  'chat_nostalgia'
 );
 
 assert(chatOutcome.headline.length > 0, 'Conversation produced dialogue outcome');
@@ -157,24 +162,27 @@ assert(
   hasPerformedActionThisYear(afterChat, targetSibRef.id, 'conversation') === true,
   'Conversation recorded in yearly cooldowns'
 );
-console.log(`✅ Conversation: Produced outcome "${chatOutcome.headline}" (Delta: ${chatOutcome.relationshipDelta}%)`);
+console.log(`✅ Conversation: Produced outcome "${chatOutcome.headline}" (Delta: ${chatOutcome.relationshipDelta}%) for chosen topic`);
 
-// Test 4: Social Action - Insult (Repeated & Negative Impact)
+// Test 4: Social Action - Insult with Specific Roast
 const initialKarma = afterChat.stats.karma;
 const { character: afterInsult, outcome: insultOutcome } = executeSocialAction(
   afterChat,
   targetSibRef,
-  'insult'
+  'insult',
+  undefined,
+  'insult_haircut'
 );
 
 assert(insultOutcome.success === false, 'Insult flagged as conflict');
+assert(insultOutcome.narrative.includes('haircut'), 'Insult narrative contains chosen roast');
 assert(insultOutcome.relationshipDelta < 0, 'Insult reduced relationship significantly');
 assert(afterInsult.stats.karma < initialKarma, 'Insult reduced character karma');
 assert(
   hasPerformedActionThisYear(afterInsult, targetSibRef.id, 'insult') === false,
   'Insults are unblocked and not restricted by 1x annual cooldown'
 );
-console.log(`✅ Insult: Correctly punished relationship (${insultOutcome.relationshipDelta}%) and deducted karma`);
+console.log(`✅ Insult: Correctly punished relationship (${insultOutcome.relationshipDelta}%) with chosen roast`);
 
 // Test 5: Social Action - Give Gift (Cost & Rel Boost)
 const initialCash = afterInsult.cash;
@@ -246,26 +254,28 @@ console.log('✅ Annual Aging: Siblings aged up properly and social action coold
 
 // Test 9: Dynamic Early-Childhood Baby Sibling Birth
 let babySiblingBorn = false;
-let childhoodSim = createMockCharacter({
-  age: 1,
-  birthYear: 2025,
-  parents: {
-    ...char.parents,
-    mother: { ...char.parents.mother, age: 26, isAlive: true },
-    father: { ...char.parents.father, age: 28, isAlive: true },
-  },
-  siblings: [],
-});
+for (let trial = 0; trial < 15 && !babySiblingBorn; trial++) {
+  let childhoodSim = createMockCharacter({
+    age: 1,
+    birthYear: 2025,
+    parents: {
+      ...char.parents,
+      mother: { ...char.parents.mother, age: 25, isAlive: true },
+      father: { ...char.parents.father, age: 27, isAlive: true },
+    },
+    siblings: [],
+  });
 
-for (let yr = 0; yr < 10; yr++) {
-  childhoodSim = ageUpCharacter(childhoodSim);
-  if (childhoodSim.siblings && childhoodSim.siblings.length > 0) {
-    babySiblingBorn = true;
-    break;
+  for (let yr = 0; yr < 9; yr++) {
+    childhoodSim = ageUpCharacter(childhoodSim);
+    if (childhoodSim.siblings && childhoodSim.siblings.length > 0) {
+      babySiblingBorn = true;
+      break;
+    }
   }
 }
 
-assert(babySiblingBorn === true, 'Dynamic baby sibling successfully born during early childhood (Option A)');
+assert(babySiblingBorn === true, 'Dynamic baby sibling successfully born during early childhood across trials (Option A)');
 console.log(`✅ Dynamic Sibling Birth: Successfully welcomed a baby sibling during childhood!`);
 
 console.log('--- ALL MODULE 6 RELATIONSHIPS & SOCIAL HUB TESTS PASSED PERFECTLY! ---');

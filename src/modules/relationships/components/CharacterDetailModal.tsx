@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   MessageCircle,
   Sparkles,
@@ -8,6 +8,8 @@ import {
   Flame,
   CheckCircle2,
   XCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { CartoonButton } from '../../../components/ui/CartoonButton';
@@ -15,7 +17,13 @@ import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import type { CharacterProfile } from '../../../types/game';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
-import { GIFT_CATALOG } from '../data/socialInteractions';
+import {
+  CHAT_OPTIONS,
+  COMPLIMENT_OPTIONS,
+  GIFT_CATALOG,
+  getHangoutOptions,
+  INSULT_OPTIONS,
+} from '../data/socialInteractions';
 import {
   executeSocialAction,
   hasPerformedActionThisYear,
@@ -37,39 +45,84 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   target,
   onUpdateCharacter,
 }) => {
-  const [showGiftPicker, setShowGiftPicker] = useState(false);
+  const [activeDrawer, setActiveDrawer] = useState<SocialActionType | null>(null);
   const [lastOutcome, setLastOutcome] = useState<SocialActionOutcome | null>(null);
 
-  if (!target) return null;
+  // Derive target's live metrics in real-time from active character state
+  const liveTarget: TargetPersonRef | null = useMemo(() => {
+    if (!target) return null;
+    if (target.type === 'parent') {
+      const isFather = target.id === character.parents.father.id;
+      const p = isFather ? character.parents.father : character.parents.mother;
+      return {
+        ...target,
+        relationship: p.relationship,
+        generosity: p.generosity,
+        isAlive: p.isAlive,
+        age: p.age,
+      };
+    }
+    if (target.type === 'sibling') {
+      const sib = (character.siblings || []).find((s) => s.id === target.id);
+      return sib
+        ? {
+            ...target,
+            relationship: sib.relationship,
+            isAlive: sib.isAlive,
+            age: sib.age,
+          }
+        : target;
+    }
+    const friend = (character.relationships || []).find((r) => r.id === target.id);
+    return friend
+      ? {
+          ...target,
+          relationship: friend.relationship,
+          age: friend.age,
+        }
+      : target;
+  }, [character, target]);
 
-  const handleAction = (actionType: SocialActionType, gift?: GiftOption) => {
+  if (!liveTarget) return null;
+
+  const stage =
+    character.age <= 12 ? 'childhood' : character.age <= 17 ? 'teens' : 'adulthood';
+
+  const handleAction = (
+    actionType: SocialActionType,
+    gift?: GiftOption,
+    selectedOptionId?: string
+  ) => {
     const { character: updated, outcome } = executeSocialAction(
       character,
-      target,
+      liveTarget,
       actionType,
-      gift
+      gift,
+      selectedOptionId
     );
     onUpdateCharacter(updated);
     setLastOutcome(outcome);
-    setShowGiftPicker(false);
+    setActiveDrawer(null);
   };
 
-  const isDeceased = !target.isAlive;
-  const spentTimeDone = hasPerformedActionThisYear(character, target.id, 'spend_time');
-  const chatDone = hasPerformedActionThisYear(character, target.id, 'conversation');
-  const complimentDone = hasPerformedActionThisYear(character, target.id, 'compliment');
-  const giftDone = hasPerformedActionThisYear(character, target.id, 'give_gift');
-  const askMoneyDone = hasPerformedActionThisYear(character, target.id, 'ask_money');
+  const isDeceased = !liveTarget.isAlive;
+  const spentTimeDone = hasPerformedActionThisYear(character, liveTarget.id, 'spend_time');
+  const chatDone = hasPerformedActionThisYear(character, liveTarget.id, 'conversation');
+  const complimentDone = hasPerformedActionThisYear(character, liveTarget.id, 'compliment');
+  const giftDone = hasPerformedActionThisYear(character, liveTarget.id, 'give_gift');
+  const askMoneyDone = hasPerformedActionThisYear(character, liveTarget.id, 'ask_money');
+
+  const hangoutOptions = getHangoutOptions(stage);
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={() => {
         setLastOutcome(null);
-        setShowGiftPicker(false);
+        setActiveDrawer(null);
         onClose();
       }}
-      title={target.name}
+      title={liveTarget.name}
       icon="👤"
     >
       <div className="flex flex-col gap-3.5 max-h-[75vh] overflow-y-auto pr-0.5">
@@ -78,11 +131,11 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-2xl border-2 border-slate-900 bg-white flex items-center justify-center text-2xl shadow-[1.5px_1.5px_0_#0f172a]">
-                {isDeceased ? '🪦' : target.type === 'parent' ? '👨‍👩‍👧' : '🧑'}
+                {isDeceased ? '🪦' : liveTarget.type === 'parent' ? '👨‍👩‍👧' : '🧑'}
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm font-black text-slate-950">{target.name}</h3>
+                  <h3 className="text-sm font-black text-slate-950">{liveTarget.name}</h3>
                   {isDeceased && (
                     <Badge variant="rose" size="xs">
                       Deceased
@@ -90,39 +143,41 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                   )}
                 </div>
                 <span className="text-[11px] font-bold text-slate-600">
-                  {target.role} • Age {target.age}
+                  {liveTarget.role} • Age {liveTarget.age}
                 </span>
               </div>
             </div>
 
             <Badge variant="slate" size="xs">
-              {target.type.toUpperCase()}
+              {liveTarget.type.toUpperCase()}
             </Badge>
           </div>
 
-          {/* Relationship Gauge */}
+          {/* Real-Time Relationship Gauge */}
           <div className="flex flex-col gap-1 pt-1 border-t border-slate-200">
             <div className="flex items-center justify-between text-[11px] font-black">
               <span className="text-slate-600 flex items-center gap-1">
                 <Heart className="w-3 h-3 text-rose-500 fill-rose-500" />
                 <span>Relationship</span>
               </span>
-              <span className="text-slate-950 font-mono">{target.relationship}%</span>
+              <span className="text-slate-950 font-mono transition-all duration-300">
+                {liveTarget.relationship}%
+              </span>
             </div>
-            <ProgressBar value={target.relationship} color="emerald" size="sm" />
+            <ProgressBar value={liveTarget.relationship} color="emerald" size="sm" />
           </div>
 
           {/* Generosity Gauge (if parent) */}
-          {target.generosity !== undefined && !isDeceased && (
+          {liveTarget.generosity !== undefined && !isDeceased && (
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between text-[11px] font-black">
                 <span className="text-slate-600 flex items-center gap-1">
                   <DollarSign className="w-3 h-3 text-amber-500" />
                   <span>Generosity</span>
                 </span>
-                <span className="text-slate-950 font-mono">{target.generosity}%</span>
+                <span className="text-slate-950 font-mono">{liveTarget.generosity}%</span>
               </div>
-              <ProgressBar value={target.generosity} color="amber" size="xs" />
+              <ProgressBar value={liveTarget.generosity} color="amber" size="xs" />
             </div>
           )}
         </div>
@@ -130,7 +185,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
         {/* Outcome Alert Toast */}
         {lastOutcome && (
           <div
-            className={`rounded-2xl border-2 border-slate-900 p-3 flex flex-col gap-1 shadow-[2px_2px_0_#0f172a] ${
+            className={`rounded-2xl border-2 border-slate-900 p-3 flex flex-col gap-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-200 ${
               lastOutcome.success ? 'bg-emerald-50' : 'bg-rose-50'
             }`}
           >
@@ -171,95 +226,152 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               {/* 1. Spend Time */}
               <button
                 type="button"
-                onClick={() => handleAction('spend_time')}
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'spend_time' ? null : 'spend_time')
+                }
                 disabled={spentTimeDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   spentTimeDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                    : activeDrawer === 'spend_time'
+                    ? 'bg-amber-100 ring-2 ring-amber-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-amber-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Spend Time</div>
-                  <span className="text-sm">⏳</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm">⏳</span>
+                    {activeDrawer === 'spend_time' ? (
+                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
-                  {spentTimeDone ? 'Already hung out this year' : 'Hang out & build bond'}
+                  {spentTimeDone ? 'Already hung out this year' : 'Choose activity & bond'}
                 </div>
               </button>
 
               {/* 2. Conversation */}
               <button
                 type="button"
-                onClick={() => handleAction('conversation')}
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'conversation' ? null : 'conversation')
+                }
                 disabled={chatDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   chatDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                    : activeDrawer === 'conversation'
+                    ? 'bg-sky-100 ring-2 ring-sky-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-sky-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Chat</div>
-                  <MessageCircle className="w-3.5 h-3.5 text-sky-600 stroke-[2.5]" />
+                  <div className="flex items-center gap-1">
+                    <MessageCircle className="w-3.5 h-3.5 text-sky-600 stroke-[2.5]" />
+                    {activeDrawer === 'conversation' ? (
+                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
-                  {chatDone ? 'Already chatted this year' : 'Deep dialogue & gossip'}
+                  {chatDone ? 'Already chatted this year' : 'Pick dialogue topic'}
                 </div>
               </button>
 
               {/* 3. Compliment */}
               <button
                 type="button"
-                onClick={() => handleAction('compliment')}
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'compliment' ? null : 'compliment')
+                }
                 disabled={complimentDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   complimentDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                    : activeDrawer === 'compliment'
+                    ? 'bg-emerald-100 ring-2 ring-emerald-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-emerald-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Compliment</div>
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500 stroke-[2.5]" />
+                  <div className="flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500 stroke-[2.5]" />
+                    {activeDrawer === 'compliment' ? (
+                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
-                  {complimentDone ? 'Already complimented' : 'Warm praise & flattery'}
+                  {complimentDone ? 'Already complimented' : 'Select flattery style'}
                 </div>
               </button>
 
               {/* 4. Insult */}
               <button
                 type="button"
-                onClick={() => handleAction('insult')}
-                className="p-2.5 rounded-2xl border-2 border-slate-900 text-left bg-white hover:bg-rose-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5"
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'insult' ? null : 'insult')
+                }
+                className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
+                  activeDrawer === 'insult'
+                    ? 'bg-rose-100 ring-2 ring-rose-500 shadow-[1.5px_2px_0_#0f172a]'
+                    : 'bg-white hover:bg-rose-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-rose-950">Insult</div>
-                  <Flame className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
+                  <div className="flex items-center gap-1">
+                    <Flame className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
+                    {activeDrawer === 'insult' ? (
+                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
-                  Pick a fight (-Rel, -Karma)
+                  Select roast & provoke
                 </div>
               </button>
 
               {/* 5. Give Gift */}
               <button
                 type="button"
-                onClick={() => setShowGiftPicker(!showGiftPicker)}
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'give_gift' ? null : 'give_gift')
+                }
                 disabled={giftDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   giftDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                    : activeDrawer === 'give_gift'
+                    ? 'bg-purple-100 ring-2 ring-purple-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-purple-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Give Gift</div>
-                  <Gift className="w-3.5 h-3.5 text-purple-600 stroke-[2.5]" />
+                  <div className="flex items-center gap-1">
+                    <Gift className="w-3.5 h-3.5 text-purple-600 stroke-[2.5]" />
+                    {activeDrawer === 'give_gift' ? (
+                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
-                  {giftDone ? 'Gift sent this year' : 'Surprise with a present'}
+                  {giftDone ? 'Gift sent this year' : 'Choose gift from catalog'}
                 </div>
               </button>
 
@@ -267,9 +379,9 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleAction('ask_money')}
-                disabled={askMoneyDone || (target.type !== 'parent' && target.relationship < 80)}
+                disabled={askMoneyDone || (liveTarget.type !== 'parent' && liveTarget.relationship < 80)}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
-                  askMoneyDone || (target.type !== 'parent' && target.relationship < 80)
+                  askMoneyDone || (liveTarget.type !== 'parent' && liveTarget.relationship < 80)
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
                     : 'bg-white hover:bg-emerald-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
@@ -281,18 +393,163 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                 <div className="text-[10px] font-bold text-slate-500">
                   {askMoneyDone
                     ? 'Already asked this year'
-                    : target.type === 'parent'
+                    : liveTarget.type === 'parent'
                     ? 'Request allowance/cash'
                     : 'Requires 80%+ bond'}
                 </div>
               </button>
             </div>
 
-            {/* Gift Picker Drawer */}
-            {showGiftPicker && !giftDone && (
-              <div className="rounded-2xl border-2 border-slate-900 bg-purple-50/70 p-3 flex flex-col gap-2 mt-1">
-                <span className="text-xs font-black text-purple-950">
-                  Select a Gift to Present:
+            {/* EXPANDED INTERACTIVE OPTION DRAWERS */}
+
+            {/* A. Spend Time Activity Picker */}
+            {activeDrawer === 'spend_time' && !spentTimeDone && (
+              <div className="rounded-2xl border-2 border-slate-900 bg-amber-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
+                <span className="text-xs font-black text-amber-950 flex items-center justify-between">
+                  <span>Choose an Activity to Do Together:</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDrawer(null)}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {hangoutOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleAction('spend_time', undefined, opt.id)}
+                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-amber-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
+                    >
+                      <span className="text-lg">{opt.icon}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-slate-950">{opt.title}</span>
+                        <span className="text-[10px] font-bold text-slate-600">
+                          {opt.description}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* B. Conversation Topic Picker */}
+            {activeDrawer === 'conversation' && !chatDone && (
+              <div className="rounded-2xl border-2 border-slate-900 bg-sky-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
+                <span className="text-xs font-black text-sky-950 flex items-center justify-between">
+                  <span>Choose a Topic to Discuss:</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDrawer(null)}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {CHAT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleAction('conversation', undefined, opt.id)}
+                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-sky-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
+                    >
+                      <span className="text-lg">{opt.icon}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-slate-950">{opt.title}</span>
+                        <span className="text-[10px] font-bold text-slate-600">
+                          {opt.description}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* C. Compliment Style Picker */}
+            {activeDrawer === 'compliment' && !complimentDone && (
+              <div className="rounded-2xl border-2 border-slate-900 bg-emerald-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
+                <span className="text-xs font-black text-emerald-950 flex items-center justify-between">
+                  <span>Choose a Compliment to Give:</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDrawer(null)}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {COMPLIMENT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleAction('compliment', undefined, opt.id)}
+                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-emerald-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
+                    >
+                      <span className="text-lg">{opt.icon}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-slate-950">{opt.title}</span>
+                        <span className="text-[10px] font-bold text-slate-600">
+                          {opt.description}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* D. Insult / Roast Picker */}
+            {activeDrawer === 'insult' && (
+              <div className="rounded-2xl border-2 border-slate-900 bg-rose-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
+                <span className="text-xs font-black text-rose-950 flex items-center justify-between">
+                  <span>Choose an Insult / Roast:</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDrawer(null)}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {INSULT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => handleAction('insult', undefined, opt.id)}
+                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-rose-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
+                    >
+                      <span className="text-lg">{opt.icon}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-rose-950">{opt.title}</span>
+                        <span className="text-[10px] font-bold text-slate-600">
+                          {opt.description}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* E. Gift Picker Drawer */}
+            {activeDrawer === 'give_gift' && !giftDone && (
+              <div className="rounded-2xl border-2 border-slate-900 bg-purple-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
+                <span className="text-xs font-black text-purple-950 flex items-center justify-between">
+                  <span>Select a Gift to Present:</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDrawer(null)}
+                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                  >
+                    Cancel
+                  </button>
                 </span>
                 <div className="flex flex-col gap-1.5">
                   {GIFT_CATALOG.map((g) => {
@@ -309,7 +566,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                             : 'bg-slate-100 opacity-50 cursor-not-allowed'
                         }`}
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                           <span className="text-lg">{g.icon}</span>
                           <div className="flex flex-col">
                             <span className="text-xs font-black text-slate-900">{g.name}</span>
@@ -333,7 +590,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             <span className="text-2xl">🕊️</span>
             <span className="text-xs font-black text-slate-700">Resting in Peace</span>
             <p className="text-[11px] font-bold text-slate-500">
-              {target.name} lived a full life. You hold cherished memories together.
+              {liveTarget.name} lived a full life. You hold cherished memories together.
             </p>
           </div>
         )}
@@ -345,7 +602,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             fullWidth
             onClick={() => {
               setLastOutcome(null);
-              setShowGiftPicker(false);
+              setActiveDrawer(null);
               onClose();
             }}
           >

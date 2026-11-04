@@ -10,6 +10,13 @@ export type SocialActionType =
 
 export type GiftTier = 'handmade' | 'thoughtful' | 'luxury' | 'lavish';
 
+export interface InteractiveOption {
+  id: string;
+  title: string;
+  icon: string;
+  description: string;
+}
+
 export interface GiftOption {
   id: string;
   name: string;
@@ -43,3 +50,4 @@ export interface ProspectiveFriend {
   avatarEmoji?: string;
   initialRelationship: number;
 }
+
