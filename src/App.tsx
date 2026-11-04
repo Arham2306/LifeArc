@@ -20,6 +20,7 @@ import { BusinessScreen } from './modules/business/components/BusinessScreen'
 import { FiscalYearReportModal } from './modules/business/components/FiscalYearReportModal'
 import { MenuScreen } from './components/layout/MenuScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
+import { RomanceScreen } from './modules/romance/components/RomanceScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
 import type { SchoolMilestoneNotice } from './modules/education/types'
@@ -43,7 +44,7 @@ export default function App() {
   const [isUniversityModalOpen, setIsUniversityModalOpen] = useState(false)
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance'>('hub')
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
     setActiveCharacter(newCharacter)
@@ -256,10 +257,18 @@ export default function App() {
                   onUpdateCharacter={setActiveCharacter}
                   onBackToMenu={() => setMenuView('hub')}
                 />
+              ) : menuView === 'romance' ? (
+                <RomanceScreen
+                  character={activeCharacter}
+                  onUpdateCharacter={setActiveCharacter}
+                  onBackToMenu={() => setMenuView('hub')}
+                  onOpenRelationships={() => setMenuView('relationships')}
+                />
               ) : (
                 <MenuScreen
                   character={activeCharacter}
                   onOpenRelationships={() => setMenuView('relationships')}
+                  onOpenRomance={() => setMenuView('romance')}
                 />
               )
             )}

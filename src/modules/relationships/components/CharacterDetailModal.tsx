@@ -10,12 +10,19 @@ import {
   XCircle,
   ChevronDown,
   ChevronUp,
+  Wine,
 } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
 import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
-import type { CharacterProfile } from '../../../types/game';
+import { DualMeterDisplay } from '../../romance/components/DualMeterDisplay';
+import { FlirtModal } from '../../romance/components/FlirtModal';
+import { DatePlannerModal } from '../../romance/components/DatePlannerModal';
+import { AskOutModal } from '../../romance/components/AskOutModal';
+import { romanceService } from '../../romance/services/romanceService';
+import type { FlirtOption, DateVenue } from '../../romance/types';
+import type { CharacterProfile, PersonProfile } from '../../../types/game';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
 import {
   CHAT_OPTIONS,
@@ -47,6 +54,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
 }) => {
   const [activeDrawer, setActiveDrawer] = useState<SocialActionType | null>(null);
   const [lastOutcome, setLastOutcome] = useState<SocialActionOutcome | null>(null);
+  const [romanceModal, setRomanceModal] = useState<'flirt' | 'date' | 'ask_out' | null>(null);
 
   // Derive target's live metrics in real-time from active character state
   const liveTarget: TargetPersonRef | null = useMemo(() => {
@@ -79,9 +87,18 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           ...target,
           relationship: friend.relationship,
           age: friend.age,
+          gender: friend.gender,
+          romanceUnlocked: friend.romanceUnlocked,
+          romanceMeter: friend.romanceMeter,
+          romanticStage: friend.romanticStage,
         }
       : target;
   }, [character, target]);
+
+  const friendTarget: PersonProfile | undefined = useMemo(() => {
+    if (liveTarget?.type !== 'friend') return undefined;
+    return (character.relationships || []).find((r) => r.id === liveTarget.id);
+  }, [character, liveTarget]);
 
   if (!liveTarget) return null;
 
@@ -103,6 +120,115 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
     onUpdateCharacter(updated);
     setLastOutcome(outcome);
     setActiveDrawer(null);
+  };
+
+  const handleSparkRomance = () => {
+    if (!friendTarget) return;
+    const sparked = romanceService.sparkRomance(friendTarget);
+    const updatedRel = (character.relationships || []).map((r) =>
+      r.id === sparked.id ? sparked : r
+    );
+    onUpdateCharacter({
+      ...character,
+      relationships: updatedRel,
+    });
+    setLastOutcome({
+      actionType: 'spend_time',
+      targetName: friendTarget.firstName,
+      success: true,
+      headline: 'Romantic Chemistry Sparked! 💖',
+      narrative: `You shared a lingering, electric moment with ${friendTarget.firstName}. Your Love / Romance meter is now unlocked!`,
+      relationshipDelta: 5,
+      statEffects: {},
+    });
+  };
+
+  const handleFlirt = (flirt: FlirtOption) => {
+    if (!friendTarget) return;
+    const { updatedTarget, result } = romanceService.executeFlirt(character, friendTarget, flirt);
+    const updatedRel = (character.relationships || []).map((r) =>
+      r.id === updatedTarget.id ? updatedTarget : r
+    );
+    const updatedChar: CharacterProfile = {
+      ...character,
+      relationships: updatedRel,
+      partner: character.partner?.id === updatedTarget.id ? updatedTarget : character.partner,
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
+      },
+    };
+    onUpdateCharacter(updatedChar);
+    setRomanceModal(null);
+    setLastOutcome({
+      actionType: 'spend_time',
+      targetName: friendTarget.firstName,
+      success: result.success,
+      headline: result.success ? 'Smooth Flirting! ✨' : 'Flirt Missed 🙈',
+      narrative: result.message,
+      relationshipDelta: result.relationshipDelta,
+      statEffects: { happiness: result.happinessDelta },
+    });
+  };
+
+  const handleDate = (venue: DateVenue) => {
+    if (!friendTarget) return;
+    const { updatedTarget, result } = romanceService.executeDate(character, friendTarget, venue);
+    if (!result.success && result.relationshipDelta === 0) {
+      return;
+    }
+    const updatedRel = (character.relationships || []).map((r) =>
+      r.id === updatedTarget.id ? updatedTarget : r
+    );
+    const updatedChar: CharacterProfile = {
+      ...character,
+      cash: character.cash + (result.cashDelta ?? 0),
+      relationships: updatedRel,
+      partner: character.partner?.id === updatedTarget.id ? updatedTarget : character.partner,
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
+      },
+    };
+    onUpdateCharacter(updatedChar);
+    setRomanceModal(null);
+    setLastOutcome({
+      actionType: 'spend_time',
+      targetName: friendTarget.firstName,
+      success: result.success,
+      headline: result.success ? 'Romantic Date Success! 🥂' : 'Date Drama! 💥',
+      narrative: result.message,
+      relationshipDelta: result.relationshipDelta,
+      statEffects: { happiness: result.happinessDelta, cash: result.cashDelta },
+    });
+  };
+
+  const handleAskOut = () => {
+    if (!friendTarget) return;
+    const { updatedTarget, result } = romanceService.executeAskOut(character, friendTarget);
+    const updatedRel = (character.relationships || []).map((r) =>
+      r.id === updatedTarget.id ? updatedTarget : r
+    );
+    const updatedChar: CharacterProfile = {
+      ...character,
+      relationships: updatedRel,
+      partner: result.success ? updatedTarget : character.partner,
+      stats: {
+        ...character.stats,
+        happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
+      },
+    };
+    onUpdateCharacter(updatedChar);
+    setRomanceModal(null);
+    setLastOutcome({
+      actionType: 'spend_time',
+      targetName: friendTarget.firstName,
+      success: result.success,
+      headline: result.success ? 'Official Couple! ❤️🎉' : 'Not Quite Yet... 💔',
+      narrative: result.message,
+      relationshipDelta: result.relationshipDelta,
+      statEffects: { happiness: result.happinessDelta },
+    });
   };
 
   const isDeceased = !liveTarget.isAlive;
@@ -153,19 +279,27 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             </Badge>
           </div>
 
-          {/* Real-Time Relationship Gauge */}
-          <div className="flex flex-col gap-1 pt-1 border-t border-slate-200">
-            <div className="flex items-center justify-between text-[11px] font-black">
-              <span className="text-slate-600 flex items-center gap-1">
-                <Heart className="w-3 h-3 text-rose-500 fill-rose-500" />
-                <span>Relationship</span>
-              </span>
-              <span className="text-slate-950 font-mono transition-all duration-300">
-                {liveTarget.relationship}%
-              </span>
+          {/* Real-Time Relationship Gauge & Romance Dual Meter */}
+          {liveTarget.romanceUnlocked ? (
+            <DualMeterDisplay
+              relationship={liveTarget.relationship}
+              romanceMeter={liveTarget.romanceMeter ?? 20}
+              romanceUnlocked={true}
+            />
+          ) : (
+            <div className="flex flex-col gap-1 pt-1 border-t border-slate-200">
+              <div className="flex items-center justify-between text-[11px] font-black">
+                <span className="text-slate-600 flex items-center gap-1">
+                  <Heart className="w-3 h-3 text-rose-500 fill-rose-500" />
+                  <span>Relationship</span>
+                </span>
+                <span className="text-slate-950 font-mono transition-all duration-300">
+                  {liveTarget.relationship}%
+                </span>
+              </div>
+              <ProgressBar value={liveTarget.relationship} color="emerald" size="sm" />
             </div>
-            <ProgressBar value={liveTarget.relationship} color="emerald" size="sm" />
-          </div>
+          )}
 
           {/* Generosity Gauge (if parent) */}
           {liveTarget.generosity !== undefined && !isDeceased && (
@@ -584,6 +718,75 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Spark Romance Banner */}
+            {liveTarget.type === 'friend' && character.age >= 13 && liveTarget.relationship >= 60 && !liveTarget.romanceUnlocked && (
+              <div className="p-3 bg-rose-50 border-2 border-slate-900 rounded-2xl flex items-center justify-between shadow-[2px_2px_0_#0f172a] mt-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">💖</span>
+                  <div>
+                    <span className="text-xs font-black text-rose-950 block">Romantic Spark Available</span>
+                    <span className="text-[10px] font-bold text-slate-600 block">Your bond is strong enough to explore romance!</span>
+                  </div>
+                </div>
+                <CartoonButton variant="rose" size="sm" onClick={handleSparkRomance}>
+                  Spark Romance ✨
+                </CartoonButton>
+              </div>
+            )}
+
+            {/* Romance Actions if unlocked */}
+            {liveTarget.type === 'friend' && liveTarget.romanceUnlocked && (
+              <div className="flex flex-col gap-2 pt-2 border-t-2 border-rose-200 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-rose-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                    <span>Romance Actions</span>
+                  </span>
+                  <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300">
+                    {liveTarget.romanticStage?.toUpperCase() || 'FLIRTING'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRomanceModal('flirt')}
+                    className="p-2.5 rounded-2xl border-2 border-slate-900 bg-white hover:bg-rose-50 text-left transition-all shadow-[1.5px_2px_0_#0f172a] cursor-pointer flex items-center justify-between"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-xs font-black text-slate-950">Flirt</span>
+                      <span className="text-[10px] font-bold text-slate-500">Test chemistry</span>
+                    </div>
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRomanceModal('date')}
+                    className="p-2.5 rounded-2xl border-2 border-slate-900 bg-white hover:bg-rose-50 text-left transition-all shadow-[1.5px_2px_0_#0f172a] cursor-pointer flex items-center justify-between"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-xs font-black text-slate-950">Plan Date</span>
+                      <span className="text-[10px] font-bold text-slate-500">Choose venue</span>
+                    </div>
+                    <Wine className="w-4 h-4 text-rose-500" />
+                  </button>
+                </div>
+
+                {/* Milestone button: Ask Out */}
+                {liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (
+                  <button
+                    type="button"
+                    onClick={() => setRomanceModal('ask_out')}
+                    className="w-full p-2.5 rounded-2xl border-2 border-slate-900 bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Heart className="w-4 h-4 fill-white" />
+                    Ask to Become Official Partners
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-4 rounded-2xl bg-slate-100 border-2 border-slate-300 text-center flex flex-col items-center gap-1.5">
@@ -610,6 +813,35 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           </CartoonButton>
         </div>
       </div>
+
+      {/* Romance Submodals */}
+      {romanceModal === 'flirt' && friendTarget && (
+        <FlirtModal
+          isOpen={true}
+          onClose={() => setRomanceModal(null)}
+          target={friendTarget}
+          onSelectFlirt={handleFlirt}
+        />
+      )}
+
+      {romanceModal === 'date' && friendTarget && (
+        <DatePlannerModal
+          isOpen={true}
+          onClose={() => setRomanceModal(null)}
+          target={friendTarget}
+          playerCash={character.cash}
+          onSelectVenue={handleDate}
+        />
+      )}
+
+      {romanceModal === 'ask_out' && friendTarget && (
+        <AskOutModal
+          isOpen={true}
+          onClose={() => setRomanceModal(null)}
+          target={friendTarget}
+          onConfirmAskOut={handleAskOut}
+        />
+      )}
     </Modal>
   );
 };

@@ -1,8 +1,9 @@
-import type { CharacterProfile, LifeEvent, SiblingProfile, StatEffects } from '../../../types/game'
+import type { CharacterProfile, ChildProfile, LifeEvent, SiblingProfile, StatEffects } from '../../../types/game'
 import { applyEffects } from '../../character/services/statService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
+import { reproductionService } from '../../romance/services/reproductionService'
 import { getSiblingOccupation } from '../../character/services/familyService'
 import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names'
 import type { ActiveBusinessProfile } from '../../business/types'
@@ -162,11 +163,85 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     griefHappinessDelta -= 25;
   }
 
+  // Age up active partner alongside player and collect spouse salary contribution
+  let spouseCashContribution = 0;
+  let updatedPartner = character.partner ? { ...character.partner } : null;
+
+  if (updatedPartner) {
+    const nextPartnerAge = updatedPartner.age + 1;
+    const yearsTogether = (updatedPartner.partnerStats?.yearsTogether ?? 0) + 1;
+    const isMarried = updatedPartner.romanticStage === 'married';
+
+    if (isMarried) {
+      const spouseSalary = updatedPartner.partnerStats?.annualIncome ?? 42000;
+      spouseCashContribution = Math.floor(spouseSalary * 0.2); // 20% household contribution
+    }
+
+    updatedPartner = {
+      ...updatedPartner,
+      age: nextPartnerAge,
+      partnerStats: {
+        ...(updatedPartner.partnerStats || {
+          craziness: 30,
+          generosity: 50,
+          looks: 60,
+          smarts: 60,
+          fertility: 50,
+        }),
+        yearsTogether,
+      },
+    };
+  }
+
   // Age up friends, partners, and coworkers alongside player
-  const updatedRelationships = (character.relationships || []).map((rel) => ({
-    ...rel,
-    age: rel.age + 1,
-  }));
+  const updatedRelationships = (character.relationships || []).map((rel) => {
+    if (updatedPartner && rel.id === updatedPartner.id) {
+      return updatedPartner;
+    }
+    return {
+      ...rel,
+      age: rel.age + 1,
+    };
+  });
+
+  // Pregnancy resolution (Childbirth upon age up)
+  const babyChildBirthEvents: LifeEvent[] = [];
+  let updatedChildren: ChildProfile[] = (character.children || []).map((child) => {
+    const nextChildAge = child.age + 1;
+    let occupation = child.occupation;
+    if (nextChildAge <= 1) occupation = 'Infant';
+    else if (nextChildAge <= 4) occupation = 'Toddler';
+    else if (nextChildAge <= 10) occupation = 'Elementary Student';
+    else if (nextChildAge <= 13) occupation = 'Middle School Student';
+    else if (nextChildAge <= 17) occupation = 'High School Student';
+    else if (occupation === 'High School Student') occupation = 'Employed';
+
+    return {
+      ...child,
+      age: nextChildAge,
+      occupation,
+    };
+  });
+
+  let childBirthHappinessDelta = 0;
+  let isPregnantResolved = false;
+
+  if (character.isPregnant) {
+    const newborn = reproductionService.generateBaby(character, updatedPartner || undefined);
+    updatedChildren = [...updatedChildren, newborn];
+    childBirthHappinessDelta += 25;
+    isPregnantResolved = true;
+
+    babyChildBirthEvents.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: 'Baby Born! 👶',
+      message: `You welcomed a beautiful newborn ${newborn.gender === 'female' ? 'daughter' : 'son'}, ${newborn.firstName} ${newborn.lastName}, into the world! Welcome to parenthood! 🍼✨`,
+      category: 'milestone',
+      icon: '👶',
+    });
+  }
 
   // Age up siblings alongside player
   let updatedSiblings = (character.siblings || []).map((sib) => {
@@ -250,12 +325,13 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       (eduEffects.happiness ?? 0) +
       (careerProgress.statEffects?.happiness ?? 0) +
       griefHappinessDelta +
-      babyHappinessDelta,
+      babyHappinessDelta +
+      childBirthHappinessDelta,
     health: (yearlyChanges.health ?? 0) + (eduEffects.health ?? 0),
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
     looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
     parents: eduEffects.parents,
-    cash: (careerProgress.netPayEarned || 0) + businessPayout,
+    cash: (careerProgress.netPayEarned || 0) + businessPayout + spouseCashContribution,
   };
 
   const { character: aged } = applyEffects(
@@ -272,6 +348,9 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       parents: updatedParents,
       siblings: updatedSiblings,
       relationships: updatedRelationships,
+      partner: updatedPartner,
+      children: updatedChildren,
+      isPregnant: isPregnantResolved ? false : character.isPregnant,
       yearlySocialActions: {},
       education: {
         ...eduProgress.education,
@@ -283,6 +362,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...character.timeline,
         milestone,
         ...babySiblingEvents,
+        ...babyChildBirthEvents,
         ...familyDeathEvents,
         ...eduProgress.events,
         ...careerProgress.events,

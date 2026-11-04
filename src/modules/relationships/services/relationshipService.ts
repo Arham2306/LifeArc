@@ -28,6 +28,10 @@ export interface TargetPersonRef {
   wealth?: FamilyWealth;
   isAlive: boolean;
   age: number;
+  gender?: 'male' | 'female' | 'non-binary';
+  romanceUnlocked?: boolean;
+  romanceMeter?: number;
+  romanticStage?: 'none' | 'crush' | 'flirting' | 'dating' | 'engaged' | 'married' | 'ex' | 'widowed';
 }
 
 const clamp = (val: number, min = 0, max = 100) => Math.min(max, Math.max(min, Math.round(val)));

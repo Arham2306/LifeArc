@@ -68,6 +68,10 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
       relationship: friend.relationship,
       isAlive: true,
       age: friend.age,
+      gender: friend.gender,
+      romanceUnlocked: friend.romanceUnlocked,
+      romanceMeter: friend.romanceMeter,
+      romanticStage: friend.romanticStage,
     });
   };
 

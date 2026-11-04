@@ -16,6 +16,7 @@ import type { CharacterProfile } from '../../types/game';
 interface MenuScreenProps {
   character: CharacterProfile;
   onOpenRelationships: () => void;
+  onOpenRomance?: () => void;
 }
 
 interface MenuTile {
@@ -32,6 +33,7 @@ interface MenuTile {
 
 export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenRelationships,
+  onOpenRomance,
 }) => {
   const menuTiles: MenuTile[] = [
     {
@@ -51,9 +53,10 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       subtitle: 'Dating apps, partners, proposals, marriage, and kids',
       icon: <Heart className="w-5 h-5 stroke-[2.5] text-rose-950" />,
       iconBg: 'bg-rose-400',
-      badgeLabel: 'Module 7',
+      badgeLabel: 'Active',
       badgeVariant: 'rose',
-      isAvailable: false,
+      isAvailable: true,
+      onClick: onOpenRomance,
     },
     {
       id: 'assets',

@@ -87,6 +87,49 @@ export type RelationshipType =
   | 'mentor'
   | 'coworker';
 
+export type RomanticStage =
+  | 'none'
+  | 'crush'
+  | 'flirting'
+  | 'dating'
+  | 'engaged'
+  | 'married'
+  | 'ex'
+  | 'widowed';
+
+export interface PartnerStats {
+  craziness: number; // 0 - 100 (drama, jealousy)
+  generosity: number; // 0 - 100 (gift reaction, allowance)
+  looks: number; // 0 - 100
+  smarts: number; // 0 - 100
+  fertility: number; // 0 - 100
+  occupation?: string;
+  annualIncome?: number;
+  hasPrenup?: boolean;
+  yearsTogether?: number;
+  engagementRing?: {
+    name: string;
+    value: number;
+  };
+  weddingVenue?: string;
+}
+
+export interface ChildProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  age: number;
+  gender: 'male' | 'female';
+  relationship: number; // 0 - 100
+  smarts: number;
+  looks: number;
+  happiness: number;
+  health: number;
+  isAdopted: boolean;
+  occupation: string; // "Infant", "Elementary School Student", etc.
+  isAlive: boolean;
+}
+
 export interface PersonProfile {
   id: string;
   firstName: string;
@@ -100,6 +143,12 @@ export interface PersonProfile {
   originStory: string;
   stageMet: 'childhood' | 'middle_school' | 'high_school' | 'university' | 'adulthood';
   avatarEmoji?: string;
+
+  // Module 7: Romance & Dating Dual-Meter & Partner Attributes
+  romanceUnlocked?: boolean;
+  romanceMeter?: number; // 0 - 100 (Romantic Chemistry & Love)
+  romanticStage?: RomanticStage;
+  partnerStats?: PartnerStats;
 }
 
 export interface CharacterProfile {
@@ -125,6 +174,16 @@ export interface CharacterProfile {
   career: PlayerCareerState;
   business?: ActiveBusinessProfile | null;
   relationships: PersonProfile[];
+  /** Active primary romantic partner (dating / engaged / married) */
+  partner?: PersonProfile | null;
+  /** Past lovers and ex-spouses */
+  exPartners?: PersonProfile[];
+  /** Biological and adopted children */
+  children?: ChildProfile[];
+  /** Pregnancy tracking */
+  isPregnant?: boolean;
+  pregnancyPartnerId?: string;
+  datingPreference?: 'women' | 'men' | 'everyone';
   /** Track interactive social actions performed on people this year: personId -> actionType[] */
   yearlySocialActions?: Record<string, string[]>;
   timeline: LifeEvent[];

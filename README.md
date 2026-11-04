@@ -4,7 +4,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646cff?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.3-38bdf8?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Tests](https://img.shields.io/badge/Tests-6%2F6%20Passed-10b981)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-8%2F8%20Passed-10b981)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **LifeArc** is an interactive, mobile-first life simulation web game inspired by text-driven simulation titles like *BitLife*. Guide your character year-by-year from birth through childhood, academics, career milestones, entrepreneurial ventures, and eventual retirement or mortality.
@@ -32,7 +32,21 @@ Designed with a playful **neo-brutalist "cartoon" aesthetic** featuring bold ink
   - Corporate levers: Pricing, Marketing, Payroll competitiveness, R&D budgets, CEO salary, and dividend distributions.
   - Executive actions: Workforce scaling, retreats, bonuses, equipment upgrades, operations audits, branch expansions, and corporate rebranding.
   - Annual P&L financial reports, company valuation, private acquisitions, and Initial Public Offerings (IPO).
-- 🎲 **Branching Narrative Events**: Hundreds of interactive dilemmas across infancy, school years, dorm life, workplace crises, corporate decisions, and family situations with multi-attribute consequences and NPC relationship introductions.
+- 👥 **Relationships Hub (Module 6)**:
+  - Categorized directory for Immediate Family (Parents & Siblings) and Friends (School, University, Workplace).
+  - Dynamic sibling generation at birth and realistic early-childhood baby sibling births.
+  - Interactive social action drawers: Spend Time, Conversation, Compliments, Insults, Gifts, and Asking for Money.
+- 💍 **Romance, Dating & Family (Module 7)**:
+  - Dual-Meter architecture tracking Relationship (Trust) and Love/Romance (Passion) in real-time.
+  - Gradual progression: Nurture friends/coworkers into lovers when Relationship $\ge 60\%$, unlocking the Love Meter.
+  - Tiered romance interactions: Flirting styles, 4-tier date planner, deep talks, romantic gifts, and "Ask to Become Official Partners".
+  - Intimacy mechanics with contraception options (unprotected, birth control, condoms) and biological fertility age curves.
+  - Marriage proposals with ring shop (Candy pop to 4.5-Carat Flawless Royal Diamond) and proposal venues.
+  - Wedding ceremonies across 4 venue tiers with prenuptial agreement negotiations.
+  - Family planning: Natural childbirth, Fertility Clinic (IVF), and Licensed Adoption Agency.
+  - Children lineage: Parenting actions (Spend time, praise, allowances, and college tuition funding).
+  - Domestic drama, infidelity, and divorce asset division with prenup protection.
+- 🎲 **Branching Narrative Events**: Hundreds of interactive dilemmas across infancy, school years, dorm life, workplace crises, corporate decisions, dating, marriage, and family situations with multi-attribute consequences and NPC relationship introductions.
 
 ---
 
