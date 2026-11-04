@@ -6,10 +6,6 @@ import {
   DollarSign,
   Heart,
   Flame,
-  CheckCircle2,
-  XCircle,
-  ChevronDown,
-  ChevronUp,
   Wine,
 } from 'lucide-react';
 import { Modal } from '../../../components/ui/Modal';
@@ -17,7 +13,8 @@ import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import { DualMeterDisplay } from '../../romance/components/DualMeterDisplay';
-import { ActionPickerModal } from '../../../components/ui/ActionPickerModal';
+import { ActionPickerModal, type ActionPickerItem } from '../../../components/ui/ActionPickerModal';
+import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
 import { ConfirmModal } from '../../../components/ui/ConfirmModal';
 import { FLIRT_OPTIONS, DATE_VENUES } from '../../romance/data/romanticInteractions';
 import { romanceService } from '../../romance/services/romanceService';
@@ -52,9 +49,16 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   target,
   onUpdateCharacter,
 }) => {
-  const [activeDrawer, setActiveDrawer] = useState<SocialActionType | null>(null);
-  const [lastOutcome, setLastOutcome] = useState<SocialActionOutcome | null>(null);
-  const [romanceModal, setRomanceModal] = useState<'flirt' | 'date' | 'ask_out' | null>(null);
+  const [actionOutcome, setActionOutcome] = useState<SocialActionOutcome | null>(null);
+  const [actionPicker, setActionPicker] = useState<{
+    title: string;
+    icon?: React.ReactNode;
+    subtitle?: string;
+    target?: PersonProfile;
+    items: ActionPickerItem<any>[];
+    onSelect: (item: any) => void;
+  } | null>(null);
+  const [isAskOutOpen, setIsAskOutOpen] = useState(false);
 
   // Derive target's live metrics in real-time from active character state
   const liveTarget: TargetPersonRef | null = useMemo(() => {
@@ -91,12 +95,14 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           romanceUnlocked: friend.romanceUnlocked,
           romanceMeter: friend.romanceMeter,
           romanticStage: friend.romanticStage,
+          isAlive: true,
         }
       : target;
   }, [character, target]);
 
+  // If liveTarget is an adult friend, get their full PersonProfile for romance interactions
   const friendTarget: PersonProfile | undefined = useMemo(() => {
-    if (liveTarget?.type !== 'friend') return undefined;
+    if (!liveTarget || liveTarget.type !== 'friend') return undefined;
     return (character.relationships || []).find((r) => r.id === liveTarget.id);
   }, [character, liveTarget]);
 
@@ -118,8 +124,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
       selectedOptionId
     );
     onUpdateCharacter(updated);
-    setLastOutcome(outcome);
-    setActiveDrawer(null);
+    setActionOutcome(outcome);
   };
 
   const handleSparkRomance = () => {
@@ -132,7 +137,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
       ...character,
       relationships: updatedRel,
     });
-    setLastOutcome({
+    setActionOutcome({
       actionType: 'spend_time',
       targetName: friendTarget.firstName,
       success: true,
@@ -164,8 +169,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
       },
     };
     onUpdateCharacter(updatedChar);
-    setRomanceModal(null);
-    setLastOutcome({
+    setActionOutcome({
       actionType: 'spend_time',
       targetName: friendTarget.firstName,
       success: result.success,
@@ -201,8 +205,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
       },
     };
     onUpdateCharacter(updatedChar);
-    setRomanceModal(null);
-    setLastOutcome({
+    setActionOutcome({
       actionType: 'spend_time',
       targetName: friendTarget.firstName,
       success: result.success,
@@ -229,8 +232,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
       },
     };
     onUpdateCharacter(updatedChar);
-    setRomanceModal(null);
-    setLastOutcome({
+    setActionOutcome({
       actionType: 'spend_time',
       targetName: friendTarget.firstName,
       success: result.success,
@@ -250,12 +252,161 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
 
   const hangoutOptions = getHangoutOptions(stage);
 
+  // Picker Openers
+  const handleOpenSpendTimePicker = () => {
+    setActionPicker({
+      title: `Hang Out with ${liveTarget.name}`,
+      icon: '🍕',
+      subtitle: 'Choose an activity to do together:',
+      target: friendTarget,
+      items: hangoutOptions.map((opt) => ({
+        id: opt.id,
+        title: opt.title,
+        description: opt.description,
+        emoji: opt.icon,
+        data: opt.id,
+      })),
+      onSelect: (optId) => handleAction('spend_time', undefined, optId),
+    });
+  };
+
+  const handleOpenChatPicker = () => {
+    setActionPicker({
+      title: `Chat with ${liveTarget.name}`,
+      icon: '💬',
+      subtitle: 'Pick a dialogue topic to discuss:',
+      target: friendTarget,
+      items: CHAT_OPTIONS.map((opt) => ({
+        id: opt.id,
+        title: opt.title,
+        description: opt.description,
+        emoji: opt.icon,
+        data: opt.id,
+      })),
+      onSelect: (optId) => handleAction('conversation', undefined, optId),
+    });
+  };
+
+  const handleOpenComplimentPicker = () => {
+    setActionPicker({
+      title: `Compliment ${liveTarget.name}`,
+      icon: '✨',
+      subtitle: 'Choose your flattery style:',
+      target: friendTarget,
+      items: COMPLIMENT_OPTIONS.map((opt) => ({
+        id: opt.id,
+        title: opt.title,
+        description: opt.description,
+        emoji: opt.icon,
+        data: opt.id,
+      })),
+      onSelect: (optId) => handleAction('compliment', undefined, optId),
+    });
+  };
+
+  const handleOpenInsultPicker = () => {
+    setActionPicker({
+      title: `Roast ${liveTarget.name}`,
+      icon: '🔥',
+      subtitle: 'Pick an insult or roast to provoke:',
+      target: friendTarget,
+      items: INSULT_OPTIONS.map((opt) => ({
+        id: opt.id,
+        title: opt.title,
+        description: opt.description,
+        emoji: opt.icon,
+        data: opt.id,
+      })),
+      onSelect: (optId) => handleAction('insult', undefined, optId),
+    });
+  };
+
+  const handleOpenGiftPicker = () => {
+    setActionPicker({
+      title: `Give Gift to ${liveTarget.name}`,
+      icon: '🎁',
+      subtitle: 'Select a present from the gift catalog:',
+      target: friendTarget,
+      items: GIFT_CATALOG.map((g) => ({
+        id: g.id,
+        title: g.name,
+        description: g.description,
+        emoji: g.icon,
+        cost: g.cost,
+        disabled: character.cash < g.cost,
+        disabledReason: "Can't afford",
+        data: g,
+      })),
+      onSelect: (g) => handleAction('give_gift', g),
+    });
+  };
+
+  const handleOpenFlirtPicker = () => {
+    if (!friendTarget) return;
+    setActionPicker({
+      title: `Flirt with ${friendTarget.firstName}`,
+      icon: '✨',
+      subtitle: 'Choose your flirting style and test your chemistry:',
+      target: friendTarget,
+      items: FLIRT_OPTIONS.map((f) => ({
+        id: f.id,
+        title: f.label,
+        subtitle: `"${f.dialogue}"`,
+        badge: f.style,
+        badgeColor: f.style === 'bold' ? 'rose' : f.style === 'playful' ? 'amber' : 'sky',
+        statDeltas: [
+          {
+            label: 'Chemistry',
+            delta: '+ Love',
+            color: 'text-rose-600',
+          },
+        ],
+        data: f,
+      })),
+      onSelect: (f) => handleFlirt(f),
+    });
+  };
+
+  const handleOpenDatePicker = () => {
+    if (!friendTarget) return;
+    const currentRomance = friendTarget.romanceMeter ?? 0;
+    setActionPicker({
+      title: `Plan Date with ${friendTarget.firstName}`,
+      icon: '🍷',
+      subtitle: 'Select a romantic setting to spend quality time together:',
+      target: friendTarget,
+      items: DATE_VENUES.map((v) => {
+        const canAfford = character.cash >= v.cost;
+        const meetsRomance = currentRomance >= v.minRomance;
+        const isAvailable = canAfford && meetsRomance;
+        return {
+          id: v.id,
+          title: v.name,
+          subtitle: v.vibe,
+          description: v.description,
+          emoji: v.emoji,
+          cost: v.cost,
+          disabled: !isAvailable,
+          disabledReason: !meetsRomance
+            ? `Needs ${v.minRomance}% Romance`
+            : `Can't afford ($${v.cost.toLocaleString()})`,
+          statDeltas: [
+            { label: 'Rel', delta: `+${v.relationshipBonus}%`, color: 'text-emerald-700' },
+            { label: 'Love', delta: `+${v.romanceBonus}%`, color: 'text-rose-600' },
+            { label: 'Happy', delta: `+${v.happinessBonus}%`, color: 'text-amber-700' },
+          ],
+          data: v,
+        };
+      }),
+      onSelect: (v) => handleDate(v),
+    });
+  };
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={() => {
-        setLastOutcome(null);
-        setActiveDrawer(null);
+        setActionOutcome(null);
         onClose();
       }}
       title={liveTarget.name}
@@ -326,39 +477,6 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           )}
         </div>
 
-        {/* Outcome Alert Toast */}
-        {lastOutcome && (
-          <div
-            className={`rounded-2xl border-2 border-slate-900 p-3 flex flex-col gap-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-200 ${
-              lastOutcome.success ? 'bg-emerald-50' : 'bg-rose-50'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-slate-950 flex items-center gap-1.5">
-                {lastOutcome.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
-                ) : (
-                  <XCircle className="w-4 h-4 text-rose-600 stroke-[2.5]" />
-                )}
-                <span>{lastOutcome.headline}</span>
-              </span>
-              {lastOutcome.relationshipDelta !== 0 && (
-                <span
-                  className={`text-xs font-black ${
-                    lastOutcome.relationshipDelta > 0 ? 'text-emerald-700' : 'text-rose-700'
-                  }`}
-                >
-                  {lastOutcome.relationshipDelta > 0 ? '+' : ''}
-                  {lastOutcome.relationshipDelta}% Rel
-                </span>
-              )}
-            </div>
-            <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
-              {lastOutcome.narrative}
-            </p>
-          </div>
-        )}
-
         {/* Action Selection */}
         {!isDeceased ? (
           <div className="flex flex-col gap-2">
@@ -370,28 +488,17 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               {/* 1. Spend Time */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveDrawer(activeDrawer === 'spend_time' ? null : 'spend_time')
-                }
+                onClick={handleOpenSpendTimePicker}
                 disabled={spentTimeDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   spentTimeDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
-                    : activeDrawer === 'spend_time'
-                    ? 'bg-amber-100 ring-2 ring-amber-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-amber-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Spend Time</div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm">⏳</span>
-                    {activeDrawer === 'spend_time' ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                  </div>
+                  <span className="text-sm">⏳</span>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
                   {spentTimeDone ? 'Already hung out this year' : 'Choose activity & bond'}
@@ -401,28 +508,17 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               {/* 2. Conversation */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveDrawer(activeDrawer === 'conversation' ? null : 'conversation')
-                }
+                onClick={handleOpenChatPicker}
                 disabled={chatDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   chatDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
-                    : activeDrawer === 'conversation'
-                    ? 'bg-sky-100 ring-2 ring-sky-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-sky-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Chat</div>
-                  <div className="flex items-center gap-1">
-                    <MessageCircle className="w-3.5 h-3.5 text-sky-600 stroke-[2.5]" />
-                    {activeDrawer === 'conversation' ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                  </div>
+                  <MessageCircle className="w-3.5 h-3.5 text-sky-600 stroke-[2.5]" />
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
                   {chatDone ? 'Already chatted this year' : 'Pick dialogue topic'}
@@ -432,28 +528,17 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               {/* 3. Compliment */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveDrawer(activeDrawer === 'compliment' ? null : 'compliment')
-                }
+                onClick={handleOpenComplimentPicker}
                 disabled={complimentDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   complimentDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
-                    : activeDrawer === 'compliment'
-                    ? 'bg-emerald-100 ring-2 ring-emerald-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-emerald-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Compliment</div>
-                  <div className="flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500 stroke-[2.5]" />
-                    {activeDrawer === 'compliment' ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                  </div>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500 stroke-[2.5]" />
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
                   {complimentDone ? 'Already complimented' : 'Select flattery style'}
@@ -463,25 +548,12 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               {/* 4. Insult */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveDrawer(activeDrawer === 'insult' ? null : 'insult')
-                }
-                className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
-                  activeDrawer === 'insult'
-                    ? 'bg-rose-100 ring-2 ring-rose-500 shadow-[1.5px_2px_0_#0f172a]'
-                    : 'bg-white hover:bg-rose-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
-                }`}
+                onClick={handleOpenInsultPicker}
+                className="p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all bg-white hover:bg-rose-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5"
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-rose-950">Insult</div>
-                  <div className="flex items-center gap-1">
-                    <Flame className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
-                    {activeDrawer === 'insult' ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                  </div>
+                  <Flame className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
                   Select roast & provoke
@@ -491,28 +563,17 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               {/* 5. Give Gift */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveDrawer(activeDrawer === 'give_gift' ? null : 'give_gift')
-                }
+                onClick={handleOpenGiftPicker}
                 disabled={giftDone}
                 className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
                   giftDone
                     ? 'bg-slate-100 opacity-60 cursor-not-allowed'
-                    : activeDrawer === 'give_gift'
-                    ? 'bg-purple-100 ring-2 ring-purple-500 shadow-[1.5px_2px_0_#0f172a]'
                     : 'bg-white hover:bg-purple-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black text-slate-950">Give Gift</div>
-                  <div className="flex items-center gap-1">
-                    <Gift className="w-3.5 h-3.5 text-purple-600 stroke-[2.5]" />
-                    {activeDrawer === 'give_gift' ? (
-                      <ChevronUp className="w-3.5 h-3.5 text-slate-600" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                  </div>
+                  <Gift className="w-3.5 h-3.5 text-purple-600 stroke-[2.5]" />
                 </div>
                 <div className="text-[10px] font-bold text-slate-500">
                   {giftDone ? 'Gift sent this year' : 'Choose gift from catalog'}
@@ -543,191 +604,6 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                 </div>
               </button>
             </div>
-
-            {/* EXPANDED INTERACTIVE OPTION DRAWERS */}
-
-            {/* A. Spend Time Activity Picker */}
-            {activeDrawer === 'spend_time' && !spentTimeDone && (
-              <div className="rounded-2xl border-2 border-slate-900 bg-amber-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
-                <span className="text-xs font-black text-amber-950 flex items-center justify-between">
-                  <span>Choose an Activity to Do Together:</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDrawer(null)}
-                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
-                  >
-                    Cancel
-                  </button>
-                </span>
-                <div className="flex flex-col gap-1.5">
-                  {hangoutOptions.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => handleAction('spend_time', undefined, opt.id)}
-                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-amber-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
-                    >
-                      <span className="text-lg">{opt.icon}</span>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-black text-slate-950">{opt.title}</span>
-                        <span className="text-[10px] font-bold text-slate-600">
-                          {opt.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* B. Conversation Topic Picker */}
-            {activeDrawer === 'conversation' && !chatDone && (
-              <div className="rounded-2xl border-2 border-slate-900 bg-sky-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
-                <span className="text-xs font-black text-sky-950 flex items-center justify-between">
-                  <span>Choose a Topic to Discuss:</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDrawer(null)}
-                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
-                  >
-                    Cancel
-                  </button>
-                </span>
-                <div className="flex flex-col gap-1.5">
-                  {CHAT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => handleAction('conversation', undefined, opt.id)}
-                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-sky-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
-                    >
-                      <span className="text-lg">{opt.icon}</span>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-black text-slate-950">{opt.title}</span>
-                        <span className="text-[10px] font-bold text-slate-600">
-                          {opt.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* C. Compliment Style Picker */}
-            {activeDrawer === 'compliment' && !complimentDone && (
-              <div className="rounded-2xl border-2 border-slate-900 bg-emerald-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
-                <span className="text-xs font-black text-emerald-950 flex items-center justify-between">
-                  <span>Choose a Compliment to Give:</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDrawer(null)}
-                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
-                  >
-                    Cancel
-                  </button>
-                </span>
-                <div className="flex flex-col gap-1.5">
-                  {COMPLIMENT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => handleAction('compliment', undefined, opt.id)}
-                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-emerald-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
-                    >
-                      <span className="text-lg">{opt.icon}</span>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-black text-slate-950">{opt.title}</span>
-                        <span className="text-[10px] font-bold text-slate-600">
-                          {opt.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* D. Insult / Roast Picker */}
-            {activeDrawer === 'insult' && (
-              <div className="rounded-2xl border-2 border-slate-900 bg-rose-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
-                <span className="text-xs font-black text-rose-950 flex items-center justify-between">
-                  <span>Choose an Insult / Roast:</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDrawer(null)}
-                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
-                  >
-                    Cancel
-                  </button>
-                </span>
-                <div className="flex flex-col gap-1.5">
-                  {INSULT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => handleAction('insult', undefined, opt.id)}
-                      className="p-2 rounded-xl border border-slate-900 bg-white hover:bg-rose-100 text-left flex items-center gap-2.5 transition-all shadow-[1px_1.5px_0_#0f172a] cursor-pointer"
-                    >
-                      <span className="text-lg">{opt.icon}</span>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-black text-rose-950">{opt.title}</span>
-                        <span className="text-[10px] font-bold text-slate-600">
-                          {opt.description}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* E. Gift Picker Drawer */}
-            {activeDrawer === 'give_gift' && !giftDone && (
-              <div className="rounded-2xl border-2 border-slate-900 bg-purple-50/90 p-3 flex flex-col gap-2 mt-1 shadow-[2px_2px_0_#0f172a] animate-in fade-in duration-150">
-                <span className="text-xs font-black text-purple-950 flex items-center justify-between">
-                  <span>Select a Gift to Present:</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveDrawer(null)}
-                    className="text-[10px] font-bold text-slate-500 hover:text-slate-800"
-                  >
-                    Cancel
-                  </button>
-                </span>
-                <div className="flex flex-col gap-1.5">
-                  {GIFT_CATALOG.map((g) => {
-                    const canAfford = character.cash >= g.cost;
-                    return (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => handleAction('give_gift', g)}
-                        disabled={!canAfford}
-                        className={`p-2 rounded-xl border border-slate-900 text-left flex items-center justify-between transition-all ${
-                          canAfford
-                            ? 'bg-white hover:bg-purple-100 cursor-pointer shadow-[1px_1.5px_0_#0f172a]'
-                            : 'bg-slate-100 opacity-50 cursor-not-allowed'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-lg">{g.icon}</span>
-                          <div className="flex flex-col">
-                            <span className="text-xs font-black text-slate-900">{g.name}</span>
-                            <span className="text-[10px] font-bold text-slate-500">
-                              {g.description}
-                            </span>
-                          </div>
-                        </div>
-                        <span className="text-xs font-black text-purple-900 font-mono">
-                          {g.cost === 0 ? 'FREE' : `$${g.cost.toLocaleString()}`}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Spark Romance Banner */}
             {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.relationship >= 50 && !liveTarget.romanceUnlocked && (
@@ -774,7 +650,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     <button
                       type="button"
                       disabled={pLimit || pFlirted}
-                      onClick={() => setRomanceModal('flirt')}
+                      onClick={handleOpenFlirtPicker}
                       className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
                         pLimit || pFlirted
                           ? 'bg-slate-100 opacity-60 cursor-not-allowed'
@@ -793,7 +669,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     <button
                       type="button"
                       disabled={pLimit || pDated}
-                      onClick={() => setRomanceModal('date')}
+                      onClick={handleOpenDatePicker}
                       className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
                         pLimit || pDated
                           ? 'bg-slate-100 opacity-60 cursor-not-allowed'
@@ -817,7 +693,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     return (
                       <button
                         type="button"
-                        onClick={() => setRomanceModal('ask_out')}
+                        onClick={() => setIsAskOutOpen(true)}
                         disabled={!canAskOut}
                         className={`w-full p-2.5 rounded-2xl border-2 border-slate-900 font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all flex flex-col items-center justify-center gap-0.5 ${
                           canAskOut
@@ -857,8 +733,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             size="md"
             fullWidth
             onClick={() => {
-              setLastOutcome(null);
-              setActiveDrawer(null);
+              setActionOutcome(null);
               onClose();
             }}
           >
@@ -867,76 +742,29 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
         </div>
       </div>
 
-      {/* Romance Submodals using Universal Primitives */}
-      {romanceModal === 'flirt' && friendTarget && (
+      {/* Universal Action Picker for Hangouts, Chat, Compliment, Insult, Gift, Flirt, Date */}
+      {actionPicker && (
         <ActionPickerModal
           isOpen={true}
-          onClose={() => setRomanceModal(null)}
-          title={`Flirt with ${friendTarget.firstName}`}
-          icon={<Sparkles className="w-5 h-5 text-amber-500" />}
-          subtitle="Pick a flirting technique to ignite romantic chemistry."
-          target={friendTarget}
-          items={FLIRT_OPTIONS.map((f) => ({
-            id: f.id,
-            title: f.label,
-            subtitle: `"${f.dialogue}"`,
-            badge: f.style,
-            badgeColor: f.style === 'bold' ? 'rose' : f.style === 'playful' ? 'amber' : 'sky',
-            statDeltas: [
-              {
-                label: 'Chemistry',
-                delta: '+ Love',
-                color: 'text-rose-600',
-              },
-            ],
-            data: f,
-          }))}
-          onSelect={(f) => handleFlirt(f)}
+          onClose={() => setActionPicker(null)}
+          title={actionPicker.title}
+          icon={actionPicker.icon}
+          subtitle={actionPicker.subtitle}
+          target={actionPicker.target}
+          items={actionPicker.items}
+          onSelect={(item) => {
+            const cb = actionPicker.onSelect;
+            setActionPicker(null);
+            cb(item);
+          }}
         />
       )}
 
-      {romanceModal === 'date' && friendTarget && (() => {
-        const currentRomance = friendTarget.romanceMeter ?? 0;
-        return (
-          <ActionPickerModal
-            isOpen={true}
-            onClose={() => setRomanceModal(null)}
-            title={`Plan Date with ${friendTarget.firstName}`}
-            icon={<Wine className="w-5 h-5 text-rose-500" />}
-            subtitle="Select a romantic setting to spend quality time together."
-            target={friendTarget}
-            items={DATE_VENUES.map((v) => {
-              const canAfford = character.cash >= v.cost;
-              const meetsRomance = currentRomance >= v.minRomance;
-              const isAvailable = canAfford && meetsRomance;
-              return {
-                id: v.id,
-                title: v.name,
-                subtitle: v.vibe,
-                description: v.description,
-                emoji: v.emoji,
-                cost: v.cost,
-                disabled: !isAvailable,
-                disabledReason: !meetsRomance
-                  ? `Needs ${v.minRomance}% Romance`
-                  : `Can't afford ($${v.cost.toLocaleString()})`,
-                statDeltas: [
-                  { label: 'Rel', delta: `+${v.relationshipBonus}%`, color: 'text-emerald-700' },
-                  { label: 'Love', delta: `+${v.romanceBonus}%`, color: 'text-rose-600' },
-                  { label: 'Happy', delta: `+${v.happinessBonus}%`, color: 'text-amber-700' },
-                ],
-                data: v,
-              };
-            })}
-            onSelect={(v) => handleDate(v)}
-          />
-        );
-      })()}
-
-      {romanceModal === 'ask_out' && friendTarget && (
+      {/* Milestone: Ask Out Confirmation */}
+      {isAskOutOpen && friendTarget && (
         <ConfirmModal
           isOpen={true}
-          onClose={() => setRomanceModal(null)}
+          onClose={() => setIsAskOutOpen(false)}
           title={`Ask Out ${friendTarget.firstName}`}
           icon="❤️"
           message={`Are you ready to confess your feelings and ask ${friendTarget.firstName} to be your official partner?`}
@@ -954,7 +782,10 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
           disabled={
             (friendTarget.romanceMeter ?? 0) < 35 || friendTarget.relationship < 50
           }
-          onConfirm={handleAskOut}
+          onConfirm={() => {
+            setIsAskOutOpen(false);
+            handleAskOut();
+          }}
         >
           <DualMeterDisplay
             relationship={friendTarget.relationship}
@@ -976,6 +807,35 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             </div>
           </div>
         </ConfirmModal>
+      )}
+
+      {/* Universal Action Outcome Notice */}
+      {actionOutcome && (
+        <ActionOutcomeModal
+          isOpen={Boolean(actionOutcome)}
+          onClose={() => setActionOutcome(null)}
+          title={actionOutcome.headline}
+          icon={actionOutcome.success ? '✨' : '💥'}
+          partnerName={actionOutcome.targetName}
+          message={actionOutcome.narrative}
+          statEffects={actionOutcome.statEffects}
+          customDeltas={
+            actionOutcome.relationshipDelta !== 0
+              ? [
+                  {
+                    label: 'Relationship',
+                    delta:
+                      actionOutcome.relationshipDelta > 0
+                        ? `+${actionOutcome.relationshipDelta}%`
+                        : `${actionOutcome.relationshipDelta}%`,
+                    color: actionOutcome.relationshipDelta > 0 ? 'emerald' : 'rose',
+                  },
+                ]
+              : undefined
+          }
+          continueVariant={actionOutcome.success ? 'emerald' : 'slate'}
+          continueLabel="Continue"
+        />
       )}
     </Modal>
   );

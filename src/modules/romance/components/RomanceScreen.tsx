@@ -20,9 +20,7 @@ import { ConfirmModal } from '../../../components/ui/ConfirmModal';
 import { FLIRT_OPTIONS, DATE_VENUES, ROMANTIC_TALK_TOPICS, ROMANTIC_GIFTS } from '../data/romanticInteractions';
 import { ProposalModal } from './ProposalModal';
 import { WeddingPlannerModal } from './WeddingPlannerModal';
-import { FamilyPlanningModal } from './FamilyPlanningModal';
 import { ChildDetailModal } from './ChildDetailModal';
-import { DivorceModal } from './DivorceModal';
 import { DatingAppModal } from './DatingAppModal';
 import { romanceService } from '../services/romanceService';
 import { reproductionService } from '../services/reproductionService';
@@ -97,9 +95,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     | 'dating_app'
     | 'proposal'
     | 'wedding'
-    | 'family_planning'
     | 'child_detail'
-    | 'divorce'
   >(null);
 
   const [actionPicker, setActionPicker] = useState<{
@@ -477,6 +473,134 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       onSelect: (protection: 'unprotected' | 'pill' | 'condom') => {
         setActionPicker(null);
         handleExecuteIntimacy(protection);
+      },
+    });
+  };
+
+  // Open Family Planning Picker
+  const handleOpenFamilyPlanningPicker = (targetPartner: PersonProfile) => {
+    setActionPicker({
+      title: `Family Planning with ${targetPartner.firstName}`,
+      icon: '👶',
+      subtitle: 'Explore paths to starting or growing your family:',
+      target: targetPartner,
+      items: [
+        {
+          id: 'natural',
+          title: 'Try for a Baby Naturally',
+          subtitle: 'Unprotected intimacy with your partner',
+          description: 'Subject to natural biological fertility and age curve.',
+          emoji: '👶',
+          cost: 0,
+          data: 'natural' as const,
+        },
+        {
+          id: 'ivf',
+          title: 'Fertility Clinic (IVF Treatment)',
+          subtitle: 'Medical reproductive technology',
+          description: 'Advanced clinical implantation with ~65% success rate.',
+          emoji: '🔬',
+          cost: 15000,
+          disabled: character.cash < 15000,
+          disabledReason: "Can't afford ($15,000)",
+          data: 'ivf' as const,
+        },
+        {
+          id: 'adopt_infant',
+          title: 'Adopt an Infant (Age 0)',
+          subtitle: 'Licensed adoption agency',
+          description: 'Provide a permanent loving home for a newborn in need.',
+          emoji: '🍼',
+          cost: 6000,
+          disabled: character.cash < 6000,
+          disabledReason: "Can't afford ($6,000)",
+          data: 'adopt_infant' as const,
+        },
+        {
+          id: 'adopt_toddler',
+          title: 'Adopt a Toddler (Age 2)',
+          subtitle: 'Licensed adoption agency',
+          description: 'Welcome an energetic toddler into your growing family.',
+          emoji: '🧸',
+          cost: 6000,
+          disabled: character.cash < 6000,
+          disabledReason: "Can't afford ($6,000)",
+          data: 'adopt_toddler' as const,
+        },
+        {
+          id: 'adopt_child',
+          title: 'Adopt an Older Child (Age 6)',
+          subtitle: 'Licensed adoption agency',
+          description: 'Give a bright school-age child a fresh start and future.',
+          emoji: '🎒',
+          cost: 6000,
+          disabled: character.cash < 6000,
+          disabledReason: "Can't afford ($6,000)",
+          data: 'adopt_child' as const,
+        },
+      ],
+      onSelect: (choice) => {
+        setActionPicker(null);
+        if (choice === 'natural') {
+          handleTryNatural();
+        } else if (choice === 'ivf') {
+          handleTryIVF();
+        } else if (choice === 'adopt_infant') {
+          handleAdopt('infant');
+        } else if (choice === 'adopt_toddler') {
+          handleAdopt('toddler');
+        } else if (choice === 'adopt_child') {
+          handleAdopt('child');
+        }
+      },
+    });
+  };
+
+  // Open Divorce Picker
+  const handleOpenDivorcePicker = (targetPartner: PersonProfile) => {
+    const hasPrenup = targetPartner.partnerStats?.hasPrenup ?? false;
+    setActionPicker({
+      title: `File for Divorce from ${targetPartner.firstName}`,
+      icon: '💔',
+      subtitle: hasPrenup
+        ? '🛡️ Active Prenuptial Agreement Found: Liquid savings and property are protected.'
+        : '⚠️ No Prenuptial Agreement: Marital assets will be split 50/50 by the court.',
+      target: targetPartner,
+      items: [
+        {
+          id: 'public',
+          title: 'Public Legal Aid Attorney',
+          subtitle: 'Minimal cost, standard defense',
+          emoji: '⚖️',
+          cost: 300,
+          disabled: character.cash < 300,
+          disabledReason: "Can't afford ($300)",
+          data: 'public' as const,
+        },
+        {
+          id: 'standard',
+          title: 'Private Family Law Firm',
+          subtitle: 'Experienced negotiators for fair settlement',
+          emoji: '🏛️',
+          cost: 1500,
+          disabled: character.cash < 1500,
+          disabledReason: "Can't afford ($1,500)",
+          data: 'standard' as const,
+        },
+        {
+          id: 'high_powered',
+          title: 'Elite Celebrity Divorce Litigators',
+          subtitle: 'Aggressive defense, maximum asset retention',
+          emoji: '💼',
+          cost: 12000,
+          disabled: character.cash < 12000,
+          disabledReason: "Can't afford ($12,000)",
+          data: 'high_powered' as const,
+        },
+      ],
+      onSelect: (tier) => {
+        setActionPicker(null);
+        handleConfirmDivorce(tier);
       },
     });
   };
@@ -1288,7 +1412,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                           disabled={!canFamily}
                           className={`flex items-center justify-center gap-1.5 ${!canFamily ? 'opacity-60 cursor-not-allowed' : ''}`}
                           onClick={() => {
-                            if (canFamily) setActiveModal('family_planning');
+                            if (canFamily) handleOpenFamilyPlanningPicker(partner);
                           }}
                         >
                           <Baby className={`w-4 h-4 shrink-0 ${canFamily ? 'text-amber-600' : 'text-slate-400'}`} />
@@ -1364,7 +1488,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                   variant="slate"
                   size="sm"
                   className="w-full flex items-center justify-center gap-2"
-                  onClick={() => setActiveModal('divorce')}
+                  onClick={() => handleOpenDivorcePicker(partner)}
                 >
                   <UserX className="w-4 h-4 shrink-0" />
                   <span>File for Divorce</span>
@@ -1791,18 +1915,6 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         />
       )}
 
-      {activeModal === 'family_planning' && partner && partner.romanticStage === 'married' && (
-        <FamilyPlanningModal
-          isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
-          playerCash={character.cash}
-          onTryNatural={handleTryNatural}
-          onTryIVF={handleTryIVF}
-          onAdopt={handleAdopt}
-        />
-      )}
-
       {activeModal === 'child_detail' && selectedChild && (
         <ChildDetailModal
           isOpen={true}
@@ -1844,16 +1956,6 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
               },
             });
           }}
-        />
-      )}
-
-      {activeModal === 'divorce' && partner && (
-        <DivorceModal
-          isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
-          playerCash={character.cash}
-          onConfirmDivorce={handleConfirmDivorce}
         />
       )}
 
