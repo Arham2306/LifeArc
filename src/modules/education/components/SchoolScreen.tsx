@@ -28,8 +28,8 @@ import { CartoonCard } from '../../../components/ui/CartoonCard'
 import { CartoonButton } from '../../../components/ui/CartoonButton'
 import { Badge } from '../../../components/ui/Badge'
 import { StatBar } from '../../../components/ui/StatBar'
-import { ActionOutcomeModal } from './ActionOutcomeModal'
-import { DropOutConfirmModal } from './DropOutConfirmModal'
+import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal'
+import { ConfirmModal } from '../../../components/ui/ConfirmModal'
 import { ActivityDirectoryModal } from './ActivityDirectoryModal'
 import { SchoolActivitiesModal } from './SchoolActivitiesModal'
 import { UniversityApplicationModal } from './UniversityApplicationModal'
@@ -507,22 +507,46 @@ export const SchoolScreen: React.FC<SchoolScreenProps> = ({
       />
 
       {/* Action Outcome Modal */}
-      <ActionOutcomeModal
-        outcome={outcomeNotice}
-        onClose={() => setOutcomeNotice(null)}
-      />
+      {outcomeNotice && (
+        <ActionOutcomeModal
+          isOpen={!!outcomeNotice}
+          onClose={() => setOutcomeNotice(null)}
+          title={outcomeNotice.title}
+          icon={outcomeNotice.icon}
+          subtitle={outcomeNotice.subtitle}
+          message={outcomeNotice.message}
+          statEffects={outcomeNotice.appliedEffects}
+          continueLabel="Awesome, Continue"
+          continueVariant="emerald"
+        />
+      )}
 
       {/* High School / University / Professional Drop Out Confirmation Modal */}
-      <DropOutConfirmModal
+      <ConfirmModal
         isOpen={isDropOutModalOpen}
-        schoolName={
+        onClose={() => setIsDropOutModalOpen(false)}
+        title="Drop Out of School?"
+        icon="🚪"
+        message={`Are you sure you want to permanently leave ${
           education.schoolName ||
           education.professionalSchool?.schoolName ||
           education.university?.universityName ||
           `${city} School`
-        }
-        onConfirmDropOut={handleConfirmDropOut}
-        onCancel={() => setIsDropOutModalOpen(false)}
+        } without a diploma?`}
+        warningCallout={{
+          title: 'Major Consequences',
+          bulletPoints: [
+            'You will not earn a degree or diploma.',
+            'Higher education & professional careers may be locked.',
+            'Your parents will be disappointed (severe relationship hit).',
+          ],
+          variant: 'rose',
+        }}
+        confirmLabel="Yes, Drop Out Forever"
+        confirmVariant="rose"
+        confirmIcon={<AlertTriangle className="w-4 h-4 stroke-[2.5]" />}
+        cancelLabel="Stay in School"
+        onConfirm={handleConfirmDropOut}
       />
     </div>
   );

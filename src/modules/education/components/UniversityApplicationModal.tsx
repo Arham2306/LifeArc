@@ -6,6 +6,7 @@ import { Badge } from '../../../components/ui/Badge'
 import type { CharacterProfile } from '../../../types/game'
 import { UNIVERSITY_MAJORS, getUniversityMajorById } from '../data/majors'
 import { evaluateMajorEligibility } from '../services/educationService'
+import { TuitionFundingStep } from './TuitionFundingStep'
 
 interface UniversityApplicationModalProps {
   isOpen: boolean;
@@ -178,110 +179,30 @@ export const UniversityApplicationModal: React.FC<
 
       {/* STEP 2: Choose Funding Plan for Selected Major */}
       {selectedMajor && selectedEligibility && (
-        <div className="flex flex-col gap-3">
-          {/* Selected Major Summary Card */}
-          <div className="rounded-2xl border-2 border-slate-900 bg-sky-50 p-3 flex items-center gap-3 shadow-[1.5px_2px_0_#0f172a]">
-            <div className="w-11 h-11 rounded-xl bg-white border-2 border-slate-900 flex items-center justify-center text-2xl flex-shrink-0">
-              {selectedMajor.icon}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-black uppercase tracking-wider text-sky-700">
-                4-Year Undergraduate Program
-              </p>
-              <h4 className="font-black text-slate-950 text-sm leading-tight truncate">
-                {selectedMajor.degreeTitle}
-              </h4>
-              <p className="text-[11px] font-bold text-slate-600 mt-0.5">
-                Tuition: ${selectedMajor.tuitionPerYear.toLocaleString()}/yr ($
-                {(selectedMajor.tuitionPerYear * 4).toLocaleString()} total)
-              </p>
-            </div>
-          </div>
-
-          <p className="text-xs font-bold text-slate-600">
-            How would you like to finance your university tuition?
-          </p>
-
-          <div className="flex flex-col gap-2">
-            {/* Option 1: Full Scholarship */}
-            <div className="rounded-2xl border-2 border-slate-900 bg-emerald-50/70 p-3 flex items-center justify-between gap-2.5 shadow-[1.5px_2px_0_#0f172a]">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base">🏆</span>
-                  <p className="text-xs font-black text-slate-950 leading-tight">
-                    Apply for Full Scholarship
-                  </p>
-                </div>
-                <p className="text-[10px] font-bold text-slate-600 mt-0.5">
-                  {selectedEligibility.qualifiesMeritScholarship
-                    ? 'Qualified for 100% Academic Merit Scholarship!'
-                    : selectedEligibility.qualifiesAthleticScholarship
-                    ? 'Qualified for 100% Athletic Division Scholarship!'
-                    : 'Requires 88%+ Grades & 74+ Smarts, or Varsity Captaincy'}
-                </p>
-              </div>
-              <CartoonButton
-                variant={
-                  selectedEligibility.qualifiesMeritScholarship ||
-                  selectedEligibility.qualifiesAthleticScholarship
-                    ? 'emerald'
-                    : 'slate'
-                }
-                size="sm"
-                onClick={() => handleConfirmFunding('scholarship')}
-              >
-                {selectedEligibility.qualifiesMeritScholarship ||
-                selectedEligibility.qualifiesAthleticScholarship
-                  ? 'Claim'
-                  : 'Apply'}
-              </CartoonButton>
-            </div>
-
-            {/* Option 2: Ask Parents to Pay */}
-            <div className="rounded-2xl border-2 border-slate-900 bg-sky-50/70 p-3 flex items-center justify-between gap-2.5 shadow-[1.5px_2px_0_#0f172a]">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base">👨‍👩‍👧</span>
-                  <p className="text-xs font-black text-slate-950 leading-tight">
-                    Ask Parents to Pay
-                  </p>
-                </div>
-                <p className="text-[10px] font-bold text-slate-600 mt-0.5 capitalize">
-                  Family Wealth: {character.parents.wealth} • No student debt
-                </p>
-              </div>
-              <CartoonButton
-                variant="sky"
-                size="sm"
-                onClick={() => handleConfirmFunding('parents')}
-              >
-                Ask Parents
-              </CartoonButton>
-            </div>
-
-            {/* Option 3: Government Student Loan */}
-            <div className="rounded-2xl border-2 border-slate-900 bg-amber-50/70 p-3 flex items-center justify-between gap-2.5 shadow-[1.5px_2px_0_#0f172a]">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base">💳</span>
-                  <p className="text-xs font-black text-slate-950 leading-tight">
-                    Student Loan ($0 Upfront)
-                  </p>
-                </div>
-                <p className="text-[10px] font-bold text-slate-600 mt-0.5">
-                  Guaranteed approval • Deferred until graduation
-                </p>
-              </div>
-              <CartoonButton
-                variant="amber"
-                size="sm"
-                onClick={() => handleConfirmFunding('student_loan')}
-              >
-                Take Loan
-              </CartoonButton>
-            </div>
-          </div>
-        </div>
+        <TuitionFundingStep
+          programTitle={selectedMajor.name}
+          degreeTitle={selectedMajor.degreeTitle}
+          icon={selectedMajor.icon}
+          programTypeLabel="4-Year Undergraduate Program"
+          durationYears={4}
+          tuitionPerYear={selectedMajor.tuitionPerYear}
+          totalTuition={selectedMajor.tuitionPerYear * 4}
+          familyWealth={character.parents.wealth}
+          scholarshipQualified={
+            selectedEligibility.qualifiesMeritScholarship ||
+            selectedEligibility.qualifiesAthleticScholarship
+          }
+          scholarshipLabel="Apply for Full Scholarship"
+          scholarshipNote={
+            selectedEligibility.qualifiesMeritScholarship
+              ? 'Qualified for 100% Academic Merit Scholarship!'
+              : selectedEligibility.qualifiesAthleticScholarship
+              ? 'Qualified for 100% Athletic Division Scholarship!'
+              : 'Requires 88%+ Grades & 74+ Smarts, or Varsity Captaincy'
+          }
+          onSelectFunding={(method) => handleConfirmFunding(method as 'scholarship' | 'parents' | 'student_loan')}
+          onBack={() => setSelectedMajorId(null)}
+        />
       )}
     </Modal>
   );

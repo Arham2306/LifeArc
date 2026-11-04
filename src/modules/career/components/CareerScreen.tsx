@@ -13,10 +13,12 @@ import {
   Moon,
   Flame,
   Palmtree,
+  GraduationCap,
 } from 'lucide-react';
 import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
+import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
 import type { CharacterProfile } from '../../../types/game';
 import type {
   EmploymentType,
@@ -42,7 +44,6 @@ import {
   type JobApplicationOutcome,
 } from '../services/careerService';
 import { JobInterviewModal } from './JobInterviewModal';
-import { WorkplaceActionModal } from './WorkplaceActionModal';
 
 interface CareerScreenProps {
   character: CharacterProfile;
@@ -683,11 +684,46 @@ export const CareerScreen: React.FC<CareerScreenProps> = ({
       />
 
       {/* Workplace Action Outcome Modal */}
-      <WorkplaceActionModal
-        outcome={actionOutcome}
-        onClose={() => setActionOutcome(null)}
-        onOpenSchoolTab={onOpenSchoolTab}
-      />
+      {actionOutcome && (
+        <ActionOutcomeModal
+          isOpen={Boolean(actionOutcome)}
+          onClose={() => setActionOutcome(null)}
+          title={actionOutcome.title}
+          icon={actionOutcome.icon}
+          subtitle={
+            actionOutcome.newSalary
+              ? `${actionOutcome.subtitle} • $${actionOutcome.newSalary.toLocaleString()} / year`
+              : actionOutcome.subtitle
+          }
+          message={actionOutcome.message}
+          statEffects={actionOutcome.appliedEffects}
+          continueVariant={actionOutcome.isSuccess ? 'emerald' : 'slate'}
+          continueLabel="Continue"
+          alertCallout={
+            actionOutcome.missingDegreeRequirement
+              ? {
+                  title: 'Degree Gate Locked',
+                  message: `To unlock this promotion, complete a ${actionOutcome.missingDegreeRequirement} at University or Professional School.`,
+                  icon: <GraduationCap className="w-4 h-4 text-amber-800 stroke-[2.5]" />,
+                  variant: 'amber',
+                }
+              : undefined
+          }
+          secondaryAction={
+            actionOutcome.missingDegreeRequirement && onOpenSchoolTab
+              ? {
+                  label: 'Enroll in Higher Education',
+                  icon: <GraduationCap className="w-4 h-4 stroke-[2.5]" />,
+                  variant: 'purple',
+                  onClick: () => {
+                    setActionOutcome(null);
+                    onOpenSchoolTab();
+                  },
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 };

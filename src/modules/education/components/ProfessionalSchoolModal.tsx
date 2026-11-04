@@ -9,6 +9,7 @@ import {
   getProfessionalSchoolById,
 } from '../data/professionalSchools'
 import { evaluateProfessionalSchoolEligibility } from '../services/educationService'
+import { TuitionFundingStep } from './TuitionFundingStep'
 
 interface ProfessionalSchoolModalProps {
   isOpen: boolean;
@@ -257,126 +258,25 @@ export const ProfessionalSchoolModal: React.FC<ProfessionalSchoolModalProps> = (
 
       {/* STEP 2: Choose Tuition Funding for Selected Program */}
       {selectedSchool && (
-        <div className="space-y-3">
-          {/* Selected School Banner */}
-          <div className="rounded-2xl border-2 border-slate-900 bg-sky-50 p-3 flex items-center gap-3 shadow-[1.5px_2px_0_#0f172a]">
-            <div className="w-12 h-12 rounded-2xl bg-white border-2 border-slate-900 flex items-center justify-center text-2xl shadow-[1.5px_1.5px_0_#0f172a] flex-shrink-0">
-              {selectedSchool.icon}
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] font-black uppercase tracking-wider text-sky-700">
-                Admitted Candidate
-              </span>
-              <h4 className="font-black text-slate-950 text-sm leading-tight truncate">
-                {selectedSchool.name}
-              </h4>
-              <p className="text-[10px] font-bold text-slate-600 mt-0.5">
-                {selectedSchool.degreeAwarded} • {selectedSchool.durationYears} Years
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-[9px] font-black text-slate-500 uppercase">
-                Total Tuition
-              </p>
-              <p className="font-mono text-sm font-black text-slate-900">
-                ${totalTuition.toLocaleString()}
-              </p>
-            </div>
-          </div>
-
-          <p className="text-xs font-bold text-slate-700">
-            How would you like to finance your {selectedSchool.durationYears}-year professional degree?
-          </p>
-
-          <div className="space-y-2">
-            {/* OPTION 1: Merit Scholarship */}
-            <div
-              className={`
-                rounded-2xl border-2 p-3 flex flex-col gap-1.5 transition-all
-                ${
-                  selectedEligibility?.qualifiesMeritScholarship
-                    ? 'border-emerald-700 bg-emerald-50/70 shadow-[1.5px_2px_0_#0f172a]'
-                    : 'border-slate-300 bg-slate-100 opacity-60'
-                }
-              `}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🏆</span>
-                  <div>
-                    <h5 className="font-black text-xs text-slate-900">
-                      Presidential Merit Scholarship (100% Free)
-                    </h5>
-                    <p className="text-[10px] font-bold text-slate-600">
-                      Covers full ${totalTuition.toLocaleString()} tuition with $0 student debt!
-                    </p>
-                  </div>
-                </div>
-                {selectedEligibility?.qualifiesMeritScholarship ? (
-                  <CartoonButton
-                    variant="emerald"
-                    size="sm"
-                    onClick={() => handleConfirmFunding('scholarship')}
-                  >
-                    Accept
-                  </CartoonButton>
-                ) : (
-                  <Badge variant="slate" size="xs">
-                    Req: 90% Grades & 80 Smarts
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            {/* OPTION 2: Ask Parents to Pay */}
-            <div className="rounded-2xl border-2 border-slate-900 bg-amber-50/60 p-3 flex flex-col gap-1.5 shadow-[1.5px_2px_0_#0f172a]">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">👨‍👩‍👧</span>
-                  <div>
-                    <h5 className="font-black text-xs text-slate-900">
-                      Ask Parents to Sponsor Tuition
-                    </h5>
-                    <p className="text-[10px] font-bold text-slate-600">
-                      Family Wealth: <span className="font-black capitalize">{character.parents.wealth}</span>
-                    </p>
-                  </div>
-                </div>
-                <CartoonButton
-                  variant="amber"
-                  size="sm"
-                  onClick={() => handleConfirmFunding('parents')}
-                >
-                  Ask Parents
-                </CartoonButton>
-              </div>
-            </div>
-
-            {/* OPTION 3: Professional Student Loan */}
-            <div className="rounded-2xl border-2 border-slate-900 bg-sky-50/60 p-3 flex flex-col gap-1.5 shadow-[1.5px_2px_0_#0f172a]">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">💳</span>
-                  <div>
-                    <h5 className="font-black text-xs text-slate-900">
-                      Professional Student Loan (Deferred)
-                    </h5>
-                    <p className="text-[10px] font-bold text-slate-600">
-                      ${selectedSchool.tuitionPerYear.toLocaleString()} per year added to debt. Repay after graduation!
-                    </p>
-                  </div>
-                </div>
-                <CartoonButton
-                  variant="sky"
-                  size="sm"
-                  onClick={() => handleConfirmFunding('student_loan')}
-                >
-                  Take Loan
-                </CartoonButton>
-              </div>
-            </div>
-          </div>
-        </div>
+        <TuitionFundingStep
+          programTitle={selectedSchool.name}
+          degreeTitle={selectedSchool.degreeAwarded}
+          icon={selectedSchool.icon}
+          programTypeLabel="Admitted Graduate Candidate"
+          durationYears={selectedSchool.durationYears}
+          tuitionPerYear={selectedSchool.tuitionPerYear}
+          totalTuition={totalTuition}
+          familyWealth={character.parents.wealth}
+          scholarshipQualified={Boolean(selectedEligibility?.qualifiesMeritScholarship)}
+          scholarshipLabel="Presidential Merit Scholarship"
+          scholarshipNote={
+            selectedEligibility?.qualifiesMeritScholarship
+              ? `Covers full $${totalTuition.toLocaleString()} tuition with $0 student debt!`
+              : 'Requires 90%+ Grades & 80 Smarts'
+          }
+          onSelectFunding={(method) => handleConfirmFunding(method as 'scholarship' | 'parents' | 'student_loan')}
+          onBack={() => setSelectedSchoolId(null)}
+        />
       )}
     </Modal>
   );
