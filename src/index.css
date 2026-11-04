@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Fredoka', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-body);
+    background-color: #f0f7ff;
+    background-image: 
+      radial-gradient(#d0e3ff 1.5px, transparent 1.5px),
+      radial-gradient(#d0e3ff 1.5px, #f0f7ff 1.5px);
+    background-size: 32px 32px;
+    background-position: 0 0, 16px 16px;
+    color: #1e293b;
+    margin: 0;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+}
+
+/* Cartoon 3D Button Utility */
+.cartoon-btn-emerald {
+  background-color: #10b981;
+  border: 3px solid #064e3b;
+  box-shadow: 0 4px 0 #064e3b;
+  transition: all 0.08s ease-in-out;
+}
+.cartoon-btn-emerald:hover {
+  background-color: #34d399;
+}
+.cartoon-btn-emerald:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #064e3b;
+}
+
+.cartoon-btn-amber {
+  background-color: #f59e0b;
+  border: 3px solid #78350f;
+  box-shadow: 0 4px 0 #78350f;
+  transition: all 0.08s ease-in-out;
+}
+.cartoon-btn-amber:hover {
+  background-color: #fbbf24;
+}
+.cartoon-btn-amber:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #78350f;
+}
+
+.cartoon-btn-sky {
+  background-color: #38bdf8;
+  border: 3px solid #0369a1;
+  box-shadow: 0 4px 0 #0369a1;
+  transition: all 0.08s ease-in-out;
+}
+.cartoon-btn-sky:hover {
+  background-color: #7dd3fc;
+}
+.cartoon-btn-sky:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #0369a1;
+}
+
+/* Cartoon Box / Card Style */
+.cartoon-card {
+  background-color: #ffffff;
+  border: 3px solid #1e293b;
+  box-shadow: 4px 5px 0 #1e293b;
+}
+
+.cartoon-card-sm {
+  background-color: #ffffff;
+  border: 2.5px solid #1e293b;
+  box-shadow: 2.5px 3px 0 #1e293b;
+}
+
+/* Glossy highlight for progress bars */
+.gloss-overlay {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.08) 100%);
+}

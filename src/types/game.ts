@@ -1,0 +1,140 @@
+import type { EducationProfile } from '../modules/education/types'
+import type { PlayerCareerState } from '../modules/career/types'
+import type { ActiveBusinessProfile } from '../modules/business/types'
+
+export interface CharacterStats {
+  health: number;      // 0 - 100
+  happiness: number;   // 0 - 100
+  smarts: number;      // 0 - 100
+  looks: number;       // 0 - 100
+  karma: number;       // 0 - 100
+}
+
+export type StatKey = keyof CharacterStats;
+
+export type FamilyWealth = 'struggling' | 'modest' | 'comfortable' | 'wealthy';
+
+export interface ParentProfile {
+  id: string;
+  role: 'father' | 'mother';
+  firstName: string;
+  lastName: string;
+  age: number;
+  occupation: string;
+  isAlive: boolean;
+  /** Player's relationship with this parent (0 - 100). */
+  relationship: number;
+  /** How generous this parent is when asked for things (0 - 100). */
+  generosity: number;
+}
+
+export interface ParentsInfo {
+  father: ParentProfile;
+  mother: ParentProfile;
+  wealth: FamilyWealth;
+}
+
+/** A set of changes to apply to a character. All fields are optional deltas. */
+export type StatEffects = Partial<Record<StatKey, number>> & {
+  cash?: number;
+  /** Changes relationship with both parents. */
+  parents?: number;
+  /** Changes relationship with father specifically. */
+  fatherRelationship?: number;
+  /** Changes relationship with mother specifically. */
+  motherRelationship?: number;
+  /** Academic grades percentage (0 - 100). */
+  grades?: number;
+  /** School popularity score (0 - 100). */
+  popularity?: number;
+  /** Current job performance delta (-100 to +100). Clamped to 0 - 100 on current job. */
+  jobPerformance?: number;
+  /** Active business brand reputation delta (-100 to +100). */
+  businessBrand?: number;
+  /** Active business workforce morale delta (-100 to +100). */
+  businessMorale?: number;
+  /** Active business product quality delta (-100 to +100). */
+  businessQuality?: number;
+  /** Active business corporate treasury cash delta ($). */
+  businessTreasury?: number;
+};
+
+export type RelationshipType =
+  | 'friend'
+  | 'best_friend'
+  | 'crush'
+  | 'dating'
+  | 'partner'
+  | 'spouse'
+  | 'ex'
+  | 'rival'
+  | 'enemy'
+  | 'classmate'
+  | 'roommate'
+  | 'mentor'
+  | 'coworker';
+
+export interface PersonProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  gender: 'male' | 'female' | 'non-binary';
+  age: number;
+  role: string;
+  relationshipType: RelationshipType;
+  /** Player's relationship score with this person (0 - 100). */
+  relationship: number;
+  originStory: string;
+  stageMet: 'childhood' | 'middle_school' | 'high_school' | 'university' | 'adulthood';
+  avatarEmoji?: string;
+}
+
+export interface CharacterProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  gender: 'male' | 'female' | 'non-binary';
+  age: number;
+  birthYear: number;
+  country: string;
+  flag?: string;
+  city: string;
+  occupation: string;
+  cash: number;
+  bankBalance: number;
+  netWorth: number;
+  isAlive: boolean;
+  causeOfDeath?: string;
+  stats: CharacterStats;
+  parents: ParentsInfo;
+  education: EducationProfile;
+  career: PlayerCareerState;
+  business?: ActiveBusinessProfile | null;
+  relationships: PersonProfile[];
+  timeline: LifeEvent[];
+  /** Ids of one-time interactive events this character has already experienced. */
+  seenEventIds: string[];
+}
+
+export type LifeEventCategory =
+  | 'birth'
+  | 'childhood'
+  | 'education'
+  | 'career'
+  | 'business'
+  | 'health'
+  | 'relationship'
+  | 'social'
+  | 'money'
+  | 'misfortune'
+  | 'milestone';
+
+export interface LifeEvent {
+  id: string;
+  age: number;
+  year: number;
+  title?: string;
+  message: string;
+  category: LifeEventCategory;
+  icon?: string;
+}
