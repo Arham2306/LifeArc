@@ -279,7 +279,7 @@ export function resolveEventChoice(
         relationship: Math.min(100, Math.max(0, p.relationship ?? existing.relationship)),
         avatarEmoji: p.avatarEmoji || existing.avatarEmoji,
         romanceUnlocked: isRomantic ? true : existing.romanceUnlocked,
-        romanceMeter: isRomantic ? (existing.romanceMeter ?? 50) : existing.romanceMeter,
+        romanceMeter: isRomantic ? (existing.romanceMeter ?? 0) : existing.romanceMeter,
         romanticStage: isRomantic ? 'dating' : existing.romanticStage,
         partnerStats: isRomantic ? (existing.partnerStats || defaultPartnerStats) : existing.partnerStats,
       };
@@ -302,7 +302,7 @@ export function resolveEventChoice(
         stageMet: p.stageMet,
         avatarEmoji: p.avatarEmoji,
         romanceUnlocked: isRomantic ? true : undefined,
-        romanceMeter: isRomantic ? 50 : undefined,
+        romanceMeter: isRomantic ? 0 : undefined,
         romanticStage: isRomantic ? 'dating' : undefined,
         partnerStats: isRomantic ? defaultPartnerStats : undefined,
       };
@@ -333,7 +333,7 @@ export function resolveEventChoice(
           ? {
               romanticStage: 'dating' as const,
               romanceUnlocked: true,
-              romanceMeter: target.romanceMeter ?? 50,
+              romanceMeter: target.romanceMeter ?? 0,
               partnerStats: target.partnerStats || {
                 craziness: 30,
                 generosity: 50,

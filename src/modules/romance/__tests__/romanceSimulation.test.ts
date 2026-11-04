@@ -167,11 +167,11 @@ assert(lowRes.result.success === false, 'Ask out rejected when rapport is low');
 
 const lowRomanceTarget = createMockFriend({ relationship: 80, romanceMeter: 20, age: 20 });
 const lowRomanceRes = romanceService.executeAskOut(adultChar, lowRomanceTarget);
-assert(lowRomanceRes.result.success === false, 'Ask out rejected when romance is under 35%');
+assert(lowRomanceRes.result.success === false, 'Ask out rejected when romance is under 30%');
 
 const readyTarget = createMockFriend({ relationship: 75, romanceMeter: 50, age: 20 });
 const readyRes = romanceService.executeAskOut(adultChar, readyTarget);
-assert(readyRes.result.success === true, 'Ask out accepted when romance >= 35% and rel >= 50%');
+assert(readyRes.result.success === true, 'Ask out accepted when romance >= 30% and rel >= 45%');
 assert(readyRes.updatedTarget.romanticStage === 'dating', 'Stage updated to dating');
 assert(readyRes.updatedTarget.role === 'Girlfriend', 'Role updated to Girlfriend');
 console.log(`✅ Ask Out Milestone: Successfully transitioned from friend to Girlfriend!`);
@@ -458,4 +458,137 @@ const older = aged.children?.find((c) => c.id === 'child-1');
 assert(older?.age === 3, 'Existing child aged to 3');
 
 console.log(`✅ Aging Lifecycle: Partner aged to 25, spouse salary contributed ($10k), and baby safely delivered!`);
+
+// Test 10: Realistic 2-Year Courtship Progression Simulation (Starting from 0% Romance)
+// Scenario: Player begins dating at 26, courts actively for 2 years with 2x per-action limits, proposes at 28.
+let pChar = createMockCharacter({ age: 26, cash: 10000 });
+let prospectTarget = createMockFriend({
+  firstName: 'Elena',
+  lastName: 'Rostova',
+  age: 26,
+  role: 'Dating Prospect',
+  relationshipType: 'crush',
+  relationship: 45,
+  romanceUnlocked: true,
+  romanceMeter: 0, // Strictly starts at 0%
+  romanticStage: 'flirting',
+  partnerStats: {
+    craziness: 25,
+    generosity: 75,
+    looks: 80,
+    smarts: 80,
+    fertility: 80,
+    occupation: 'Architect',
+    annualIncome: 70000,
+    yearsTogether: 0,
+  },
+});
+
+assert(prospectTarget.romanceMeter === 0, 'Target starts at 0% romance');
+
+// Year 1 (Age 26):
+// Action 1 & 2: Dates (e.g. Coffee / Diner + Picnic)
+const date1 = romanceService.executeDate(pChar, prospectTarget, DATE_VENUES[0]);
+prospectTarget = date1.updatedTarget;
+assert((prospectTarget.romanceMeter ?? 0) >= 10, 'Date 1 boosted romance above 10%');
+
+const date2 = romanceService.executeDate(pChar, prospectTarget, DATE_VENUES[1]);
+prospectTarget = date2.updatedTarget;
+assert((prospectTarget.romanceMeter ?? 0) >= 20, 'Date 2 boosted romance above 20%');
+
+// Action 3 & 4: Flirting (2x)
+const flirt1 = romanceService.executeFlirt(pChar, prospectTarget, FLIRT_OPTIONS[0]);
+prospectTarget = flirt1.updatedTarget;
+const flirt2 = romanceService.executeFlirt(pChar, prospectTarget, FLIRT_OPTIONS[1]);
+prospectTarget = flirt2.updatedTarget;
+assert((prospectTarget.romanceMeter ?? 0) >= 28, 'Flirts boosted romance to ~30%');
+
+// Action 5 & 6: Deep Talks (2x)
+const talk1 = romanceService.executeRomanticTalk(pChar, prospectTarget, ROMANTIC_TALK_TOPICS[0]);
+prospectTarget = talk1.updatedTarget;
+const talk2 = romanceService.executeRomanticTalk(pChar, prospectTarget, ROMANTIC_TALK_TOPICS[1]);
+prospectTarget = talk2.updatedTarget;
+assert((prospectTarget.romanceMeter ?? 0) >= 38, 'Deep talks unlocked and boosted romance');
+
+// Milestone: Ask Elena to be official Partner / Girlfriend
+const askOut = romanceService.executeAskOut(pChar, prospectTarget);
+assert(askOut.result.success === true, 'Ask out accepted in Year 1 after active courting');
+prospectTarget = askOut.updatedTarget;
+assert(prospectTarget.romanticStage === 'dating', 'Became official girlfriend');
+assert((prospectTarget.romanceMeter ?? 0) >= 50, 'Ask out boosted romance over 50%');
+
+// Unlock Tier 4 Intimacy once Love reaches 60%
+// Gift 1
+const gift1 = romanceService.executeRomanticGift(pChar, prospectTarget, ROMANTIC_GIFTS[1]); // Flowers
+prospectTarget = gift1.updatedTarget;
+assert((prospectTarget.romanceMeter ?? 0) >= 60, 'Flowers unlocked Tier 4 Intimacy (>=60%)');
+
+// Intimacy (2x)
+const intimate1 = reproductionService.executeIntimacy(pChar, prospectTarget, 'condom');
+prospectTarget = {
+  ...prospectTarget,
+  relationship: Math.min(100, prospectTarget.relationship + intimate1.relationshipDelta),
+  romanceMeter: Math.min(100, (prospectTarget.romanceMeter ?? 0) + intimate1.romanceDelta),
+};
+const intimate2 = reproductionService.executeIntimacy(pChar, prospectTarget, 'condom');
+prospectTarget = {
+  ...prospectTarget,
+  relationship: Math.min(100, prospectTarget.relationship + intimate2.relationshipDelta),
+  romanceMeter: Math.min(100, (prospectTarget.romanceMeter ?? 0) + intimate2.romanceDelta),
+};
+assert((prospectTarget.romanceMeter ?? 0) >= 70, 'Year 1 Romance reached 70%+');
+
+// Year 1 Ends -> Age up to 27
+pChar = {
+  ...pChar,
+  partner: prospectTarget,
+  relationships: [prospectTarget],
+  yearlySocialActions: {
+    [prospectTarget.id]: ['romance_date', 'romance_date', 'romance_flirt', 'romance_flirt'],
+  },
+};
+let agedChar = ageUpCharacter(pChar);
+assert(agedChar.age === 27, 'Character aged to 27');
+assert(agedChar.partner?.partnerStats?.yearsTogether === 1, '1 Year together recorded');
+prospectTarget = agedChar.partner!;
+
+// Year 2 (Age 27):
+// Further dates, deep talks, gifts
+const yr2Date1 = romanceService.executeDate(agedChar, prospectTarget, DATE_VENUES[3]); // Candlelit Bistro
+prospectTarget = yr2Date1.updatedTarget;
+const yr2Date2 = romanceService.executeDate(agedChar, prospectTarget, DATE_VENUES[4]); // Rooftop Cocktail
+prospectTarget = yr2Date2.updatedTarget;
+const yr2Talk = romanceService.executeRomanticTalk(agedChar, prospectTarget, ROMANTIC_TALK_TOPICS[2]);
+prospectTarget = yr2Talk.updatedTarget;
+const yr2Gift = romanceService.executeRomanticGift(agedChar, prospectTarget, ROMANTIC_GIFTS[2]);
+prospectTarget = yr2Gift.updatedTarget;
+
+assert((prospectTarget.romanceMeter ?? 0) >= 85, 'Year 2 Romance smoothly climbed past 85%');
+assert(prospectTarget.relationship >= 90, 'Relationship rapport at peak (>90%)');
+
+// Year 2 Ends -> Age up to 28
+agedChar = {
+  ...agedChar,
+  partner: prospectTarget,
+  relationships: [prospectTarget],
+  yearlySocialActions: {
+    [prospectTarget.id]: ['romance_date', 'romance_talk'],
+  },
+};
+let matureChar = ageUpCharacter(agedChar);
+assert(matureChar.age === 28, 'Character aged to 28');
+assert(matureChar.partner?.partnerStats?.yearsTogether === 2, 'Exactly 2 Years together reached!');
+prospectTarget = matureChar.partner!;
+
+// Milestone: Propose Marriage at 28!
+const proposalResult = romanceService.executeProposal(
+  matureChar,
+  prospectTarget,
+  ENGAGEMENT_RINGS[2],
+  PROPOSAL_VENUES[2]
+);
+assert(proposalResult.result.success === true, 'Proposal succeeded after 2 years of dating from 0% romance baseline!');
+assert(proposalResult.updatedTarget.romanticStage === 'engaged', 'Elena is now Fiancée at 28!');
+console.log(`✅ Realistic 2-Year Courtship Simulation: Started at 0% romance at age 26, dated for 2 years with 2x actions/yr, successfully engaged at age 28!`);
+
 console.log('--- ALL MODULE 7 ROMANCE & DATING TESTS PASSED PERFECTLY! ---\n');

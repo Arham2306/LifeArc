@@ -168,7 +168,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
     if (reaction.actionKey && reaction.targetId) {
       const currentActions = finalChar.yearlySocialActions?.[reaction.targetId] || [];
-      if (!currentActions.includes(reaction.actionKey)) {
+      const actionCount = currentActions.filter((a) => a === reaction.actionKey).length;
+      if (actionCount < 2) {
         finalChar = {
           ...finalChar,
           yearlySocialActions: {
@@ -1321,15 +1322,17 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
             <div className="flex flex-col gap-2">
             {(() => {
               const partnerYearlyActions = character.yearlySocialActions?.[partner.id] || [];
-              const partnerRomanceActions = partnerYearlyActions.filter((a) => a.startsWith('romance_'));
-              const romanceCount = partnerRomanceActions.length;
-              const isLimitReached = romanceCount >= 2;
+              const dateCount = partnerYearlyActions.filter((a) => a === 'romance_date').length;
+              const flirtCount = partnerYearlyActions.filter((a) => a === 'romance_flirt').length;
+              const talkCount = partnerYearlyActions.filter((a) => a === 'romance_talk').length;
+              const giftCount = partnerYearlyActions.filter((a) => a === 'romance_gift').length;
+              const intimacyCount = partnerYearlyActions.filter((a) => a === 'romance_intimacy').length;
 
-              const hasDated = partnerRomanceActions.includes('romance_date');
-              const hasFlirted = partnerRomanceActions.includes('romance_flirt');
-              const hasTalked = partnerRomanceActions.includes('romance_talk');
-              const hasGifted = partnerRomanceActions.includes('romance_gift');
-              const hasIntimacy = partnerRomanceActions.includes('romance_intimacy');
+              const isDateMaxed = dateCount >= 2;
+              const isFlirtMaxed = flirtCount >= 2;
+              const isTalkMaxed = talkCount >= 2;
+              const isGiftMaxed = giftCount >= 2;
+              const isIntimacyMaxed = intimacyCount >= 2;
 
               return (
                 <>
@@ -1337,66 +1340,60 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                     <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
                       Romantic Interactions
                     </h4>
-                    <span
-                      className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                        isLimitReached
-                          ? 'bg-amber-100 text-amber-800 border-amber-300'
-                          : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      }`}
-                    >
-                      {romanceCount}/2 Actions This Year
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-rose-50 text-rose-800 border-rose-200">
+                      2x per action / year
                     </span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <CartoonButton
-                      variant={isLimitReached || hasDated ? 'slate' : 'white'}
+                      variant={isDateMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isLimitReached || hasDated}
+                      disabled={isDateMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenDatePicker(partner)}
                     >
                       <Wine className="w-4 h-4 text-rose-500 shrink-0" />
-                      <span>{hasDated ? 'Date (Done)' : 'Plan a Date'}</span>
+                      <span>{isDateMaxed ? 'Date (2/2 Done)' : dateCount === 1 ? 'Date (1/2)' : 'Plan Date (0/2)'}</span>
                     </CartoonButton>
 
                     <CartoonButton
-                      variant={isLimitReached || hasFlirted ? 'slate' : 'white'}
+                      variant={isFlirtMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isLimitReached || hasFlirted}
+                      disabled={isFlirtMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenFlirtPicker(partner)}
                     >
                       <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span>{hasFlirted ? 'Flirt (Done)' : 'Flirt'}</span>
+                      <span>{isFlirtMaxed ? 'Flirt (2/2 Done)' : flirtCount === 1 ? 'Flirt (1/2)' : 'Flirt (0/2)'}</span>
                     </CartoonButton>
 
                     <CartoonButton
-                      variant={isLimitReached || hasTalked ? 'slate' : 'white'}
+                      variant={isTalkMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isLimitReached || hasTalked}
+                      disabled={isTalkMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenTalkPicker(partner)}
                     >
                       <MessageCircle className="w-4 h-4 text-sky-500 shrink-0" />
-                      <span>{hasTalked ? 'Deep Talk (Done)' : 'Deep Talk'}</span>
+                      <span>{isTalkMaxed ? 'Deep Talk (2/2 Done)' : talkCount === 1 ? 'Deep Talk (1/2)' : 'Deep Talk (0/2)'}</span>
                     </CartoonButton>
 
                     <CartoonButton
-                      variant={isLimitReached || hasGifted ? 'slate' : 'white'}
+                      variant={isGiftMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isLimitReached || hasGifted}
+                      disabled={isGiftMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenGiftPicker(partner)}
                     >
                       <Gift className="w-4 h-4 text-emerald-500 shrink-0" />
-                      <span>{hasGifted ? 'Gift (Done)' : 'Give Gift'}</span>
+                      <span>{isGiftMaxed ? 'Gift (2/2 Done)' : giftCount === 1 ? 'Give Gift (1/2)' : 'Give Gift (0/2)'}</span>
                     </CartoonButton>
 
-                    {/* Intimacy: Gated behind 60% Love & 70% Relationship, plus annual limits */}
+                    {/* Intimacy: Gated behind 60% Love & 70% Relationship, plus 2x annual limits */}
                     {(() => {
                       const meetsStats = (partner.romanceMeter ?? 0) >= 60 && partner.relationship >= 70;
-                      const canMakeLove = meetsStats && !isLimitReached && !hasIntimacy;
+                      const canMakeLove = meetsStats && !isIntimacyMaxed;
                       return (
                         <CartoonButton
                           variant={canMakeLove ? 'white' : 'slate'}
@@ -1409,12 +1406,12 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                         >
                           <Flame className={`w-4 h-4 shrink-0 ${canMakeLove ? 'text-rose-600' : 'text-slate-400'}`} />
                           <span>
-                            {hasIntimacy
-                              ? 'Make Love (Done)'
-                              : isLimitReached
-                              ? 'Make Love (Limit 2/2)'
+                            {isIntimacyMaxed
+                              ? 'Make Love (2/2 Done)'
                               : meetsStats
-                              ? 'Make Love'
+                              ? intimacyCount === 1
+                                ? 'Make Love (1/2)'
+                                : 'Make Love (0/2)'
                               : 'Make Love (60% Love)'}
                           </span>
                         </CartoonButton>
@@ -1560,7 +1557,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
               <div className="flex flex-col gap-3">
                 {datingProspects.map((prospect) => {
                   const romanceVal = prospect.romanceMeter ?? 0;
-                  const canAskOut = romanceVal >= 35 && prospect.relationship >= 50;
+                  const canAskOut = romanceVal >= 30 && prospect.relationship >= 45;
 
                   return (
                     <div
@@ -1608,71 +1605,68 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       {/* Courtship Action Buttons */}
                       {(() => {
                         const pYearlyActions = character.yearlySocialActions?.[prospect.id] || [];
-                        const pRomanceActions = pYearlyActions.filter((a) => a.startsWith('romance_'));
-                        const pCount = pRomanceActions.length;
-                        const pLimit = pCount >= 2;
+                        const pFlirtCount = pYearlyActions.filter((a) => a === 'romance_flirt').length;
+                        const pDateCount = pYearlyActions.filter((a) => a === 'romance_date').length;
+                        const pTalkCount = pYearlyActions.filter((a) => a === 'romance_talk').length;
+                        const pGiftCount = pYearlyActions.filter((a) => a === 'romance_gift').length;
 
-                        const pDated = pRomanceActions.includes('romance_date');
-                        const pFlirted = pRomanceActions.includes('romance_flirt');
-                        const pTalked = pRomanceActions.includes('romance_talk');
-                        const pGifted = pRomanceActions.includes('romance_gift');
+                        const isPFlirtMaxed = pFlirtCount >= 2;
+                        const isPDateMaxed = pDateCount >= 2;
+                        const isPTalkMaxed = pTalkCount >= 2;
+                        const isPGiftMaxed = pGiftCount >= 2;
 
                         return (
                           <>
                             <div className="flex items-center justify-between text-[11px] font-black text-slate-600 px-0.5">
                               <span>Courting Actions</span>
-                              <span
-                                className={`font-mono ${
-                                  pLimit ? 'text-amber-700 bg-amber-100' : 'text-emerald-700 bg-emerald-100'
-                                } px-1.5 py-0.5 rounded text-[10px]`}
-                              >
-                                {pCount}/2 this year
+                              <span className="font-mono text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded text-[10px] border border-emerald-200">
+                                2x per action
                               </span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-1.5">
                               <CartoonButton
-                                variant={pLimit || pFlirted ? 'slate' : 'white'}
+                                variant={isPFlirtMaxed ? 'slate' : 'white'}
                                 size="sm"
-                                disabled={pLimit || pFlirted}
+                                disabled={isPFlirtMaxed}
                                 className="flex items-center justify-center gap-1.5"
                                 onClick={() => handleOpenFlirtPicker(prospect)}
                               >
                                 <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                <span>{pFlirted ? 'Flirt (Done)' : 'Flirt'}</span>
+                                <span>{isPFlirtMaxed ? 'Flirt (2/2 Done)' : pFlirtCount === 1 ? 'Flirt (1/2)' : 'Flirt (0/2)'}</span>
                               </CartoonButton>
 
                               <CartoonButton
-                                variant={pLimit || pDated ? 'slate' : 'white'}
+                                variant={isPDateMaxed ? 'slate' : 'white'}
                                 size="sm"
-                                disabled={pLimit || pDated}
+                                disabled={isPDateMaxed}
                                 className="flex items-center justify-center gap-1.5"
                                 onClick={() => handleOpenDatePicker(prospect)}
                               >
                                 <Wine className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                                <span>{pDated ? 'Date (Done)' : 'Plan Date'}</span>
+                                <span>{isPDateMaxed ? 'Date (2/2 Done)' : pDateCount === 1 ? 'Plan Date (1/2)' : 'Plan Date (0/2)'}</span>
                               </CartoonButton>
 
                               <CartoonButton
-                                variant={pLimit || pTalked ? 'slate' : 'white'}
+                                variant={isPTalkMaxed ? 'slate' : 'white'}
                                 size="sm"
-                                disabled={pLimit || pTalked}
+                                disabled={isPTalkMaxed}
                                 className="flex items-center justify-center gap-1.5"
                                 onClick={() => handleOpenTalkPicker(prospect)}
                               >
                                 <MessageCircle className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                                <span>{pTalked ? 'Talk (Done)' : 'Deep Talk'}</span>
+                                <span>{isPTalkMaxed ? 'Talk (2/2 Done)' : pTalkCount === 1 ? 'Deep Talk (1/2)' : 'Deep Talk (0/2)'}</span>
                               </CartoonButton>
 
                               <CartoonButton
-                                variant={pLimit || pGifted ? 'slate' : 'white'}
+                                variant={isPGiftMaxed ? 'slate' : 'white'}
                                 size="sm"
-                                disabled={pLimit || pGifted}
+                                disabled={isPGiftMaxed}
                                 className="flex items-center justify-center gap-1.5"
                                 onClick={() => handleOpenGiftPicker(prospect)}
                               >
                                 <Gift className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                <span>{pGifted ? 'Gift (Done)' : 'Give Gift'}</span>
+                                <span>{isPGiftMaxed ? 'Gift (2/2 Done)' : pGiftCount === 1 ? 'Give Gift (1/2)' : 'Give Gift (0/2)'}</span>
                               </CartoonButton>
                             </div>
                           </>
@@ -1693,7 +1687,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                         <span>
                           {canAskOut
                             ? `Ask ${prospect.firstName} to be Partner ❤️`
-                            : `Ask Out (Needs 35% Love [${romanceVal}%] & 50% Rel [${Math.round(prospect.relationship)}%])`}
+                            : `Ask Out (Needs 30% Love [${romanceVal}%] & 45% Rel [${Math.round(prospect.relationship)}%])`}
                         </span>
                       </CartoonButton>
                     </div>

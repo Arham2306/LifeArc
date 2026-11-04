@@ -76,14 +76,14 @@ export class RomanceService {
     if (roll >= successThreshold) {
       // Big success
       success = true;
-      relationshipDelta = Math.floor(Math.random() * 3) + 2; // +2 to +4
-      romanceDelta = flirt.style === 'bold' ? Math.floor(Math.random() * 2) + 3 : Math.floor(Math.random() * 2) + 2; // +2 to +4
+      relationshipDelta = Math.floor(Math.random() * 3) + 3; // +3 to +5
+      romanceDelta = flirt.style === 'bold' ? Math.floor(Math.random() * 2) + 5 : Math.floor(Math.random() * 2) + 4; // +4 to +6
       message = `${target.firstName} ${flirt.successMessage}`;
     } else if (roll >= successThreshold - 20) {
       // Awkward but safe
       success = true;
-      relationshipDelta = 1;
-      romanceDelta = 1;
+      relationshipDelta = 2;
+      romanceDelta = 3;
       message = `${target.firstName} ${flirt.awkwardMessage}`;
     } else {
       // Rejected
@@ -188,8 +188,8 @@ export class RomanceService {
     target: PersonProfile,
     talk: RomanticTalkOption
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
-    const relationshipDelta = Math.floor(Math.random() * 3) + 3; // +3 to +5
-    const romanceDelta = Math.floor(Math.random() * 3) + 2; // +2 to +4
+    const relationshipDelta = Math.floor(Math.random() * 3) + 6; // +6 to +8
+    const romanceDelta = Math.floor(Math.random() * 3) + 5; // +5 to +7
     const message = `You discussed "${talk.topic}" with ${target.firstName}. They ${talk.reaction}`;
 
     const updatedTarget: PersonProfile = {
@@ -272,7 +272,7 @@ export class RomanceService {
     const rel = target.relationship;
     const romance = target.romanceMeter ?? 0;
 
-    if (rel < 50 || romance < 35) {
+    if (rel < 45 || romance < 30) {
       return {
         updatedTarget: target,
         result: {
@@ -296,7 +296,7 @@ export class RomanceService {
       relationshipType: 'dating',
       romanticStage: 'dating',
       relationship: Math.min(100, rel + 15),
-      romanceMeter: Math.min(100, romance + 25),
+      romanceMeter: Math.min(100, romance + 15),
       partnerStats: {
         ...(target.partnerStats || {
           craziness: Math.floor(Math.random() * 40) + 20,
@@ -365,7 +365,7 @@ export class RomanceService {
       };
     }
 
-    if (target.romanticStage === 'flirting' || rel < 75 || romance < 70) {
+    if (target.romanticStage === 'flirting' || rel < 70 || romance < 70) {
       return {
         updatedTarget: target,
         result: {

@@ -18,8 +18,8 @@ export class ReproductionService {
     romanceDelta: number;
     happinessDelta: number;
   } {
-    const relDelta = Math.floor(Math.random() * 3) + 3;
-    const romanceDelta = Math.floor(Math.random() * 3) + 3;
+    const relDelta = Math.floor(Math.random() * 3) + 5; // +5 to +7
+    const romanceDelta = Math.floor(Math.random() * 3) + 5; // +5 to +7
     const happinessDelta = 12;
 
     let conceptionOccurred = false;
