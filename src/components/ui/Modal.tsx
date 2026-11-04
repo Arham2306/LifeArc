@@ -8,7 +8,14 @@ interface ModalProps {
   icon?: React.ReactNode;
   children: React.ReactNode;
   actions?: React.ReactNode;
+  maxWidth?: 'sm' | 'md' | 'lg';
 }
+
+const maxWidthStyles: Record<'sm' | 'md' | 'lg', string> = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+};
 
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -17,12 +24,13 @@ export const Modal: React.FC<ModalProps> = ({
   icon,
   children,
   actions,
+  maxWidth = 'sm',
 }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="w-full max-w-sm rounded-[28px] bg-white border-[3px] border-slate-900 shadow-[6px_8px_0_#0f172a] overflow-hidden flex flex-col">
+      <div className={`w-full ${maxWidthStyles[maxWidth]} rounded-[28px] bg-white border-[3px] border-slate-900 shadow-[6px_8px_0_#0f172a] overflow-hidden flex flex-col`}>
         {/* Header */}
         <div className="bg-amber-400 border-b-[3px] border-slate-900 px-5 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2">

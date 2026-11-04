@@ -14,23 +14,21 @@ import {
 } from 'lucide-react';
 import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { DualMeterDisplay } from './DualMeterDisplay';
-import { FlirtModal } from './FlirtModal';
-import { DatePlannerModal } from './DatePlannerModal';
-import { RomanticTalkModal } from './RomanticTalkModal';
-import { RomanticGiftModal } from './RomanticGiftModal';
-import { IntimacyModal } from './IntimacyModal';
-import { AskOutModal } from './AskOutModal';
+import { ActionPickerModal, type ActionPickerItem } from '../../../components/ui/ActionPickerModal';
+import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
+import { ConfirmModal } from '../../../components/ui/ConfirmModal';
+import { FLIRT_OPTIONS, DATE_VENUES, ROMANTIC_TALK_TOPICS, ROMANTIC_GIFTS } from '../data/romanticInteractions';
 import { ProposalModal } from './ProposalModal';
 import { WeddingPlannerModal } from './WeddingPlannerModal';
 import { FamilyPlanningModal } from './FamilyPlanningModal';
 import { ChildDetailModal } from './ChildDetailModal';
 import { DivorceModal } from './DivorceModal';
 import { DatingAppModal } from './DatingAppModal';
-import { RomanceReactionModal, type RomanceReactionDeltas } from './RomanceReactionModal';
 import { romanceService } from '../services/romanceService';
 import { reproductionService } from '../services/reproductionService';
 import { divorceService } from '../services/divorceService';
 import { createId } from '../../../utils/id';
+import { ShieldCheck, MessageCircleHeart } from 'lucide-react';
 import type { CharacterProfile, PersonProfile, ChildProfile, LifeEvent } from '../../../types/game';
 import type {
   FlirtOption,
@@ -42,6 +40,15 @@ import type {
   WeddingVenue,
   DatingCandidate,
 } from '../types';
+
+export interface RomanceReactionDeltas {
+  romanceDelta?: number;
+  relationshipDelta?: number;
+  happinessDelta?: number;
+  cashDelta?: number;
+  isConception?: boolean;
+  customBadge?: string;
+}
 
 interface RomanceScreenProps {
   character: CharacterProfile;
@@ -88,18 +95,23 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   const [activeModal, setActiveModal] = useState<
     | null
     | 'dating_app'
-    | 'flirt'
-    | 'date'
-    | 'romantic_talk'
-    | 'romantic_gift'
-    | 'intimacy'
-    | 'ask_out'
     | 'proposal'
     | 'wedding'
     | 'family_planning'
     | 'child_detail'
     | 'divorce'
   >(null);
+
+  const [actionPicker, setActionPicker] = useState<{
+    title: string;
+    icon?: React.ReactNode;
+    subtitle?: string;
+    target?: PersonProfile;
+    items: ActionPickerItem<any>[];
+    onSelect: (item: any) => void;
+  } | null>(null);
+
+  const [askOutTarget, setAskOutTarget] = useState<PersonProfile | null>(null);
 
   const [activeTarget, setActiveTarget] = useState<PersonProfile | null>(null);
   const [selectedChild, setSelectedChild] = useState<ChildProfile | null>(null);
@@ -119,7 +131,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   const partner = character.partner;
 
   /**
-   * Helper to display outcome in RomanceReactionModal popup AND log it into character.timeline
+   * Helper to display outcome in ActionOutcomeModal popup AND log it into character.timeline
    */
   const triggerRomanceReaction = (
     baseChar: CharacterProfile,
@@ -293,9 +305,185 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     });
   };
 
+  // Open Flirt Picker
+  const handleOpenFlirtPicker = (targetPerson: PersonProfile) => {
+    setActionPicker({
+      title: `Flirt with ${targetPerson.firstName}`,
+      icon: '✨',
+      subtitle: 'Choose your flirting style and test your chemistry:',
+      target: targetPerson,
+      items: FLIRT_OPTIONS.map((flirt) => ({
+        id: flirt.id,
+        title: flirt.label,
+        subtitle: `"${flirt.dialogue}"`,
+        badge: flirt.style,
+        badgeColor: flirt.style === 'bold' ? 'rose' : flirt.style === 'playful' ? 'amber' : 'sky',
+        icon: <MessageCircleHeart className="w-3.5 h-3.5 text-rose-500 stroke-[2.5]" />,
+        data: flirt,
+      })),
+      onSelect: (flirt: FlirtOption) => {
+        setActionPicker(null);
+        handleExecuteFlirt(flirt, targetPerson);
+      },
+    });
+  };
+
+  // Open Date Picker
+  const handleOpenDatePicker = (targetPerson: PersonProfile) => {
+    const currentRomance = targetPerson.romanceMeter ?? 0;
+    setActionPicker({
+      title: `Plan a Date with ${targetPerson.firstName}`,
+      icon: '🍷',
+      subtitle: 'Select a date venue matching your chemistry and budget:',
+      target: targetPerson,
+      items: DATE_VENUES.map((venue) => {
+        const canAfford = character.cash >= venue.cost;
+        const meetsRomance = currentRomance >= venue.minRomance;
+        const isAvailable = canAfford && meetsRomance;
+        return {
+          id: venue.id,
+          title: venue.name,
+          subtitle: venue.vibe,
+          description: venue.description,
+          emoji: venue.emoji,
+          cost: venue.cost,
+          disabled: !isAvailable,
+          disabledReason: !meetsRomance
+            ? `Needs ${venue.minRomance}% Romance`
+            : `Can't afford ($${venue.cost.toLocaleString()})`,
+          statDeltas: [
+            { label: 'Rel', delta: `+${venue.relationshipBonus}%`, color: 'text-emerald-700' },
+            { label: 'Love', delta: `+${venue.romanceBonus}%`, color: 'text-rose-600' },
+            { label: 'Happy', delta: `+${venue.happinessBonus}%`, color: 'text-amber-700' },
+          ],
+          data: venue,
+        };
+      }),
+      onSelect: (venue: DateVenue) => {
+        setActionPicker(null);
+        handleExecuteDate(venue, targetPerson);
+      },
+    });
+  };
+
+  // Open Deep Talk Picker
+  const handleOpenTalkPicker = (targetPerson: PersonProfile) => {
+    const currentRomance = targetPerson.romanceMeter ?? 0;
+    setActionPicker({
+      title: `Deep Talk with ${targetPerson.firstName}`,
+      icon: '💬',
+      subtitle: 'Pick a meaningful conversation topic to deepen your emotional bond:',
+      target: targetPerson,
+      items: ROMANTIC_TALK_TOPICS.map((topic) => {
+        const isAvailable = currentRomance >= topic.minRomance;
+        return {
+          id: topic.id,
+          title: topic.topic,
+          description: topic.dialogue,
+          icon: <MessageCircle className="w-3.5 h-3.5 text-sky-600 shrink-0" />,
+          disabled: !isAvailable,
+          disabledReason: !isAvailable ? `Needs ${topic.minRomance}% Love` : undefined,
+          statDeltas: [
+            {
+              label: 'Bond & Romance',
+              delta: '+',
+              color: 'text-emerald-700',
+              icon: <Heart className="w-3 h-3 text-rose-500 fill-rose-500" />,
+            },
+          ],
+          data: topic,
+        };
+      }),
+      onSelect: (topic: RomanticTalkOption) => {
+        setActionPicker(null);
+        handleExecuteRomanticTalk(topic, targetPerson);
+      },
+    });
+  };
+
+  // Open Gift Picker
+  const handleOpenGiftPicker = (targetPerson: PersonProfile) => {
+    const currentRomance = targetPerson.romanceMeter ?? 0;
+    setActionPicker({
+      title: `Give Gift to ${targetPerson.firstName}`,
+      icon: '🎁',
+      subtitle: 'Choose a romantic present from thoughtful gestures to luxury surprises:',
+      target: targetPerson,
+      items: ROMANTIC_GIFTS.map((gift) => {
+        const canAfford = character.cash >= gift.cost;
+        const meetsRomance = currentRomance >= gift.minRomance;
+        const isAvailable = canAfford && meetsRomance;
+        return {
+          id: gift.id,
+          title: gift.name,
+          subtitle: `"${gift.reaction}"`,
+          emoji: gift.emoji,
+          cost: gift.cost,
+          disabled: !isAvailable,
+          disabledReason: !meetsRomance
+            ? `Needs ${gift.minRomance}% Love`
+            : `Can't afford ($${gift.cost.toLocaleString()})`,
+          statDeltas: [
+            { label: 'Rel', delta: `+${gift.relationshipDelta}%`, color: 'text-emerald-700' },
+            { label: 'Love', delta: `+${gift.romanceDelta}%`, color: 'text-rose-600' },
+          ],
+          data: gift,
+        };
+      }),
+      onSelect: (gift: RomanticGift) => {
+        setActionPicker(null);
+        handleExecuteRomanticGift(gift, targetPerson);
+      },
+    });
+  };
+
+  // Open Intimacy Picker
+  const handleOpenIntimacyPicker = (targetPerson: PersonProfile) => {
+    setActionPicker({
+      title: `Make Love with ${targetPerson.firstName}`,
+      icon: '💋',
+      subtitle: 'Choose your protection and intimacy preference:',
+      target: targetPerson,
+      items: [
+        {
+          id: 'unprotected',
+          title: 'Unprotected / Passionate Intimacy',
+          description:
+            'Completely natural, raw passion. If biologically fertile, there is a natural probability of pregnancy!',
+          badge: 'Conception Risk',
+          badgeColor: 'rose',
+          icon: <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />,
+          data: 'unprotected' as const,
+        },
+        {
+          id: 'pill',
+          title: 'Birth Control Pill',
+          description: 'Enjoy full intimacy with dependable hormonal birth control protection.',
+          badge: '99% Protected',
+          badgeColor: 'emerald',
+          icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />,
+          data: 'pill' as const,
+        },
+        {
+          id: 'condom',
+          title: 'Safe Protection (Barrier)',
+          description: 'Safe physical barrier contraception with virtually zero pregnancy risk.',
+          badge: '98% Protected',
+          badgeColor: 'sky',
+          icon: <ShieldCheck className="w-3.5 h-3.5 text-sky-600 stroke-[2.5]" />,
+          data: 'condom' as const,
+        },
+      ],
+      onSelect: (protection: 'unprotected' | 'pill' | 'condom') => {
+        setActionPicker(null);
+        handleExecuteIntimacy(protection);
+      },
+    });
+  };
+
   // Execute Flirt
-  const handleExecuteFlirt = (flirt: FlirtOption) => {
-    const currentTarget = activeTarget || partner;
+  const handleExecuteFlirt = (flirt: FlirtOption, targetOverride?: PersonProfile) => {
+    const currentTarget = targetOverride || activeTarget || partner;
     if (!currentTarget) return;
     const { updatedTarget, result } = romanceService.executeFlirt(character, currentTarget, flirt);
 
@@ -336,8 +524,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   // Execute Date
-  const handleExecuteDate = (venue: DateVenue) => {
-    const currentTarget = activeTarget || partner;
+  const handleExecuteDate = (venue: DateVenue, targetOverride?: PersonProfile) => {
+    const currentTarget = targetOverride || activeTarget || partner;
     if (!currentTarget) return;
     const { updatedTarget, result } = romanceService.executeDate(character, currentTarget, venue);
 
@@ -389,8 +577,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   // Execute Romantic Talk
-  const handleExecuteRomanticTalk = (talk: RomanticTalkOption) => {
-    const currentTarget = activeTarget || partner;
+  const handleExecuteRomanticTalk = (talk: RomanticTalkOption, targetOverride?: PersonProfile) => {
+    const currentTarget = targetOverride || activeTarget || partner;
     if (!currentTarget) return;
     const { updatedTarget, result } = romanceService.executeRomanticTalk(character, currentTarget, talk);
 
@@ -430,8 +618,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   // Execute Romantic Gift
-  const handleExecuteRomanticGift = (gift: RomanticGift) => {
-    const currentTarget = activeTarget || partner;
+  const handleExecuteRomanticGift = (gift: RomanticGift, targetOverride?: PersonProfile) => {
+    const currentTarget = targetOverride || activeTarget || partner;
     if (!currentTarget) return;
     if (character.cash < gift.cost) {
       setReactionModal({
@@ -543,8 +731,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   // Confirm Ask Out
-  const handleConfirmAskOut = () => {
-    const currentTarget = activeTarget || partner;
+  const handleConfirmAskOut = (targetOverride?: PersonProfile) => {
+    const currentTarget = targetOverride || activeTarget || partner;
     if (!currentTarget) return;
     const { updatedTarget, result } = romanceService.executeAskOut(character, currentTarget);
 
@@ -1021,10 +1209,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       size="sm"
                       disabled={isLimitReached || hasDated}
                       className="flex items-center justify-center gap-1.5"
-                      onClick={() => {
-                        setActiveTarget(partner);
-                        setActiveModal('date');
-                      }}
+                      onClick={() => handleOpenDatePicker(partner)}
                     >
                       <Wine className="w-4 h-4 text-rose-500 shrink-0" />
                       <span>{hasDated ? 'Date (Done)' : 'Plan a Date'}</span>
@@ -1035,10 +1220,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       size="sm"
                       disabled={isLimitReached || hasFlirted}
                       className="flex items-center justify-center gap-1.5"
-                      onClick={() => {
-                        setActiveTarget(partner);
-                        setActiveModal('flirt');
-                      }}
+                      onClick={() => handleOpenFlirtPicker(partner)}
                     >
                       <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
                       <span>{hasFlirted ? 'Flirt (Done)' : 'Flirt'}</span>
@@ -1049,10 +1231,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       size="sm"
                       disabled={isLimitReached || hasTalked}
                       className="flex items-center justify-center gap-1.5"
-                      onClick={() => {
-                        setActiveTarget(partner);
-                        setActiveModal('romantic_talk');
-                      }}
+                      onClick={() => handleOpenTalkPicker(partner)}
                     >
                       <MessageCircle className="w-4 h-4 text-sky-500 shrink-0" />
                       <span>{hasTalked ? 'Deep Talk (Done)' : 'Deep Talk'}</span>
@@ -1063,10 +1242,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       size="sm"
                       disabled={isLimitReached || hasGifted}
                       className="flex items-center justify-center gap-1.5"
-                      onClick={() => {
-                        setActiveTarget(partner);
-                        setActiveModal('romantic_gift');
-                      }}
+                      onClick={() => handleOpenGiftPicker(partner)}
                     >
                       <Gift className="w-4 h-4 text-emerald-500 shrink-0" />
                       <span>{hasGifted ? 'Gift (Done)' : 'Give Gift'}</span>
@@ -1083,7 +1259,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                           disabled={!canMakeLove}
                           className={`flex items-center justify-center gap-1.5 ${!canMakeLove ? 'opacity-60 cursor-not-allowed' : ''}`}
                           onClick={() => {
-                            if (canMakeLove) setActiveModal('intimacy');
+                            if (canMakeLove) handleOpenIntimacyPicker(partner);
                           }}
                         >
                           <Flame className={`w-4 h-4 shrink-0 ${canMakeLove ? 'text-rose-600' : 'text-slate-400'}`} />
@@ -1135,10 +1311,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                 variant="rose"
                 size="sm"
                 className="w-full flex items-center justify-center gap-2"
-                onClick={() => {
-                  setActiveTarget(partner);
-                  setActiveModal('ask_out');
-                }}
+                onClick={() => setAskOutTarget(partner)}
               >
                 <Heart className="w-4 h-4 fill-white shrink-0" />
                 <span>Ask to Become Official Partners</span>
@@ -1318,10 +1491,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                                 size="sm"
                                 disabled={pLimit || pFlirted}
                                 className="flex items-center justify-center gap-1.5"
-                                onClick={() => {
-                                  setActiveTarget(prospect);
-                                  setActiveModal('flirt');
-                                }}
+                                onClick={() => handleOpenFlirtPicker(prospect)}
                               >
                                 <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                                 <span>{pFlirted ? 'Flirt (Done)' : 'Flirt'}</span>
@@ -1332,10 +1502,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                                 size="sm"
                                 disabled={pLimit || pDated}
                                 className="flex items-center justify-center gap-1.5"
-                                onClick={() => {
-                                  setActiveTarget(prospect);
-                                  setActiveModal('date');
-                                }}
+                                onClick={() => handleOpenDatePicker(prospect)}
                               >
                                 <Wine className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                                 <span>{pDated ? 'Date (Done)' : 'Plan Date'}</span>
@@ -1346,10 +1513,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                                 size="sm"
                                 disabled={pLimit || pTalked}
                                 className="flex items-center justify-center gap-1.5"
-                                onClick={() => {
-                                  setActiveTarget(prospect);
-                                  setActiveModal('romantic_talk');
-                                }}
+                                onClick={() => handleOpenTalkPicker(prospect)}
                               >
                                 <MessageCircle className="w-3.5 h-3.5 text-sky-500 shrink-0" />
                                 <span>{pTalked ? 'Talk (Done)' : 'Deep Talk'}</span>
@@ -1360,10 +1524,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                                 size="sm"
                                 disabled={pLimit || pGifted}
                                 className="flex items-center justify-center gap-1.5"
-                                onClick={() => {
-                                  setActiveTarget(prospect);
-                                  setActiveModal('romantic_gift');
-                                }}
+                                onClick={() => handleOpenGiftPicker(prospect)}
                               >
                                 <Gift className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                                 <span>{pGifted ? 'Gift (Done)' : 'Give Gift'}</span>
@@ -1381,10 +1542,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                         className={`w-full flex items-center justify-center gap-2 ${
                           !canAskOut ? 'opacity-60 cursor-not-allowed' : ''
                         }`}
-                        onClick={() => {
-                          setActiveTarget(prospect);
-                          setActiveModal('ask_out');
-                        }}
+                        onClick={() => setAskOutTarget(prospect)}
                       >
                         <Heart className={`w-3.5 h-3.5 shrink-0 ${canAskOut ? 'fill-white' : 'text-slate-400'}`} />
                         <span>
@@ -1540,75 +1698,74 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         />
       )}
 
-      {activeModal === 'flirt' && (activeTarget || partner) && (
-        <FlirtModal
+      {/* Universal Action Picker for Flirt, Date, Deep Talk, Gift, Intimacy */}
+      {actionPicker && (
+        <ActionPickerModal
           isOpen={true}
-          onClose={() => {
-            setActiveModal(null);
-            setActiveTarget(null);
+          onClose={() => setActionPicker(null)}
+          title={actionPicker.title}
+          icon={actionPicker.icon}
+          subtitle={actionPicker.subtitle}
+          target={actionPicker.target}
+          items={actionPicker.items}
+          onSelect={(item) => {
+            const cb = actionPicker.onSelect;
+            setActionPicker(null);
+            cb(item);
           }}
-          target={activeTarget || partner!}
-          onSelectFlirt={handleExecuteFlirt}
         />
       )}
 
-      {activeModal === 'date' && (activeTarget || partner) && (
-        <DatePlannerModal
+      {/* Universal Confirmation for Milestone: Ask Out */}
+      {askOutTarget && (
+        <ConfirmModal
           isOpen={true}
-          onClose={() => {
-            setActiveModal(null);
-            setActiveTarget(null);
+          onClose={() => setAskOutTarget(null)}
+          title={`Ask Out ${askOutTarget.firstName}`}
+          icon="❤️"
+          message={`Are you ready to confess your feelings and ask ${askOutTarget.firstName} to be your official ${
+            askOutTarget.gender === 'female' ? 'girlfriend' : askOutTarget.gender === 'male' ? 'boyfriend' : 'partner'
+          }?`}
+          warningCallout={{
+            title: 'Courting Milestone',
+            bulletPoints: [
+              'Changes your relationship status to official partners',
+              'Takes 1 courtship turn this year',
+              'Requires continuing commitment and mutual affection',
+            ],
+            variant: 'rose',
           }}
-          target={activeTarget || partner!}
-          playerCash={character.cash}
-          onSelectVenue={handleExecuteDate}
-        />
-      )}
-
-      {activeModal === 'romantic_talk' && (activeTarget || partner) && (
-        <RomanticTalkModal
-          isOpen={true}
-          onClose={() => {
-            setActiveModal(null);
-            setActiveTarget(null);
+          confirmLabel="Ask Out Now! ❤️"
+          confirmVariant="rose"
+          disabled={
+            (askOutTarget.romanceMeter ?? 0) < 35 || askOutTarget.relationship < 50
+          }
+          onConfirm={() => {
+            const target = askOutTarget;
+            setAskOutTarget(null);
+            handleConfirmAskOut(target);
           }}
-          target={activeTarget || partner!}
-          onSelectTopic={handleExecuteRomanticTalk}
-        />
-      )}
-
-      {activeModal === 'romantic_gift' && (activeTarget || partner) && (
-        <RomanticGiftModal
-          isOpen={true}
-          onClose={() => {
-            setActiveModal(null);
-            setActiveTarget(null);
-          }}
-          target={activeTarget || partner!}
-          playerCash={character.cash}
-          onSelectGift={handleExecuteRomanticGift}
-        />
-      )}
-
-      {activeModal === 'intimacy' && partner && (
-        <IntimacyModal
-          isOpen={true}
-          onClose={() => setActiveModal(null)}
-          target={partner}
-          onSelectProtection={handleExecuteIntimacy}
-        />
-      )}
-
-      {activeModal === 'ask_out' && (activeTarget || partner) && (
-        <AskOutModal
-          isOpen={true}
-          onClose={() => {
-            setActiveModal(null);
-            setActiveTarget(null);
-          }}
-          target={activeTarget || partner!}
-          onConfirmAskOut={handleConfirmAskOut}
-        />
+        >
+          <DualMeterDisplay
+            relationship={askOutTarget.relationship}
+            romanceMeter={askOutTarget.romanceMeter ?? 0}
+            romanceUnlocked={true}
+          />
+          <div className="text-[11px] font-bold text-slate-600 bg-white border border-slate-300 p-2.5 rounded-lg flex flex-col gap-1 mt-2">
+            <div className="flex justify-between items-center">
+              <span>Required Relationship:</span>
+              <span className={askOutTarget.relationship >= 50 ? 'text-emerald-700' : 'text-rose-600'}>
+                {Math.round(askOutTarget.relationship)}% / 50% min
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span>Required Romance:</span>
+              <span className={(askOutTarget.romanceMeter ?? 0) >= 35 ? 'text-emerald-700' : 'text-rose-600'}>
+                {askOutTarget.romanceMeter ?? 0}% / 35% min
+              </span>
+            </div>
+          </div>
+        </ConfirmModal>
       )}
 
       {activeModal === 'proposal' && (activeTarget || partner) && (
@@ -1700,9 +1857,9 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         />
       )}
 
-      {/* Romance Reaction Modal Popup */}
+      {/* Universal Action Outcome Popup */}
       {reactionModal && (
-        <RomanceReactionModal
+        <ActionOutcomeModal
           isOpen={true}
           onClose={() => setReactionModal(null)}
           title={reactionModal.title}
@@ -1710,7 +1867,66 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           partnerName={reactionModal.partnerName}
           avatarEmoji={reactionModal.avatarEmoji}
           message={reactionModal.message}
-          deltas={reactionModal.deltas}
+          statEffects={
+            reactionModal.deltas?.happinessDelta
+              ? { happiness: reactionModal.deltas.happinessDelta }
+              : undefined
+          }
+          customDeltas={[
+            ...(reactionModal.deltas?.romanceDelta !== undefined && reactionModal.deltas.romanceDelta !== 0
+              ? [
+                  {
+                    label: 'Love',
+                    delta:
+                      reactionModal.deltas.romanceDelta > 0
+                        ? `+${reactionModal.deltas.romanceDelta}%`
+                        : `${reactionModal.deltas.romanceDelta}%`,
+                    color: 'rose' as const,
+                  },
+                ]
+              : []),
+            ...(reactionModal.deltas?.relationshipDelta !== undefined && reactionModal.deltas.relationshipDelta !== 0
+              ? [
+                  {
+                    label: 'Relationship',
+                    delta:
+                      reactionModal.deltas.relationshipDelta > 0
+                        ? `+${reactionModal.deltas.relationshipDelta}%`
+                        : `${reactionModal.deltas.relationshipDelta}%`,
+                    color: (reactionModal.deltas.relationshipDelta > 0 ? 'emerald' : 'rose') as 'emerald' | 'rose',
+                  },
+                ]
+              : []),
+            ...(reactionModal.deltas?.cashDelta !== undefined && reactionModal.deltas.cashDelta !== 0
+              ? [
+                  {
+                    label: 'Cash',
+                    delta:
+                      reactionModal.deltas.cashDelta > 0
+                        ? `+$${reactionModal.deltas.cashDelta.toLocaleString()}`
+                        : `-$${Math.abs(reactionModal.deltas.cashDelta).toLocaleString()}`,
+                    color: (reactionModal.deltas.cashDelta > 0 ? 'emerald' : 'slate') as 'emerald' | 'slate',
+                  },
+                ]
+              : []),
+          ]}
+          alertCallout={
+            reactionModal.deltas?.isConception
+              ? {
+                  title: 'Baby on the Way! 🍼',
+                  message: 'Pregnancy confirmed! A new bundle of joy will arrive next year.',
+                  icon: '🍼',
+                  variant: 'rose',
+                }
+              : reactionModal.deltas?.customBadge
+              ? {
+                  title: 'Romantic Milestone ✨',
+                  message: reactionModal.deltas.customBadge,
+                  icon: '✨',
+                  variant: 'amber',
+                }
+              : undefined
+          }
         />
       )}
     </div>

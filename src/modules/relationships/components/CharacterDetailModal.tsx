@@ -17,9 +17,9 @@ import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import { DualMeterDisplay } from '../../romance/components/DualMeterDisplay';
-import { FlirtModal } from '../../romance/components/FlirtModal';
-import { DatePlannerModal } from '../../romance/components/DatePlannerModal';
-import { AskOutModal } from '../../romance/components/AskOutModal';
+import { ActionPickerModal } from '../../../components/ui/ActionPickerModal';
+import { ConfirmModal } from '../../../components/ui/ConfirmModal';
+import { FLIRT_OPTIONS, DATE_VENUES } from '../../romance/data/romanticInteractions';
 import { romanceService } from '../../romance/services/romanceService';
 import type { FlirtOption, DateVenue } from '../../romance/types';
 import type { CharacterProfile, PersonProfile } from '../../../types/game';
@@ -149,10 +149,15 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
+    const currentActions = character.yearlySocialActions?.[updatedTarget.id] || [];
     const updatedChar: CharacterProfile = {
       ...character,
       relationships: updatedRel,
       partner: character.partner?.id === updatedTarget.id ? updatedTarget : character.partner,
+      yearlySocialActions: {
+        ...(character.yearlySocialActions || {}),
+        [updatedTarget.id]: [...currentActions, 'romance_flirt'],
+      },
       stats: {
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
@@ -180,11 +185,16 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
     );
+    const currentActions = character.yearlySocialActions?.[updatedTarget.id] || [];
     const updatedChar: CharacterProfile = {
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       relationships: updatedRel,
       partner: character.partner?.id === updatedTarget.id ? updatedTarget : character.partner,
+      yearlySocialActions: {
+        ...(character.yearlySocialActions || {}),
+        [updatedTarget.id]: [...currentActions, 'romance_date'],
+      },
       stats: {
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
@@ -736,73 +746,100 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             )}
 
             {/* Romance Actions if unlocked */}
-            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.romanceUnlocked && (
-              <div className="flex flex-col gap-2 pt-2 border-t-2 border-rose-200 mt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-rose-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
-                    <span>Romance Actions</span>
-                  </span>
-                  <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300">
-                    {liveTarget.romanticStage?.toUpperCase() || 'FLIRTING'}
-                  </span>
-                </div>
+            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.romanceUnlocked && (() => {
+              const pYearlyActions = character.yearlySocialActions?.[liveTarget.id] || [];
+              const pRomanceActions = pYearlyActions.filter((a) => a.startsWith('romance_'));
+              const pCount = pRomanceActions.length;
+              const pLimit = pCount >= 2;
+              const pFlirted = pRomanceActions.includes('romance_flirt');
+              const pDated = pRomanceActions.includes('romance_date');
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRomanceModal('flirt')}
-                    className="p-2.5 rounded-2xl border-2 border-slate-900 bg-white hover:bg-rose-50 text-left transition-all shadow-[1.5px_2px_0_#0f172a] cursor-pointer flex items-center justify-between"
-                  >
-                    <div className="flex flex-col">
-                      <span className="text-xs font-black text-slate-950">Flirt</span>
-                      <span className="text-[10px] font-bold text-slate-500">Test chemistry</span>
-                    </div>
-                    <Sparkles className="w-4 h-4 text-amber-500" />
-                  </button>
+              return (
+                <div className="flex flex-col gap-2 pt-2 border-t-2 border-rose-200 mt-2">
+                  <div className="flex items-center justify-between text-[11px] font-black text-rose-900 px-0.5">
+                    <span className="flex items-center gap-1.5 uppercase tracking-wider">
+                      <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                      <span>Romance Actions</span>
+                    </span>
+                    <span
+                      className={`font-mono ${
+                        pLimit ? 'text-amber-700 bg-amber-100' : 'text-emerald-700 bg-emerald-100'
+                      } px-1.5 py-0.5 rounded text-[10px]`}
+                    >
+                      {pCount}/2 this year
+                    </span>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setRomanceModal('date')}
-                    className="p-2.5 rounded-2xl border-2 border-slate-900 bg-white hover:bg-rose-50 text-left transition-all shadow-[1.5px_2px_0_#0f172a] cursor-pointer flex items-center justify-between"
-                  >
-                    <div className="flex flex-col">
-                      <span className="text-xs font-black text-slate-950">Plan Date</span>
-                      <span className="text-[10px] font-bold text-slate-500">Choose venue</span>
-                    </div>
-                    <Wine className="w-4 h-4 text-rose-500" />
-                  </button>
-                </div>
-
-                {/* Milestone button: Ask Out */}
-                {liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (() => {
-                  const romanceVal = liveTarget.romanceMeter ?? 0;
-                  const canAskOut = romanceVal >= 35 && liveTarget.relationship >= 50;
-                  return (
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setRomanceModal('ask_out')}
-                      disabled={!canAskOut}
-                      className={`w-full p-2.5 rounded-2xl border-2 border-slate-900 font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all flex flex-col items-center justify-center gap-0.5 ${
-                        canAskOut
-                          ? 'bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white cursor-pointer active:translate-y-0.5'
-                          : 'bg-slate-100 text-slate-400 border-slate-300 cursor-not-allowed opacity-75'
+                      disabled={pLimit || pFlirted}
+                      onClick={() => setRomanceModal('flirt')}
+                      className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
+                        pLimit || pFlirted
+                          ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                          : 'bg-white hover:bg-rose-50 cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <Heart className={`w-4 h-4 ${canAskOut ? 'fill-white' : 'fill-slate-400'}`} />
-                        <span>Ask to Become Official Partners</span>
-                      </div>
-                      {!canAskOut && (
-                        <span className="text-[10px] font-bold text-slate-500">
-                          Requires 35% Love (Now: {romanceVal}%) & 50% Rel (Now: {Math.round(liveTarget.relationship)}%)
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-slate-950">
+                          {pFlirted ? 'Flirt (Done)' : 'Flirt'}
                         </span>
-                      )}
+                        <span className="text-[10px] font-bold text-slate-500">Test chemistry</span>
+                      </div>
+                      <Sparkles className="w-4 h-4 text-amber-500" />
                     </button>
-                  );
-                })()}
-              </div>
-            )}
+
+                    <button
+                      type="button"
+                      disabled={pLimit || pDated}
+                      onClick={() => setRomanceModal('date')}
+                      className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
+                        pLimit || pDated
+                          ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                          : 'bg-white hover:bg-rose-50 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-slate-950">
+                          {pDated ? 'Plan Date (Done)' : 'Plan Date'}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-500">Choose venue</span>
+                      </div>
+                      <Wine className="w-4 h-4 text-rose-500" />
+                    </button>
+                  </div>
+
+                  {/* Milestone button: Ask Out */}
+                  {liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (() => {
+                    const romanceVal = liveTarget.romanceMeter ?? 0;
+                    const canAskOut = romanceVal >= 35 && liveTarget.relationship >= 50;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setRomanceModal('ask_out')}
+                        disabled={!canAskOut}
+                        className={`w-full p-2.5 rounded-2xl border-2 border-slate-900 font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all flex flex-col items-center justify-center gap-0.5 ${
+                          canAskOut
+                            ? 'bg-gradient-to-r from-rose-400 to-pink-500 hover:from-rose-500 hover:to-pink-600 text-white cursor-pointer active:translate-y-0.5'
+                            : 'bg-slate-100 text-slate-400 border-slate-300 cursor-not-allowed opacity-75'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Heart className={`w-4 h-4 ${canAskOut ? 'fill-white' : 'fill-slate-400'}`} />
+                          <span>Ask to Become Official Partners</span>
+                        </div>
+                        {!canAskOut && (
+                          <span className="text-[10px] font-bold text-slate-500">
+                            Requires 35% Love (Now: {romanceVal}%) & 50% Rel (Now: {Math.round(liveTarget.relationship)}%)
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
           </div>
         ) : (
           <div className="p-4 rounded-2xl bg-slate-100 border-2 border-slate-300 text-center flex flex-col items-center gap-1.5">
@@ -830,33 +867,115 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
         </div>
       </div>
 
-      {/* Romance Submodals */}
+      {/* Romance Submodals using Universal Primitives */}
       {romanceModal === 'flirt' && friendTarget && (
-        <FlirtModal
+        <ActionPickerModal
           isOpen={true}
           onClose={() => setRomanceModal(null)}
+          title={`Flirt with ${friendTarget.firstName}`}
+          icon={<Sparkles className="w-5 h-5 text-amber-500" />}
+          subtitle="Pick a flirting technique to ignite romantic chemistry."
           target={friendTarget}
-          onSelectFlirt={handleFlirt}
+          items={FLIRT_OPTIONS.map((f) => ({
+            id: f.id,
+            title: f.label,
+            subtitle: `"${f.dialogue}"`,
+            badge: f.style,
+            badgeColor: f.style === 'bold' ? 'rose' : f.style === 'playful' ? 'amber' : 'sky',
+            statDeltas: [
+              {
+                label: 'Chemistry',
+                delta: '+ Love',
+                color: 'text-rose-600',
+              },
+            ],
+            data: f,
+          }))}
+          onSelect={(f) => handleFlirt(f)}
         />
       )}
 
-      {romanceModal === 'date' && friendTarget && (
-        <DatePlannerModal
-          isOpen={true}
-          onClose={() => setRomanceModal(null)}
-          target={friendTarget}
-          playerCash={character.cash}
-          onSelectVenue={handleDate}
-        />
-      )}
+      {romanceModal === 'date' && friendTarget && (() => {
+        const currentRomance = friendTarget.romanceMeter ?? 0;
+        return (
+          <ActionPickerModal
+            isOpen={true}
+            onClose={() => setRomanceModal(null)}
+            title={`Plan Date with ${friendTarget.firstName}`}
+            icon={<Wine className="w-5 h-5 text-rose-500" />}
+            subtitle="Select a romantic setting to spend quality time together."
+            target={friendTarget}
+            items={DATE_VENUES.map((v) => {
+              const canAfford = character.cash >= v.cost;
+              const meetsRomance = currentRomance >= v.minRomance;
+              const isAvailable = canAfford && meetsRomance;
+              return {
+                id: v.id,
+                title: v.name,
+                subtitle: v.vibe,
+                description: v.description,
+                emoji: v.emoji,
+                cost: v.cost,
+                disabled: !isAvailable,
+                disabledReason: !meetsRomance
+                  ? `Needs ${v.minRomance}% Romance`
+                  : `Can't afford ($${v.cost.toLocaleString()})`,
+                statDeltas: [
+                  { label: 'Rel', delta: `+${v.relationshipBonus}%`, color: 'text-emerald-700' },
+                  { label: 'Love', delta: `+${v.romanceBonus}%`, color: 'text-rose-600' },
+                  { label: 'Happy', delta: `+${v.happinessBonus}%`, color: 'text-amber-700' },
+                ],
+                data: v,
+              };
+            })}
+            onSelect={(v) => handleDate(v)}
+          />
+        );
+      })()}
 
       {romanceModal === 'ask_out' && friendTarget && (
-        <AskOutModal
+        <ConfirmModal
           isOpen={true}
           onClose={() => setRomanceModal(null)}
-          target={friendTarget}
-          onConfirmAskOut={handleAskOut}
-        />
+          title={`Ask Out ${friendTarget.firstName}`}
+          icon="❤️"
+          message={`Are you ready to confess your feelings and ask ${friendTarget.firstName} to be your official partner?`}
+          warningCallout={{
+            title: 'Courting Milestone',
+            bulletPoints: [
+              'Changes your relationship status to official partners',
+              'Takes 1 courtship turn this year',
+              'Requires continuing commitment and mutual affection',
+            ],
+            variant: 'rose',
+          }}
+          confirmLabel="Ask Out Now! ❤️"
+          confirmVariant="rose"
+          disabled={
+            (friendTarget.romanceMeter ?? 0) < 35 || friendTarget.relationship < 50
+          }
+          onConfirm={handleAskOut}
+        >
+          <DualMeterDisplay
+            relationship={friendTarget.relationship}
+            romanceMeter={friendTarget.romanceMeter ?? 0}
+            romanceUnlocked={true}
+          />
+          <div className="text-[11px] font-bold text-slate-600 bg-white border border-slate-300 p-2.5 rounded-lg flex flex-col gap-1 mt-2">
+            <div className="flex justify-between items-center">
+              <span>Required Relationship:</span>
+              <span className={friendTarget.relationship >= 50 ? 'text-emerald-700' : 'text-rose-600'}>
+                {Math.round(friendTarget.relationship)}% / 50% min
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span>Required Romance:</span>
+              <span className={(friendTarget.romanceMeter ?? 0) >= 35 ? 'text-emerald-700' : 'text-rose-600'}>
+                {friendTarget.romanceMeter ?? 0}% / 35% min
+              </span>
+            </div>
+          </div>
+        </ConfirmModal>
       )}
     </Modal>
   );
