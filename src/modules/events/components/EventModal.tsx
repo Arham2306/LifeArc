@@ -35,8 +35,6 @@ export const EventModal: React.FC<EventModalProps> = ({
   onChoose,
   onContinue,
 }) => {
-  if (!event) return null;
-
   const boundPerson = useMemo(() => {
     if (!event) return undefined;
     if (event.category === 'career' || event.requiresEmployed || event.requiredCareerField) {
@@ -44,6 +42,8 @@ export const EventModal: React.FC<EventModalProps> = ({
     }
     return findContextualPeer(character, 'classmate');
   }, [event, character]);
+
+  if (!event) return null;
 
   const actions = result ? (
     <CartoonButton variant="emerald" size="md" fullWidth onClick={onContinue}>

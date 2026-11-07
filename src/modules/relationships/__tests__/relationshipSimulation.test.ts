@@ -1,4 +1,4 @@
-import type { CharacterProfile, SiblingProfile } from '../../../types/game';
+import type { CharacterProfile, SiblingProfile, ChildProfile } from '../../../types/game';
 import { generateParents, generateSiblings, getSiblingOccupation } from '../../character/services/familyService';
 import { createInitialEducation } from '../../education/services/educationService';
 import { createInitialCareerState } from '../../career/services/careerService';

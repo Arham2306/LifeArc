@@ -207,7 +207,7 @@ export const BusinessScreen: React.FC<BusinessScreenProps> = ({
     );
 
     return (
-      <div className="p-4 flex flex-col gap-3.5 bg-white min-h-[480px] max-h-[640px] overflow-y-auto">
+      <div className="p-4 flex flex-col gap-3.5 bg-white">
         {/* Status Toast */}
         {statusMessage && (
           <div className="rounded-2xl bg-emerald-100 border-2 border-slate-900 px-3.5 py-2 text-xs font-black text-slate-900 flex items-center justify-between shadow-[2px_2px_0_#0f172a] animate-in fade-in">

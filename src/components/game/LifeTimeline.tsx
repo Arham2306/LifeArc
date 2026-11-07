@@ -21,7 +21,7 @@ export const LifeTimeline: React.FC<LifeTimelineProps> = ({ events, stageLabel }
   return (
     <div
       ref={containerRef}
-      className="flex-1 min-h-[210px] max-h-[280px] overflow-y-auto bg-slate-50/90 rounded-2xl border-[2.5px] border-slate-900 p-3 shadow-inner flex flex-col gap-2"
+      className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-slate-50/90 rounded-2xl border-[2.5px] border-slate-900 p-3 shadow-inner flex flex-col gap-2"
     >
       {events.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-8 text-center gap-2 text-slate-400">

@@ -86,3 +86,33 @@
 .gloss-overlay {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.08) 100%);
 }
+
+/* Custom Cartoon Scrollbar */
+.cartoon-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+
+.cartoon-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cartoon-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 6px 2px;
+}
+
+.cartoon-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 9999px;
+  border: 1.5px solid #0f172a;
+  transition: background-color 0.15s ease-in-out;
+}
+
+.cartoon-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #f59e0b;
+}
+
+.cartoon-scrollbar::-webkit-scrollbar-thumb:active {
+  background-color: #d97706;
+}

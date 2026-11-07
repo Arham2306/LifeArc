@@ -226,7 +226,7 @@ export const CareerScreen: React.FC<CareerScreenProps> = ({
   // VIEW 2: AGE 16+ ACTIVE JOB MARKET & CAREER DASHBOARD
   // ==========================================================================
   return (
-    <div className="p-4 flex flex-col gap-3.5 bg-white min-h-[480px] max-h-[600px] overflow-y-auto">
+    <div className="p-4 flex flex-col gap-3.5 bg-white">
       {/* Status Toast if just resigned */}
       {statusBanner && (
         <div className="rounded-2xl bg-amber-100 border-2 border-slate-900 px-3.5 py-2.5 text-xs font-black text-slate-900 flex items-center justify-between shadow-[2px_2px_0_#0f172a]">

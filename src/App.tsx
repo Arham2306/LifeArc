@@ -187,13 +187,13 @@ export default function App() {
     ) || []
 
   return (
-    <div className="min-h-screen py-6 px-4 flex flex-col items-center justify-center">
+    <div className="h-screen max-h-screen w-screen overflow-hidden p-2 sm:p-4 flex flex-col items-center justify-center">
       {/* Mobile Simulation Frame */}
-      <main className="w-full max-w-[430px] cartoon-card rounded-[32px] overflow-hidden flex flex-col transition-all duration-200">
+      <main className="w-full max-w-[430px] h-full sm:h-[94vh] max-h-[880px] cartoon-card rounded-[32px] overflow-hidden flex flex-col transition-all duration-200">
         {/* VIEW 1: Character Creation Screen */}
         {!activeCharacter ? (
-          <div className="flex flex-col">
-            <header className="bg-amber-400 border-b-[3px] border-slate-900 px-5 py-4 flex items-center justify-between">
+          <div className="flex flex-col h-full min-h-0">
+            <header className="bg-amber-400 border-b-[3px] border-slate-900 px-5 py-4 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-white border-2 border-slate-900 flex items-center justify-center text-xl shadow-[2px_2px_0_#0f172a]">
                   ✨
@@ -212,25 +212,29 @@ export default function App() {
               </Badge>
             </header>
 
-            <NewLifeScreen onStartLife={handleStartLife} />
+            <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar">
+              <NewLifeScreen onStartLife={handleStartLife} />
+            </div>
           </div>
         ) : (
           /* VIEW 2: Active Life Simulation Dashboard */
-          <div className="flex flex-col">
-            <ProfileDashboard
-              character={activeCharacter}
-              selectedStage={activeStageId}
-              onSelectStage={setSelectedStage}
-              onOpenMenu={() => setIsMenuOpen(true)}
-              countryFlag={activeCharacter.flag || '🌐'}
-            />
+          <div className="flex flex-col h-full min-h-0">
+            <div className="flex-shrink-0">
+              <ProfileDashboard
+                character={activeCharacter}
+                selectedStage={activeStageId}
+                onSelectStage={setSelectedStage}
+                onOpenMenu={() => setIsMenuOpen(true)}
+                countryFlag={activeCharacter.flag || '🌐'}
+              />
+            </div>
 
             {/* TAB CONTENT: LIFE */}
             {currentTab === 'life' && (
-              <div className="p-4 flex flex-col gap-3 bg-white min-h-[480px]">
-                {/* Life Journal */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between px-1">
+              <div className="flex-1 min-h-0 flex flex-col bg-white p-3.5 pb-2">
+                {/* 1. Life Journal Section (Takes all available middle height) */}
+                <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between px-1 flex-shrink-0">
                     <span className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
                       <span>{currentStageInfo?.icon}</span>
                       <span>{currentStageInfo?.label} Journal</span>
@@ -243,11 +247,10 @@ export default function App() {
                   <LifeTimeline events={filteredEvents} stageLabel={currentStageInfo?.label} />
                 </div>
 
-                {/* Vitality Stats Card */}
-                <VitalityCard stats={activeCharacter.stats} />
+                {/* 2. Pinned Bottom Dock: Horizontal Stats Strip + Primary Action */}
+                <div className="pt-1.5 flex flex-col gap-1.5 flex-shrink-0">
+                  <VitalityCard stats={activeCharacter.stats} />
 
-                {/* Primary Action Button */}
-                <div className="pt-0.5">
                   {activeCharacter.isAlive ? (
                     <CartoonButton
                       variant="emerald"
@@ -277,68 +280,78 @@ export default function App() {
 
             {/* TAB CONTENT: SCHOOL */}
             {currentTab === 'school' && (
-              <SchoolScreen
-                character={activeCharacter}
-                onUpdateCharacter={setActiveCharacter}
-                isUniversityModalOpen={isUniversityModalOpen}
-                onSetUniversityModalOpen={setIsUniversityModalOpen}
-                isProfessionalModalOpen={isProfessionalModalOpen}
-                onSetProfessionalModalOpen={setIsProfessionalModalOpen}
-              />
+              <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
+                <SchoolScreen
+                  character={activeCharacter}
+                  onUpdateCharacter={setActiveCharacter}
+                  isUniversityModalOpen={isUniversityModalOpen}
+                  onSetUniversityModalOpen={setIsUniversityModalOpen}
+                  isProfessionalModalOpen={isProfessionalModalOpen}
+                  onSetProfessionalModalOpen={setIsProfessionalModalOpen}
+                />
+              </div>
             )}
 
             {/* TAB CONTENT: CAREERS */}
             {currentTab === 'careers' && (
-              <CareerScreen
-                character={activeCharacter}
-                onUpdateCharacter={setActiveCharacter}
-                onOpenSchoolTab={() => setCurrentTab('school')}
-              />
+              <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
+                <CareerScreen
+                  character={activeCharacter}
+                  onUpdateCharacter={setActiveCharacter}
+                  onOpenSchoolTab={() => setCurrentTab('school')}
+                />
+              </div>
             )}
 
             {/* TAB CONTENT: BUSINESS */}
             {currentTab === 'business' && (
-              <BusinessScreen
-                character={activeCharacter}
-                onUpdateCharacter={setActiveCharacter}
-              />
+              <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
+                <BusinessScreen
+                  character={activeCharacter}
+                  onUpdateCharacter={setActiveCharacter}
+                />
+              </div>
             )}
 
             {/* TAB CONTENT: MENU & ACTIVITIES */}
             {currentTab === 'menu' && (
-              menuView === 'relationships' ? (
-                <RelationshipsScreen
-                  character={activeCharacter}
-                  onUpdateCharacter={setActiveCharacter}
-                  onBackToMenu={() => setMenuView('hub')}
-                />
-              ) : menuView === 'romance' && activeCharacter.age >= 16 ? (
-                <RomanceScreen
-                  character={activeCharacter}
-                  onUpdateCharacter={setActiveCharacter}
-                  onBackToMenu={() => setMenuView('hub')}
-                  onOpenRelationships={() => setMenuView('relationships')}
-                />
-              ) : (
-                <MenuScreen
-                  character={activeCharacter}
-                  onOpenRelationships={() => setMenuView('relationships')}
-                  onOpenRomance={() => {
-                    if (activeCharacter.age >= 16) {
-                      setMenuView('romance');
-                    }
-                  }}
-                />
-              )
+              <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
+                {menuView === 'relationships' ? (
+                  <RelationshipsScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                  />
+                ) : menuView === 'romance' && activeCharacter.age >= 16 ? (
+                  <RomanceScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                    onOpenRelationships={() => setMenuView('relationships')}
+                  />
+                ) : (
+                  <MenuScreen
+                    character={activeCharacter}
+                    onOpenRelationships={() => setMenuView('relationships')}
+                    onOpenRomance={() => {
+                      if (activeCharacter.age >= 16) {
+                        setMenuView('romance');
+                      }
+                    }}
+                  />
+                )}
+              </div>
             )}
 
-            <BottomNav
-              currentTab={currentTab}
-              onTabChange={(tab) => {
-                setCurrentTab(tab);
-                if (tab === 'menu') setMenuView('hub');
-              }}
-            />
+            <div className="flex-shrink-0">
+              <BottomNav
+                currentTab={currentTab}
+                onTabChange={(tab) => {
+                  setCurrentTab(tab);
+                  if (tab === 'menu') setMenuView('hub');
+                }}
+              />
+            </div>
           </div>
         )}
       </main>

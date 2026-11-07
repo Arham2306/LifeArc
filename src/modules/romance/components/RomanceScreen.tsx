@@ -61,35 +61,6 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   onBackToMenu,
   onOpenRelationships,
 }) => {
-  if (character.age < 16) {
-    return (
-      <div className="p-4 flex flex-col gap-4 bg-white min-h-[480px]">
-        <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
-          <button
-            type="button"
-            onClick={onBackToMenu}
-            className="flex items-center gap-1.5 text-xs font-black text-slate-700 hover:text-slate-950 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl border-2 border-slate-900 shadow-[1.5px_1.5px_0_#0f172a] transition-all cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 stroke-[3]" />
-            <span>Menu</span>
-          </button>
-          <span className="text-xs font-black text-slate-800">Romance & Dating</span>
-        </div>
-
-        <div className="p-6 rounded-2xl border-2 border-slate-900 bg-rose-50 text-center flex flex-col items-center gap-3 shadow-[2px_2.5px_0_#0f172a] my-auto">
-          <span className="text-4xl">🔒</span>
-          <h3 className="text-base font-black text-rose-950">Romance Unlocks at Age 16</h3>
-          <p className="text-xs font-bold text-slate-600 max-w-xs leading-relaxed">
-            Dating, partners, and romantic interactions are reserved for age 16 and older. Focus on school and friendships for now!
-          </p>
-          <CartoonButton variant="rose" onClick={onBackToMenu}>
-            Back to Activities
-          </CartoonButton>
-        </div>
-      </div>
-    );
-  }
-
   const [activeModal, setActiveModal] = useState<
     | null
     | 'dating_app'
@@ -139,13 +110,42 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     null;
 
   React.useEffect(() => {
-    if (!character.partner && partner) {
+    if (character.age >= 16 && !character.partner && partner) {
       onUpdateCharacter({
         ...character,
         partner,
       });
     }
   }, [character, partner, onUpdateCharacter]);
+
+  if (character.age < 16) {
+    return (
+      <div className="p-4 flex flex-col gap-4 bg-white min-h-[480px]">
+        <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
+          <button
+            type="button"
+            onClick={onBackToMenu}
+            className="flex items-center gap-1.5 text-xs font-black text-slate-700 hover:text-slate-950 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl border-2 border-slate-900 shadow-[1.5px_1.5px_0_#0f172a] transition-all cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 stroke-[3]" />
+            <span>Menu</span>
+          </button>
+          <span className="text-xs font-black text-slate-800">Romance & Dating</span>
+        </div>
+
+        <div className="p-6 rounded-2xl border-2 border-slate-900 bg-rose-50 text-center flex flex-col items-center gap-3 shadow-[2px_2.5px_0_#0f172a] my-auto">
+          <span className="text-4xl">🔒</span>
+          <h3 className="text-base font-black text-rose-950">Romance Unlocks at Age 16</h3>
+          <p className="text-xs font-bold text-slate-600 max-w-xs leading-relaxed">
+            Dating, partners, and romantic interactions are reserved for age 16 and older. Focus on school and friendships for now!
+          </p>
+          <CartoonButton variant="rose" onClick={onBackToMenu}>
+            Back to Activities
+          </CartoonButton>
+        </div>
+      </div>
+    );
+  }
 
   /**
    * Helper to display outcome in ActionOutcomeModal popup AND log it into character.timeline
