@@ -48,7 +48,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="p-5 text-sm font-bold text-slate-700 space-y-3 overflow-y-auto cartoon-scrollbar flex-1 min-h-0">
+        <div className="p-5 text-sm font-bold text-slate-700 space-y-3 overflow-y-auto overflow-x-hidden cartoon-scrollbar flex-1 min-h-0">
           {children}
         </div>
 

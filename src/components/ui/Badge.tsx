@@ -8,6 +8,7 @@ interface BadgeProps {
   icon?: React.ReactNode;
   size?: 'xs' | 'sm';
   className?: string;
+  wrap?: boolean;
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
@@ -25,20 +26,23 @@ export const Badge: React.FC<BadgeProps> = ({
   icon,
   size = 'sm',
   className = '',
+  wrap = false,
 }) => {
   const sizeClasses = size === 'xs' ? 'text-[10px] px-2 py-0.5' : 'text-xs px-2.5 py-1';
+  const shouldWrap = wrap || className.includes('whitespace-normal');
 
   return (
     <span
       className={`
-        inline-flex items-center gap-1 font-black rounded-full border whitespace-nowrap shrink-0
+        inline-flex items-center gap-1 font-black rounded-full border max-w-full
+        ${shouldWrap ? 'whitespace-normal break-words leading-tight' : 'whitespace-nowrap shrink-0'}
         ${variantStyles[variant]}
         ${sizeClasses}
         ${className}
       `}
     >
       {icon && <span className="flex-shrink-0">{icon}</span>}
-      <span>{children}</span>
+      <span className={shouldWrap ? 'break-words' : 'truncate'}>{children}</span>
     </span>
   );
 };

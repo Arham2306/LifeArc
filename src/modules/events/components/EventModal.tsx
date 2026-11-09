@@ -73,7 +73,13 @@ export const EventModal: React.FC<EventModalProps> = ({
     >
       {result ? (
         <>
-          <Badge variant="sky" size="xs" icon={<span>{result.choice.icon}</span>}>
+          <Badge
+            variant="sky"
+            size="xs"
+            wrap
+            icon={<span>{result.choice.icon}</span>}
+            className="py-1 px-2.5 rounded-xl text-left leading-snug"
+          >
             {formatEventText(result.choice.label, character, boundPerson)}
           </Badge>
           <p className="text-slate-800 leading-relaxed">{result.message}</p>
