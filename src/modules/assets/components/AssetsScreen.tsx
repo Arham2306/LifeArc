@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Home } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
-import { CartoonButton } from '../../../components/ui/CartoonButton';
 import type { CharacterProfile } from '../../../types/game';
-import { PROPERTY_CATALOG } from '../data/propertyCatalog';
+import { PROPERTY_CATALOG, getPropertyListing } from '../data/propertyCatalog';
+import { propertyIllustration } from '../data/propertyIllustrations';
 import {
   PROPERTY_PORTFOLIO_CAP,
   calculatePlayerNetWorth,
@@ -12,13 +12,31 @@ import {
   sellProperty,
   validProperties,
 } from '../services/assetService';
-import type { OwnedProperty } from '../types';
+import type { OwnedProperty, PropertyType } from '../types';
+import { PropertyArtwork } from './PropertyArtwork';
+import { PropertyDetailModal } from './PropertyDetailModal';
+import { PropertyListingCard } from './PropertyListingCard';
+import { createTransactionGuard } from './transactionGuard';
 
 interface AssetsScreenProps {
   character: CharacterProfile;
   onUpdateCharacter: (updated: CharacterProfile) => void;
   onBackToMenu: () => void;
 }
+
+type AssetSelection =
+  | { kind: 'listing'; catalogId: string }
+  | { kind: 'owned'; propertyId: string }
+  | null;
+
+const TYPE_LABEL: Record<PropertyType, string> = {
+  studio: 'Studio',
+  condo: 'Condo',
+  house: 'House',
+  luxury_house: 'Luxury house',
+};
+
+const TYPE_ORDER: PropertyType[] = ['studio', 'condo', 'house', 'luxury_house'];
 
 function money(amount: number): string {
   return `$${Math.round(amount).toLocaleString()}`;
@@ -29,8 +47,19 @@ export const AssetsScreen: React.FC<AssetsScreenProps> = ({
   onUpdateCharacter,
   onBackToMenu,
 }) => {
-  const [notice, setNotice] = useState<string | null>(null);
-  const [saleTarget, setSaleTarget] = useState<OwnedProperty | null>(null);
+  const guardRef = useRef(createTransactionGuard());
+  const [selection, setSelection] = useState<AssetSelection>(null);
+
+  const selectionKey = selection === null
+    ? ''
+    : selection.kind === 'listing'
+      ? `listing:${selection.catalogId}`
+      : `owned:${selection.propertyId}`;
+
+  useEffect(() => {
+    guardRef.current.reset();
+  }, [selectionKey]);
+
   const owned = validProperties(character);
   const stored = character.assets?.properties;
   const malformedCount = Array.isArray(stored)
@@ -42,27 +71,17 @@ export const AssetsScreen: React.FC<AssetsScreenProps> = ({
     0
   );
 
-  const buy = (catalogId: string, financing: 'cash' | 'mortgage') => {
-    const result = purchaseProperty(character, catalogId, financing);
-    if (!result.ok) {
-      setNotice(result.reason ?? 'That purchase did not go through.');
-      return;
-    }
-    setNotice(null);
-    setSaleTarget(null);
-    onUpdateCharacter(result.character);
-  };
+  const selectedOwned = selection?.kind === 'owned'
+    ? owned.find((property) => property.id === selection.propertyId) ?? null
+    : null;
+  const selectedListing = selection?.kind === 'listing'
+    ? getPropertyListing(selection.catalogId) ?? null
+    : selectedOwned
+      ? getPropertyListing(selectedOwned.catalogId) ?? null
+      : null;
 
-  const confirmSale = () => {
-    if (!saleTarget) return;
-    const result = sellProperty(character, saleTarget.id);
-    if (!result.ok) {
-      setNotice(result.reason ?? 'That sale did not go through.');
-      return;
-    }
-    setNotice(null);
-    setSaleTarget(null);
-    onUpdateCharacter(result.character);
+  const openSelection = (next: AssetSelection) => {
+    setSelection(next);
   };
 
   return (
@@ -109,12 +128,6 @@ export const AssetsScreen: React.FC<AssetsScreenProps> = ({
         </div>
       </div>
 
-      {notice && (
-        <div className="rounded-xl border-2 border-rose-700 bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-900">
-          {notice}
-        </div>
-      )}
-
       {malformedCount > 0 && (
         <p className="text-[10px] font-bold text-amber-800">
           {malformedCount} saved record{malformedCount === 1 ? '' : 's'} could not be read and
@@ -127,82 +140,143 @@ export const AssetsScreen: React.FC<AssetsScreenProps> = ({
         {owned.length === 0 ? (
           <p className="text-[11px] font-bold text-slate-500">You do not own a home yet.</p>
         ) : (
-          owned.map((property) => (
-            <div
-              key={property.id}
-              className="rounded-2xl border-2 border-slate-900 bg-white p-3 shadow-[2px_2px_0_#0f172a] flex flex-col gap-2"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <Home className="w-3.5 h-3.5" />
-                    <span className="text-xs font-black text-slate-950">{property.name}</span>
-                  </div>
-                  <div className="text-[10px] font-bold text-slate-500">
-                    {property.city} • bought at age {property.purchaseAge}
-                  </div>
-                </div>
-                <Badge variant="sky" size="xs">
-                  {property.mortgage && property.mortgage.principal > 0 ? 'Mortgage' : 'Owned outright'}
-                </Badge>
-              </div>
-              <div className="text-[10px] font-bold text-slate-600">
-                Value {money(property.marketValue)}
-                {property.mortgage
-                  ? ` • Principal ${money(property.mortgage.principal)}`
-                  : ''}
-              </div>
-              {saleTarget?.id === property.id ? (
-                <div className="flex gap-2">
-                  <CartoonButton size="sm" variant="rose" onClick={confirmSale}>
-                    Confirm sale
-                  </CartoonButton>
-                  <CartoonButton size="sm" variant="white" onClick={() => setSaleTarget(null)}>
-                    Cancel
-                  </CartoonButton>
-                </div>
-              ) : (
-                <CartoonButton size="sm" variant="white" onClick={() => setSaleTarget(property)}>
-                  Sell
-                </CartoonButton>
-              )}
-            </div>
-          ))
+          <div className="grid grid-cols-2 gap-2">
+            {owned.map((property) => (
+              <OwnedHomeCard
+                key={property.id}
+                property={property}
+                onOpen={() => openSelection({ kind: 'owned', propertyId: property.id })}
+              />
+            ))}
+          </div>
         )}
       </section>
 
-      <section className="flex flex-col gap-2">
+      <section className="flex flex-col gap-3">
         <h2 className="text-xs font-black text-slate-950">Listings</h2>
-        {PROPERTY_CATALOG.map((listing) => {
-          const down = Math.round(listing.purchasePrice * 0.2);
+        {TYPE_ORDER.map((type) => {
+          const listings = PROPERTY_CATALOG.filter((listing) => listing.type === type);
+          if (listings.length === 0) return null;
           return (
-            <div
-              key={listing.id}
-              className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-3 flex flex-col gap-2"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs font-black text-slate-950">{listing.name}</div>
-                  <div className="text-[10px] font-bold text-slate-500">
-                    {listing.city} • upkeep {money(listing.annualMaintenance)} / year
-                  </div>
-                </div>
-                <span className="text-xs font-black font-mono text-slate-950">
-                  {money(listing.purchasePrice)}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <CartoonButton size="sm" variant="emerald" onClick={() => buy(listing.id, 'cash')}>
-                  Cash
-                </CartoonButton>
-                <CartoonButton size="sm" variant="sky" onClick={() => buy(listing.id, 'mortgage')}>
-                  Mortgage ({money(down)} down)
-                </CartoonButton>
-              </div>
+            <div key={type} className="flex flex-col gap-2">
+              <h3 className="text-[10px] font-black uppercase tracking-wide text-slate-500">{TYPE_LABEL[type]}</h3>
+              {listings.map((listing) => (
+                <PropertyListingCard
+                  key={listing.id}
+                  name={listing.name}
+                  city={listing.city}
+                  typeLabel={TYPE_LABEL[listing.type]}
+                  price={money(listing.purchasePrice)}
+                  upkeep={money(listing.annualMaintenance)}
+                  imageSrc={propertyIllustration(listing.id)}
+                  onOpen={() => openSelection({ kind: 'listing', catalogId: listing.id })}
+                />
+              ))}
             </div>
           );
         })}
       </section>
+
+      {selection ? (
+        <AssetDetailSession
+          key={selectionKey}
+          selection={selection}
+          listing={selectedListing}
+          owned={selectedOwned}
+          character={character}
+          guardRef={guardRef}
+          onUpdateCharacter={onUpdateCharacter}
+          onClose={() => setSelection(null)}
+        />
+      ) : null}
     </div>
+  );
+};
+
+const AssetDetailSession: React.FC<{
+  selection: Exclude<AssetSelection, null>;
+  listing: ReturnType<typeof getPropertyListing> | null;
+  owned: OwnedProperty | null;
+  character: CharacterProfile;
+  guardRef: React.RefObject<ReturnType<typeof createTransactionGuard>>;
+  onUpdateCharacter: (updated: CharacterProfile) => void;
+  onClose: () => void;
+}> = ({ selection, listing, owned, character, guardRef, onUpdateCharacter, onClose }) => {
+  const [actionsDisabled, setActionsDisabled] = useState(false);
+  const [confirmingSale, setConfirmingSale] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const buy = (financing: 'cash' | 'mortgage') => {
+    if (selection.kind !== 'listing') return;
+    if (!guardRef.current.begin()) return;
+    setActionsDisabled(true);
+    const result = purchaseProperty(character, selection.catalogId, financing);
+    if (!result.ok) {
+      guardRef.current.fail();
+      setActionsDisabled(false);
+      setDetailError(result.reason ?? 'That purchase did not go through.');
+      return;
+    }
+    guardRef.current.succeed();
+    onUpdateCharacter(result.character);
+    onClose();
+  };
+
+  const confirmSale = () => {
+    if (selection.kind !== 'owned') return;
+    if (!guardRef.current.begin()) return;
+    setActionsDisabled(true);
+    const result = sellProperty(character, selection.propertyId);
+    if (!result.ok) {
+      guardRef.current.fail();
+      setActionsDisabled(false);
+      setDetailError(result.reason ?? 'That sale did not go through.');
+      return;
+    }
+    guardRef.current.succeed();
+    onUpdateCharacter(result.character);
+    onClose();
+  };
+
+  return (
+    <PropertyDetailModal
+      listing={listing ?? null}
+      owned={owned}
+      imageSrc={listing ? propertyIllustration(listing.id) : null}
+      cash={character.cash}
+      error={detailError}
+      actionsDisabled={actionsDisabled}
+      confirmingSale={confirmingSale}
+      onClose={onClose}
+      onPurchase={buy}
+      onStartSale={() => setConfirmingSale(true)}
+      onCancelSale={() => setConfirmingSale(false)}
+      onConfirmSale={confirmSale}
+    />
+  );
+};
+
+const OwnedHomeCard: React.FC<{ property: OwnedProperty; onOpen: () => void }> = ({ property, onOpen }) => {
+  const mortgaged = property.mortgage !== null && property.mortgage.principal > 0;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="text-left rounded-2xl border-2 border-slate-900 bg-white shadow-[2px_2px_0_#0f172a] overflow-hidden cursor-pointer hover:bg-sky-50/60"
+    >
+      <PropertyArtwork
+        src={propertyIllustration(property.catalogId)}
+        name={property.name}
+        className="h-20 w-full border-b-2 border-slate-900"
+      />
+      <div className="p-2 flex flex-col gap-1">
+        <span className="text-[11px] font-black text-slate-950 leading-tight">{property.name}</span>
+        <span className="text-[10px] font-bold text-slate-500">{property.city}</span>
+        <span className="text-[10px] font-mono font-bold text-slate-950">{money(property.marketValue)}</span>
+        <Badge variant={mortgaged ? 'sky' : 'emerald'} size="xs">
+          {mortgaged ? 'Mortgage' : 'Owned outright'}
+        </Badge>
+      </div>
+    </button>
   );
 };
