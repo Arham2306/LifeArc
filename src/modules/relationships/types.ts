@@ -6,7 +6,8 @@ export type SocialActionType =
   | 'compliment'
   | 'insult'
   | 'give_gift'
-  | 'ask_money';
+  | 'ask_money'
+  | 'outing';
 
 export type GiftTier = 'handmade' | 'thoughtful' | 'luxury' | 'lavish';
 

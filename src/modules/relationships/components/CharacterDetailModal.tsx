@@ -22,6 +22,7 @@ import { romanceService } from '../../romance/services/romanceService';
 import type { FlirtOption, DateVenue } from '../../romance/types';
 import type { CharacterProfile, PersonProfile } from '../../../types/game';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
+import { OUTINGS } from '../data/outings';
 import {
   CHAT_OPTIONS,
   COMPLIMENT_OPTIONS,
@@ -34,6 +35,31 @@ import {
   hasPerformedActionThisYear,
   type TargetPersonRef,
 } from '../services/relationshipService';
+
+const COMMITTED_ROMANTIC_STAGES = new Set<string>(['dating', 'engaged', 'married']);
+const COMMITTED_RELATIONSHIP_TYPES = new Set<string>(['dating', 'partner', 'spouse']);
+const COMMITTED_PARTNER_ROLES = new Set([
+  'Girlfriend',
+  'Boyfriend',
+  'Fiancé',
+  'Fiancée',
+  'Wife',
+  'Husband',
+  'Partner',
+]);
+
+/** Same committed-partner test the outing service uses before it will take someone out. */
+function personIsCommittedPartner(
+  character: CharacterProfile,
+  target: TargetPersonRef,
+  profile: PersonProfile | undefined,
+): boolean {
+  if (character.partner?.id === target.id) return true;
+  const stage = profile?.romanticStage ?? target.romanticStage;
+  if (stage && COMMITTED_ROMANTIC_STAGES.has(stage)) return true;
+  if (profile?.relationshipType && COMMITTED_RELATIONSHIP_TYPES.has(profile.relationshipType)) return true;
+  return COMMITTED_PARTNER_ROLES.has(profile?.role ?? target.role);
+}
 
 interface CharacterDetailModalProps {
   isOpen: boolean;
@@ -261,6 +287,9 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   const complimentDone = hasPerformedActionThisYear(character, liveTarget.id, 'compliment');
   const giftDone = hasPerformedActionThisYear(character, liveTarget.id, 'give_gift');
   const askMoneyDone = hasPerformedActionThisYear(character, liveTarget.id, 'ask_money');
+  const outingDone = hasPerformedActionThisYear(character, liveTarget.id, 'outing');
+  const canShowOuting = character.age >= 13;
+  const committedPartner = personIsCommittedPartner(character, liveTarget, friendTarget);
 
   const hangoutOptions = getHangoutOptions(stage);
 
@@ -376,6 +405,41 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
         data: f,
       })),
       onSelect: (f) => handleFlirt(f),
+    });
+  };
+
+  const handleOpenOutingPicker = () => {
+    if (!canShowOuting || committedPartner || outingDone) return;
+    const relationship =
+      typeof liveTarget.relationship === 'number' && Number.isFinite(liveTarget.relationship)
+        ? liveTarget.relationship
+        : 0;
+    const cashLabel = Number.isFinite(character.cash) ? character.cash.toLocaleString() : '0';
+    setActionPicker({
+      title: `Go out with ${liveTarget.name}`,
+      icon: '🎟️',
+      subtitle: `You have $${cashLabel} cash.`,
+      target: friendTarget,
+      items: OUTINGS.map((outing) => {
+        const tooYoung = character.age < outing.minAge;
+        const notClose = outing.minRelationship !== null && relationship < outing.minRelationship;
+        const unaffordable = outing.price > character.cash;
+        let disabledReason: string | undefined;
+        if (tooYoung) disabledReason = `You can do this from age ${outing.minAge}.`;
+        else if (notClose) disabledReason = 'You are not close enough for a whole day out.';
+        else if (unaffordable) disabledReason = 'Not enough cash.';
+        return {
+          id: outing.id,
+          title: outing.title,
+          description: outing.description,
+          emoji: outing.emoji,
+          cost: outing.price,
+          disabled: disabledReason !== undefined,
+          disabledReason,
+          data: outing.id,
+        };
+      }),
+      onSelect: (outingId) => handleAction('outing', undefined, outingId),
     });
   };
 
@@ -615,6 +679,38 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     : 'Requires 80%+ bond'}
                 </div>
               </button>
+
+              {canShowOuting && committedPartner && (
+                <div className="col-span-2 rounded-2xl border-2 border-slate-900 bg-rose-50 p-2.5 shadow-[1.5px_2px_0_#0f172a]">
+                  <div className="text-xs font-black text-rose-950">Dates stay on the romance card</div>
+                  <p className="text-[10px] font-bold text-slate-600 leading-snug mt-0.5">
+                    Plan a date with {liveTarget.name} from Romance. Go out is for family and friends.
+                  </p>
+                </div>
+              )}
+
+              {canShowOuting && !committedPartner && (
+                <button
+                  type="button"
+                  onClick={handleOpenOutingPicker}
+                  disabled={outingDone}
+                  className={`col-span-2 p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all ${
+                    outingDone
+                      ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                      : 'bg-white hover:bg-amber-50 cursor-pointer shadow-[1.5px_2px_0_#0f172a] active:translate-y-0.5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-black text-slate-950">
+                      {outingDone ? 'Went out this year' : 'Go out'}
+                    </div>
+                    <span className="text-sm">🎟️</span>
+                  </div>
+                  <div className="text-[10px] font-bold text-slate-500">
+                    {outingDone ? 'One outing with this person each year' : 'Movie, meal, concert, or a day out'}
+                  </div>
+                </button>
+              )}
             </div>
 
             {/* Spark Romance Banner */}

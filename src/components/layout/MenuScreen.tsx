@@ -4,6 +4,7 @@ import {
   Heart,
   Home,
   ShoppingBag,
+  PawPrint,
   Stethoscope,
   ShieldAlert,
   Award,
@@ -18,6 +19,8 @@ interface MenuScreenProps {
   onOpenRelationships: () => void;
   onOpenRomance?: () => void;
   onOpenAssets?: () => void;
+  onOpenLifestyle?: () => void;
+  onOpenPets?: () => void;
 }
 
 interface MenuTile {
@@ -37,9 +40,13 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenRelationships,
   onOpenRomance,
   onOpenAssets,
+  onOpenLifestyle,
+  onOpenPets,
 }) => {
   const isRomanceUnlocked = character.age >= 16;
   const isAssetsUnlocked = character.age >= 18;
+  const isLifestyleUnlocked = character.age >= 16;
+  const isPetsUnlocked = character.age >= 16;
 
   const menuTiles: MenuTile[] = [
     {
@@ -78,12 +85,24 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     {
       id: 'shopping',
       title: 'Shopping & Lifestyle',
-      subtitle: 'Designer fashion, electronics, pets, and vacations',
+      subtitle: 'Books, games, and music',
       icon: <ShoppingBag className="w-5 h-5 stroke-[2.5] text-amber-950" />,
-      iconBg: 'bg-amber-300',
-      badgeLabel: 'Module 9',
-      badgeVariant: 'slate',
-      isAvailable: false,
+      iconBg: isLifestyleUnlocked ? 'bg-amber-400' : 'bg-amber-300',
+      badgeLabel: isLifestyleUnlocked ? undefined : 'Age 16',
+      badgeVariant: isLifestyleUnlocked ? undefined : 'slate',
+      isAvailable: isLifestyleUnlocked,
+      onClick: isLifestyleUnlocked ? onOpenLifestyle : undefined,
+    },
+    {
+      id: 'pets',
+      title: 'Pets',
+      subtitle: 'A companion who stays.',
+      icon: <PawPrint className="w-5 h-5 stroke-[2.5] text-orange-950" />,
+      iconBg: isPetsUnlocked ? 'bg-orange-400' : 'bg-orange-300',
+      badgeLabel: isPetsUnlocked ? undefined : 'Age 16',
+      badgeVariant: isPetsUnlocked ? undefined : 'slate',
+      isAvailable: isPetsUnlocked,
+      onClick: isPetsUnlocked ? onOpenPets : undefined,
     },
     {
       id: 'health',

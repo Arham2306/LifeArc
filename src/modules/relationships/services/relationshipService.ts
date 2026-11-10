@@ -3,12 +3,15 @@ import type {
   FamilyWealth,
   LifeEvent,
   PersonProfile,
+  RelationshipType,
+  RomanticStage,
   StatEffects,
 } from '../../../types/game';
 import { applyEffects } from '../../character/services/statService';
 import { createId } from '../../../utils/id';
 import { pickRandom, randomInt } from '../../../utils/random';
 import { MALE_NAMES, FEMALE_NAMES, LAST_NAMES } from '../../character/data/names';
+import { getOuting, outingScene } from '../data/outings';
 import {
   CHAT_OPTIONS,
   COMPLIMENT_OPTIONS,
@@ -16,6 +19,7 @@ import {
   getHangoutOptions,
   INSULT_OPTIONS,
 } from '../data/socialInteractions';
+import { validPossessions } from '../../lifestyle/services/lifestyleService';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
 
 export interface TargetPersonRef {
@@ -35,6 +39,115 @@ export interface TargetPersonRef {
 }
 
 const clamp = (val: number, min = 0, max = 100) => Math.min(max, Math.max(min, Math.round(val)));
+
+const COMMITTED_STAGES = new Set<RomanticStage>(['dating', 'engaged', 'married']);
+const COMMITTED_TYPES = new Set<RelationshipType>(['dating', 'partner', 'spouse']);
+const COMMITTED_ROLES = new Set([
+  'Girlfriend',
+  'Boyfriend',
+  'Fiancé',
+  'Fiancée',
+  'Wife',
+  'Husband',
+  'Partner',
+]);
+
+interface ResolvedOutingPerson {
+  relationship: number;
+  isAlive: boolean;
+  romanticStage?: RomanticStage;
+  relationshipType?: RelationshipType;
+  role: string;
+}
+
+function finiteRelationship(value: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function resolveOutingPerson(
+  character: CharacterProfile,
+  target: TargetPersonRef,
+): ResolvedOutingPerson | null {
+  if (target.type === 'parent') {
+    const parents = character.parents;
+    const parent =
+      parents?.father?.id === target.id
+        ? parents.father
+        : parents?.mother?.id === target.id
+          ? parents.mother
+          : null;
+    if (!parent) return null;
+    return {
+      relationship: finiteRelationship(parent.relationship),
+      isAlive: parent.isAlive,
+      role: parent.role,
+    };
+  }
+
+  if (target.type === 'sibling') {
+    const sibling = (character.siblings || []).find((item) => item.id === target.id);
+    if (!sibling) return null;
+    return {
+      relationship: finiteRelationship(sibling.relationship),
+      isAlive: sibling.isAlive,
+      role: sibling.role,
+    };
+  }
+
+  if (target.type === 'friend') {
+    const friend = (character.relationships || []).find((item) => item.id === target.id);
+    const partner = character.partner?.id === target.id ? character.partner : null;
+    const person = friend ?? partner;
+    if (!person) return null;
+    return {
+      relationship: finiteRelationship(person.relationship),
+      isAlive: true,
+      romanticStage: person.romanticStage,
+      relationshipType: person.relationshipType,
+      role: person.role,
+    };
+  }
+
+  return null;
+}
+
+function isCommittedPartner(
+  character: CharacterProfile,
+  personId: string,
+  person: ResolvedOutingPerson,
+): boolean {
+  if (character.partner?.id === personId) return true;
+  if (person.romanticStage && COMMITTED_STAGES.has(person.romanticStage)) return true;
+  if (person.relationshipType && COMMITTED_TYPES.has(person.relationshipType)) return true;
+  return COMMITTED_ROLES.has(person.role);
+}
+
+function ownsInstrument(character: CharacterProfile): boolean {
+  return validPossessions(character).some(
+    (item) => item.catalogId === 'instrument_keyboard' || item.catalogId === 'instrument_piano',
+  );
+}
+
+function refuseOuting(
+  character: CharacterProfile,
+  target: TargetPersonRef,
+  headline: string,
+  narrative: string,
+): { character: CharacterProfile; outcome: SocialActionOutcome } {
+  return {
+    character,
+    outcome: {
+      actionType: 'outing',
+      success: false,
+      headline,
+      narrative,
+      relationshipDelta: 0,
+      statEffects: {},
+      targetName: target.name,
+      cashDelta: 0,
+    },
+  };
+}
 
 /**
  * Checks whether an interactive action has already been performed with a target this year.
@@ -75,6 +188,7 @@ export function executeSocialAction(
   }
 
   let relationshipDelta = 0;
+  let relationshipBase = target.relationship;
   let headline = '';
   let narrative = '';
   let success = true;
@@ -210,6 +324,72 @@ export function executeSocialAction(
       }
       break;
     }
+
+    case 'outing': {
+      const resolved = resolveOutingPerson(character, target);
+      if (!resolved) {
+        return refuseOuting(character, target, 'Nobody There', 'That person is not part of your life.');
+      }
+      if (!resolved.isAlive) {
+        return refuseOuting(
+          character,
+          target,
+          'Rest in Peace',
+          `${target.name} has passed away. You visited their resting place to pay your respects.`,
+        );
+      }
+      if (isCommittedPartner(character, target.id, resolved)) {
+        return refuseOuting(
+          character,
+          target,
+          'Dates Stay on the Romance Card',
+          `Dates with ${target.name} stay on the romance card.`,
+        );
+      }
+
+      const outing = selectedOptionId ? getOuting(selectedOptionId) : null;
+      if (!outing) {
+        return refuseOuting(character, target, 'Cannot Go Out', 'That outing is not available.');
+      }
+      if (character.age < outing.minAge) {
+        return refuseOuting(
+          character,
+          target,
+          'Too Young',
+          `You can do this from age ${outing.minAge}.`,
+        );
+      }
+      if (outing.minRelationship !== null && resolved.relationship < outing.minRelationship) {
+        return refuseOuting(
+          character,
+          target,
+          'Not Close Enough',
+          'You are not close enough for a whole day out.',
+        );
+      }
+      if (hasPerformedActionThisYear(character, target.id, 'outing')) {
+        return refuseOuting(
+          character,
+          target,
+          'Already Went Out',
+          `You already went out with ${target.name} this year.`,
+        );
+      }
+      if (outing.price > character.cash) {
+        return refuseOuting(character, target, 'Not Enough Cash', 'You do not have enough cash.');
+      }
+
+      const scene = outingScene(outing, resolved.relationship, ownsInstrument(character));
+      relationshipBase = resolved.relationship;
+      relationshipDelta = scene.relationshipDelta;
+      headline = scene.title;
+      narrative = `${scene.scene} You spent $${outing.price}.`;
+      cashDelta = -outing.price;
+      statChanges.cash = -outing.price;
+      statChanges.happiness = scene.happinessDelta;
+      success = true;
+      break;
+    }
   }
 
   // Record this action into yearly cooldown tracking
@@ -220,7 +400,7 @@ export function executeSocialAction(
   };
 
   // Update target's relationship meter in character state
-  const newRelScore = clamp(target.relationship + relationshipDelta);
+  const newRelScore = clamp(relationshipBase + relationshipDelta);
 
   let updatedParents = character.parents;
   let updatedSiblings = character.siblings;

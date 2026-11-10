@@ -2,6 +2,8 @@ import type { EducationProfile } from '../modules/education/types'
 import type { PlayerCareerState } from '../modules/career/types'
 import type { ActiveBusinessProfile } from '../modules/business/types'
 import type { PlayerAssetPortfolio } from '../modules/assets/types'
+import type { PlayerLifestyle } from '../modules/lifestyle/types'
+import type { PlayerPets } from '../modules/pets/types'
 import type { WorldSimulationState } from '../modules/autonomy/types'
 
 export interface CharacterStats {
@@ -186,6 +188,10 @@ export interface CharacterProfile {
   business?: ActiveBusinessProfile | null;
   /** Personally owned residential property. Absent on lives started before Module 8. */
   assets?: PlayerAssetPortfolio;
+  /** Books, equipment, and hobbies. Absent until the first lifestyle purchase. */
+  lifestyle?: PlayerLifestyle;
+  /** Shelter pets and the ones you still remember. Absent until the first adoption. */
+  pets?: PlayerPets;
   relationships: PersonProfile[];
   /** Active primary romantic partner (dating / engaged / married) */
   partner?: PersonProfile | null;

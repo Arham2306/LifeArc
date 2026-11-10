@@ -20,6 +20,8 @@ import { BusinessScreen } from './modules/business/components/BusinessScreen'
 import { FiscalYearReportModal } from './modules/business/components/FiscalYearReportModal'
 import { MenuScreen } from './components/layout/MenuScreen'
 import { AssetsScreen } from './modules/assets/components/AssetsScreen'
+import { LifestyleScreen } from './modules/lifestyle/components/LifestyleScreen'
+import { PetsScreen } from './modules/pets/components/PetsScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
 import { RomanceScreen } from './modules/romance/components/RomanceScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
@@ -47,7 +49,7 @@ export default function App() {
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets'>('hub')
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
     setActiveCharacter(newCharacter)
@@ -323,6 +325,18 @@ export default function App() {
                     onUpdateCharacter={setActiveCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
+                ) : menuView === 'lifestyle' && activeCharacter.age >= 16 ? (
+                  <LifestyleScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                  />
+                ) : menuView === 'pets' && activeCharacter.age >= 16 ? (
+                  <PetsScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                  />
                 ) : menuView === 'assets' && activeCharacter.age >= 18 ? (
                   <AssetsScreen
                     character={activeCharacter}
@@ -348,6 +362,16 @@ export default function App() {
                     onOpenAssets={() => {
                       if (activeCharacter.age >= 18) {
                         setMenuView('assets');
+                      }
+                    }}
+                    onOpenLifestyle={() => {
+                      if (activeCharacter.age >= 16) {
+                        setMenuView('lifestyle');
+                      }
+                    }}
+                    onOpenPets={() => {
+                      if (activeCharacter.age >= 16) {
+                        setMenuView('pets');
                       }
                     }}
                   />

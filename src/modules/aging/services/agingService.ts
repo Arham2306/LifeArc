@@ -3,6 +3,7 @@ import { progressAutonomousYear } from '../../autonomy/services/autonomousYearSe
 import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService'
 import { applyEffects } from '../../character/services/statService'
 import { progressPropertiesForYear } from '../../assets/services/assetService'
+import { progressPetsForYear } from '../../pets/services/petService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
@@ -460,6 +461,10 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
   const incomingCash =
     (careerProgress.netPayEarned || 0) + businessPayout + spouseCashContribution;
   const propertyYear = progressPropertiesForYear(character, incomingCash);
+  const cashOnHand = Number.isFinite(character.cash) ? Math.max(0, character.cash) : 0;
+  const incomingPool = Number.isFinite(incomingCash) ? Math.max(0, incomingCash) : 0;
+  const petSpendable = Math.max(0, cashOnHand + incomingPool - propertyYear.cashSpent);
+  const petYear = progressPetsForYear(character, petSpendable);
 
   const combinedChanges: StatEffects = {
     happiness:
@@ -468,12 +473,13 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       (careerProgress.statEffects?.happiness ?? 0) +
       griefHappinessDelta +
       babyHappinessDelta +
-      childBirthHappinessDelta,
+      childBirthHappinessDelta +
+      petYear.happinessDelta,
     health: (yearlyChanges.health ?? 0) + (eduEffects.health ?? 0),
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
     looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
     parents: eduEffects.parents,
-    cash: incomingCash - propertyYear.cashSpent,
+    cash: incomingCash - propertyYear.cashSpent - petYear.cashSpent,
   };
 
   const { character: aged } = applyEffects(
@@ -502,6 +508,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       career: careerProgress.career,
       business: updatedBusiness,
       ...(character.assets ? { assets: { properties: propertyYear.properties } } : {}),
+      ...(Array.isArray(character.pets?.animals) ? { pets: { animals: petYear.animals } } : {}),
       timeline: [
         ...character.timeline,
         milestone,
@@ -512,6 +519,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...careerProgress.events,
         ...businessEvents,
         ...cohortEvents,
+        ...petYear.events,
       ],
     },
     combinedChanges
