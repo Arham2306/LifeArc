@@ -382,8 +382,12 @@ export interface InheritanceRecord {
   deceasedNpcId: string;
   settlementYear: number;
   currency: string;
+  /** Rounded cash + savings + real estate + business equity. Net worth is not used. */
   grossAssets: number;
+  totalLiabilities: number;
   liabilitiesPaid: number;
+  /** Liabilities that remain after assets are exhausted. Written off, not passed to heirs. */
+  unpaidLiabilities: number;
   netDistributableEstate: number;
   distributions: InheritanceBeneficiaryShare[];
   escheatedToState: boolean;
@@ -460,6 +464,8 @@ export interface WorldSimulationState {
   lastSocialSimYear?: number;
   /** Last year the NPC romance pass completed. A repeat or earlier year is a no-op. */
   lastRomanceSimYear?: number;
+  /** Last year the NPC mortality pass completed. A repeat or earlier year is a no-op. */
+  lastMortalitySimYear?: number;
   familyWealth: FamilyWealth;
 
   /**
