@@ -157,7 +157,7 @@ export interface NpcResidenceHistoryEntry {
   city: string;
   startYear: number;
   endYear?: number;
-  reason: 'birth' | 'career' | 'education' | 'marriage' | 'retirement' | 'financial';
+  reason: 'birth' | 'career' | 'education' | 'marriage' | 'retirement' | 'financial' | 'relocation' | 'adoption';
 }
 
 export interface NpcLocation {
@@ -175,6 +175,9 @@ export type NpcLifeEventType =
   | 'resigned'
   | 'terminated'
   | 'relationship_started'
+  | 'friendship_drifted'
+  | 'reconciliation'
+  | 'breakup'
   | 'engagement'
   | 'wedding'
   | 'divorce'
@@ -265,6 +268,11 @@ export interface NpcProfile {
   processedTurnYear?: number;
   /** Set when population pressure demotes a social NPC to background, so they can be restored. */
   demotedByPopulationCap?: boolean;
+  /**
+   * Who this NPC will date. Missing values are derived from the world seed and id
+   * and are not written back onto existing profiles.
+   */
+  romanticOrientation?: 'women' | 'men' | 'everyone';
 }
 
 export type RelationshipCategory =
@@ -309,7 +317,17 @@ export interface RelationshipEpisode {
   category: RelationshipCategory;
   startYear: number;
   endYear?: number;
-  endReason?: 'breakup' | 'divorce' | 'reconciled' | 'marriage' | 'death' | 'drifted';
+  endReason?:
+    | 'breakup'
+    | 'divorce'
+    | 'reconciled'
+    | 'marriage'
+    | 'death'
+    | 'drifted'
+    | 'deepened'
+    | 'conflict'
+    | 'coupled'
+    | 'engaged';
 }
 
 export interface RelationshipEdge {
@@ -337,6 +355,12 @@ export interface RelationshipEdge {
   engagementRingValue?: number;
   weddingVenue?: string;
   isPregnant?: boolean;
+  /** Year a conception was recorded on this couple edge. */
+  conceptionYear?: number;
+  /** NPC carrying the pregnancy. The biological mother for a natural conception. */
+  pregnantParentId?: string;
+  /** Spouse edge that created a step parent-child edge. */
+  stepSourceEdgeId?: string;
   lastInteractedYear: number;
 
   // Shared Episodic Relationship History (cannot diverge between A and B)
@@ -420,6 +444,8 @@ export interface PopulationConfig {
   minAutonomousReproductionAge: number; // Default: 18 (adult-only autonomous reproduction)
   maxFemaleBiologicalFertilityAge: number; // Default: 46
   minEngagementYears: number;           // Default: 2
+  /** Completed dating years required before engagement. Missing means 2. */
+  minDatingYears?: number;
   retirementTargetAge: number;          // Default: 60 (matches careerService.ts)
   allowRelocation: boolean;             // Default: true
 }
@@ -430,6 +456,10 @@ export interface WorldSimulationState {
   simulationVersion: number;
   lastSimulatedYear: number;
   lastSimulationTurnId: string;
+  /** Last year the NPC social pass completed. A repeat or earlier year is a no-op. */
+  lastSocialSimYear?: number;
+  /** Last year the NPC romance pass completed. A repeat or earlier year is a no-op. */
+  lastRomanceSimYear?: number;
   familyWealth: FamilyWealth;
 
   /**

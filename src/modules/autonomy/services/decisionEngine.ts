@@ -90,6 +90,19 @@ export function evaluateProbabilisticDecision(params: {
   };
 }
 
+/** Logistic probabilities at or above this value are a certain yes. */
+export const CERTAIN_DECISION_PROBABILITY = 0.99;
+
+/**
+ * Shared acceptance rule for social and romantic rolls.
+ * A probability of 0.99 or higher is accepted. Below that, the seeded roll decides.
+ */
+export function acceptProbabilisticDecision(
+  result: Pick<DecisionEvaluationResult, 'probability' | 'chosen'>
+): boolean {
+  return result.probability >= CERTAIN_DECISION_PROBABILITY || result.chosen;
+}
+
 /**
  * Ranks candidate options by utility score descending, breaking ties strictly
  * by lexicographical ID ascending (`a.id.localeCompare(b.id)`).

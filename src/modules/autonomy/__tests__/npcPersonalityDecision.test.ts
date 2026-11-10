@@ -19,7 +19,9 @@ import {
   createInitialNpcFinances,
 } from '../services/currencyService';
 import {
+  acceptProbabilisticDecision,
   calculateWeightedUtility,
+  evaluateProbabilisticDecision,
   evaluateProfessionalSchoolDecision,
   evaluatePromotionPursuitDecision,
   evaluateRetirementDecision,
@@ -335,6 +337,22 @@ console.log('\n--- STARTING NPC AUTONOMY ENGINE MILESTONE 2 TESTS ---');
     'Candidates ranked by score descending, then ID ascending'
   );
   assertDeepEqual(rankedA, rankedB, 'Ranking is strictly independent of input order');
+
+  assert(acceptProbabilisticDecision({ probability: 0.99, chosen: false }), 'a probability of exactly 0.99 is accepted when the roll says no');
+  assert(acceptProbabilisticDecision({ probability: 0.995, chosen: false }), 'a probability above 0.99 is accepted when the roll says no');
+  assert(!acceptProbabilisticDecision({ probability: 0.989, chosen: false }), 'a probability below 0.99 is rejected when the roll says no');
+  assert(acceptProbabilisticDecision({ probability: 0.5, chosen: true }), 'a probability below 0.99 is accepted when the roll says yes');
+  const seededDecision = evaluateProbabilisticDecision({
+    factors: [{ weight: 1, score: 96 }],
+    threshold: 20,
+    steepness: 0.2,
+    noiseRange: 0,
+    prng: new SeededPRNG(99),
+  });
+  assert(
+    acceptProbabilisticDecision(seededDecision) === (seededDecision.probability >= 0.99 || seededDecision.chosen),
+    'the shared helper matches the seeded probability rule'
+  );
 
   console.log('✅ 2. Decision Engine: Weighted utility, logistic probability, personality sensitivity, and tie-breaking verified!');
 }
