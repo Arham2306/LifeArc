@@ -2,6 +2,7 @@ import type { CharacterProfile, ChildProfile, LifeEvent, SiblingProfile, StatEff
 import { progressAutonomousYear } from '../../autonomy/services/autonomousYearService'
 import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService'
 import { applyEffects } from '../../character/services/statService'
+import { progressPropertiesForYear } from '../../assets/services/assetService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
@@ -456,6 +457,10 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     cohortEvents.push(...driftResult.departedEvents);
   }
 
+  const incomingCash =
+    (careerProgress.netPayEarned || 0) + businessPayout + spouseCashContribution;
+  const propertyYear = progressPropertiesForYear(character, incomingCash);
+
   const combinedChanges: StatEffects = {
     happiness:
       (yearlyChanges.happiness ?? 0) +
@@ -468,7 +473,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
     looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
     parents: eduEffects.parents,
-    cash: (careerProgress.netPayEarned || 0) + businessPayout + spouseCashContribution,
+    cash: incomingCash - propertyYear.cashSpent,
   };
 
   const { character: aged } = applyEffects(
@@ -496,6 +501,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       },
       career: careerProgress.career,
       business: updatedBusiness,
+      ...(character.assets ? { assets: { properties: propertyYear.properties } } : {}),
       timeline: [
         ...character.timeline,
         milestone,

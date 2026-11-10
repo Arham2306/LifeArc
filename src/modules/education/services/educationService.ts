@@ -1,4 +1,5 @@
 import type { CharacterProfile, LifeEvent, StatEffects } from '../../../types/game'
+import { stampPlayerNetWorth } from '../../assets/services/assetService'
 import type {
   ActionOutcomeNotice,
   ActiveExtracurricular,
@@ -1730,7 +1731,7 @@ export function enrollInUniversity(
 
   return {
     enrolled: true,
-    character: {
+    character: stampPlayerNetWorth({
       ...updated,
       occupation: 'University Student',
       education: {
@@ -1747,7 +1748,7 @@ export function enrollInUniversity(
         studentDebt: updated.education.studentDebt + initialYearDebt,
       },
       timeline: [...updated.timeline, journalEvent],
-    },
+    }),
     outcome: {
       title: 'Accepted to University!',
       subtitle: `${universityName} • ${fundingMeta.label}`,
@@ -1969,7 +1970,7 @@ export function enrollInProfessionalSchool(
 
   return {
     enrolled: true,
-    character: {
+    character: stampPlayerNetWorth({
       ...updated,
       occupation: occupationLabel,
       education: {
@@ -1986,7 +1987,7 @@ export function enrollInProfessionalSchool(
         studentDebt: updated.education.studentDebt + initialYearDebt,
       },
       timeline: [...updated.timeline, journalEvent],
-    },
+    }),
     outcome: {
       title: `Accepted to ${template.name}!`,
       subtitle: `${schoolName} • ${fundingMeta.label}`,

@@ -1,4 +1,5 @@
 import type { CharacterProfile, StatEffects, StatKey } from '../../../types/game'
+import { stampPlayerNetWorth } from '../../assets/services/assetService'
 
 const STAT_KEYS: StatKey[] = ['health', 'happiness', 'smarts', 'looks', 'karma'];
 
@@ -146,7 +147,7 @@ export function applyEffects(character: CharacterProfile, effects: StatEffects):
   const diedFromHealth = character.isAlive && stats.health <= 0;
 
   return {
-    character: {
+    character: stampPlayerNetWorth({
       ...character,
       stats,
       parents,
@@ -154,12 +155,11 @@ export function applyEffects(character: CharacterProfile, effects: StatEffects):
       career,
       business,
       cash,
-      netWorth: cash + character.bankBalance,
       isAlive: diedFromHealth ? false : character.isAlive,
       causeOfDeath: diedFromHealth
         ? character.causeOfDeath || 'Succumbed to poor health'
         : character.causeOfDeath,
-    },
+    }),
     applied,
   };
 }

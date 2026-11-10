@@ -13,6 +13,7 @@ import { CartoonButton } from '../../../components/ui/CartoonButton';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
 import { DualMeterDisplay } from '../../romance/components/DualMeterDisplay';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
 import { ActionPickerModal, type ActionPickerItem } from '../../../components/ui/ActionPickerModal';
 import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
 import { ConfirmModal } from '../../../components/ui/ConfirmModal';
@@ -201,7 +202,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
     const currentActions = character.yearlySocialActions?.[updatedTarget.id] || [];
     const dateCount = currentActions.filter((a) => a === 'romance_date').length;
     const newActions = dateCount < 2 ? [...currentActions, 'romance_date'] : currentActions;
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       relationships: updatedRel,
@@ -214,7 +215,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    };
+    });
     onUpdateCharacter(updatedChar);
     setActionOutcome({
       actionType: 'spend_time',

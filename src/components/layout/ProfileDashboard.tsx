@@ -1,6 +1,7 @@
 import React from 'react'
 import { Dices, Menu, Calendar, User, Briefcase, Landmark, PieChart } from 'lucide-react'
 import type { CharacterProfile } from '../../types/game'
+import { calculatePlayerNetWorth } from '../../modules/assets/services/assetService'
 
 export type LifeStage = 'childhood' | 'teens' | 'adulthood' | 'middle_age' | 'old_age';
 
@@ -144,7 +145,7 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
           {/* Net Worth */}
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-black text-emerald-800 font-mono tracking-tight leading-none">
-              ${(character.netWorth || character.cash).toLocaleString()}
+              ${calculatePlayerNetWorth(character).toLocaleString()}
             </span>
             <div className="w-6 h-6 rounded-full bg-sky-100 border-[1.5px] border-blue-800 flex items-center justify-center text-blue-800 shadow-[1px_1px_0_#0369a1]">
               <PieChart className="w-3 h-3 stroke-[2.5]" />

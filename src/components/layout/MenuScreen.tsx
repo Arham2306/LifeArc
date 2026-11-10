@@ -17,6 +17,7 @@ interface MenuScreenProps {
   character: CharacterProfile;
   onOpenRelationships: () => void;
   onOpenRomance?: () => void;
+  onOpenAssets?: () => void;
 }
 
 interface MenuTile {
@@ -35,8 +36,10 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   character,
   onOpenRelationships,
   onOpenRomance,
+  onOpenAssets,
 }) => {
   const isRomanceUnlocked = character.age >= 16;
+  const isAssetsUnlocked = character.age >= 18;
 
   const menuTiles: MenuTile[] = [
     {
@@ -66,10 +69,11 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       title: 'Assets & Real Estate',
       subtitle: 'Houses, luxury cars, private jets, and investments',
       icon: <Home className="w-5 h-5 stroke-[2.5] text-sky-950" />,
-      iconBg: 'bg-sky-400',
-      badgeLabel: 'Module 8',
-      badgeVariant: 'sky',
-      isAvailable: false,
+      iconBg: isAssetsUnlocked ? 'bg-sky-400' : 'bg-sky-300',
+      badgeLabel: isAssetsUnlocked ? undefined : 'Age 18',
+      badgeVariant: isAssetsUnlocked ? undefined : 'slate',
+      isAvailable: isAssetsUnlocked,
+      onClick: isAssetsUnlocked ? onOpenAssets : undefined,
     },
     {
       id: 'shopping',

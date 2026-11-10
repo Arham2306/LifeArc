@@ -10,6 +10,7 @@ import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
 import type { TargetPersonRef } from '../services/relationshipService';
 import { ARCHETYPE_LABELS } from '../services/cohortService';
 import { createId } from '../../../utils/id';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
 
 interface RelationshipsScreenProps {
   character: CharacterProfile;
@@ -252,7 +253,7 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
       category: 'relationship',
       icon: '💵',
     };
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash - amount,
       children: updatedChildren,
@@ -261,7 +262,7 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, character.stats.happiness + 5),
       },
-    };
+    });
     onUpdateCharacter(updatedChar);
     setSelectedChild(null);
     setChildOutcome({
@@ -303,7 +304,7 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
       category: 'milestone',
       icon: '🎓',
     };
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash - 15000,
       children: updatedChildren,
@@ -312,7 +313,7 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, character.stats.happiness + 20),
       },
-    };
+    });
     onUpdateCharacter(updatedChar);
     setSelectedChild(null);
     setChildOutcome({

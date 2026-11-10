@@ -12,6 +12,7 @@ import type {
 } from '../types';
 import { getBusinessTemplateById } from '../data/businessCatalog';
 import { createId } from '../../../utils/id';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
 import { randomInt } from '../../../utils/random';
 
 const clamp = (val: number, min = 0, max = 100) => Math.min(max, Math.max(min, Math.round(val)));
@@ -217,13 +218,13 @@ export function foundBusiness(
     icon: business.icon,
   };
 
-  const updatedCharacter: CharacterProfile = {
+  const updatedCharacter = stampPlayerNetWorth({
     ...character,
     cash: remainingCash,
     occupation: `Founder & CEO (${business.name})`,
     business,
     timeline: [...character.timeline, foundEvent],
-  };
+  });
 
   return { character: updatedCharacter, business };
 }
@@ -561,7 +562,7 @@ export function injectCapitalIntoBusiness(
     valuation: updatedValuation,
   };
 
-  const updatedCharacter: CharacterProfile = {
+  const updatedCharacter = stampPlayerNetWorth({
     ...character,
     cash: character.cash - actualAmount,
     business: updatedBusiness,
@@ -577,7 +578,7 @@ export function injectCapitalIntoBusiness(
         icon: '💼',
       },
     ],
-  };
+  });
 
   return { business: updatedBusiness, character: updatedCharacter };
 }
@@ -612,13 +613,13 @@ export function exitBusiness(
     return {
       payoutAmount,
       message,
-      character: {
+      character: stampPlayerNetWorth({
         ...character,
         cash: character.cash + payoutAmount,
         occupation: 'Retired Entrepreneur',
         business: null,
         timeline: [...character.timeline, exitEvent],
-      },
+      }),
     };
   }
 
@@ -654,13 +655,13 @@ export function exitBusiness(
     return {
       payoutAmount,
       message,
-      character: {
+      character: stampPlayerNetWorth({
         ...character,
         cash: character.cash + payoutAmount,
         occupation: `Public CEO & Founder (${business.name})`,
         business: updatedBusiness,
         timeline: [...character.timeline, ipoEvent],
-      },
+      }),
     };
   }
 
@@ -682,13 +683,13 @@ export function exitBusiness(
   return {
     payoutAmount,
     message,
-    character: {
+    character: stampPlayerNetWorth({
       ...character,
       cash: character.cash + payoutAmount,
       occupation: 'Unemployed',
       business: null,
       timeline: [...character.timeline, liquidationEvent],
-    },
+    }),
   };
 }
 
@@ -1099,11 +1100,11 @@ export function payOffLoanEarly(
     annualLoanPayment: nextAnnualPayment,
   };
 
-  const updatedChar: CharacterProfile = {
+  const updatedChar = stampPlayerNetWorth({
     ...character,
     cash: nextCash,
     business: updatedBiz,
-  };
+  });
 
   const message = nextLoan === 0
     ? `Hooray! You paid off the entire bank loan! ${business.name} is now 100% debt-free with $0 annual debt service!`

@@ -1,6 +1,7 @@
 import type { EducationProfile } from '../modules/education/types'
 import type { PlayerCareerState } from '../modules/career/types'
 import type { ActiveBusinessProfile } from '../modules/business/types'
+import type { PlayerAssetPortfolio } from '../modules/assets/types'
 import type { WorldSimulationState } from '../modules/autonomy/types'
 
 export interface CharacterStats {
@@ -183,6 +184,8 @@ export interface CharacterProfile {
   education: EducationProfile;
   career: PlayerCareerState;
   business?: ActiveBusinessProfile | null;
+  /** Personally owned residential property. Absent on lives started before Module 8. */
+  assets?: PlayerAssetPortfolio;
   relationships: PersonProfile[];
   /** Active primary romantic partner (dating / engaged / married) */
   partner?: PersonProfile | null;

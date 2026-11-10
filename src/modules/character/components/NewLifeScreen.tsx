@@ -195,6 +195,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
       siblings,
       education: createInitialEducation(),
       career: createInitialCareerState(),
+      assets: { properties: [] },
       relationships: [],
       seenEventIds: [],
       timeline: [birthEntry],

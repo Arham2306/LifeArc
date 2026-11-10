@@ -1,4 +1,5 @@
 import type { CharacterProfile, PersonProfile } from '../../../types/game';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
 import type { DivorceSettlement } from '../types';
 
 export class DivorceService {
@@ -56,7 +57,7 @@ export class DivorceService {
     };
 
     const exList = character.exPartners || [];
-    const updatedCharacter: CharacterProfile = {
+    const updatedCharacter = stampPlayerNetWorth({
       ...character,
       cash: playerRetainedCash,
       partner: null,
@@ -80,7 +81,7 @@ export class DivorceService {
           icon: '💔',
         },
       ],
-    };
+    });
 
     return {
       updatedCharacter,

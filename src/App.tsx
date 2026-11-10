@@ -19,6 +19,7 @@ import { CareerScreen } from './modules/career/components/CareerScreen'
 import { BusinessScreen } from './modules/business/components/BusinessScreen'
 import { FiscalYearReportModal } from './modules/business/components/FiscalYearReportModal'
 import { MenuScreen } from './components/layout/MenuScreen'
+import { AssetsScreen } from './modules/assets/components/AssetsScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
 import { RomanceScreen } from './modules/romance/components/RomanceScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
@@ -46,7 +47,7 @@ export default function App() {
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets'>('hub')
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
     setActiveCharacter(newCharacter)
@@ -322,6 +323,12 @@ export default function App() {
                     onUpdateCharacter={setActiveCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
+                ) : menuView === 'assets' && activeCharacter.age >= 18 ? (
+                  <AssetsScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                  />
                 ) : menuView === 'romance' && activeCharacter.age >= 16 ? (
                   <RomanceScreen
                     character={activeCharacter}
@@ -336,6 +343,11 @@ export default function App() {
                     onOpenRomance={() => {
                       if (activeCharacter.age >= 16) {
                         setMenuView('romance');
+                      }
+                    }}
+                    onOpenAssets={() => {
+                      if (activeCharacter.age >= 18) {
+                        setMenuView('assets');
                       }
                     }}
                   />

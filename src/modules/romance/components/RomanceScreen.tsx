@@ -26,6 +26,7 @@ import { romanceService } from '../services/romanceService';
 import { reproductionService } from '../services/reproductionService';
 import { divorceService } from '../services/divorceService';
 import { createId } from '../../../utils/id';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
 import { ShieldCheck, MessageCircleHeart } from 'lucide-react';
 import type { CharacterProfile, PersonProfile, ChildProfile, LifeEvent } from '../../../types/game';
 import type {
@@ -303,11 +304,11 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       },
     };
 
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash - 40,
       relationships: [newPerson, ...(character.relationships || [])],
-    };
+    });
 
     const candidateName = `${candidate.firstName} ${candidate.lastName}`;
     triggerRomanceReaction(updatedChar, {
@@ -705,7 +706,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
     const isCurrentPartner = partner?.id === updatedTarget.id;
 
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       partner: isCurrentPartner ? updatedTarget : character.partner,
@@ -714,7 +715,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    };
+    });
 
     setActiveModal(null);
     setActiveTarget(null);
@@ -798,7 +799,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
     const isCurrentPartner = partner?.id === updatedTarget.id;
 
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       partner: isCurrentPartner ? updatedTarget : character.partner,
@@ -807,7 +808,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, character.stats.happiness + (result.happinessDelta ?? 0)),
       },
-    };
+    });
 
     setActiveModal(null);
     setActiveTarget(null);
@@ -945,7 +946,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
     const isCurrentPartner = partner?.id === updatedTarget.id;
 
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       partner: updatedTarget.romanticStage === 'ex' ? null : (isCurrentPartner ? updatedTarget : character.partner),
@@ -954,7 +955,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    };
+    });
 
     setActiveModal(null);
     setActiveTarget(null);
@@ -983,7 +984,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + (result.cashDelta ?? 0),
       partner: updatedTarget,
@@ -992,7 +993,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         ...character.stats,
         happiness: Math.min(100, Math.max(0, character.stats.happiness + (result.happinessDelta ?? 0))),
       },
-    };
+    });
 
     setActiveModal(null);
 
@@ -1189,13 +1190,13 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       r.id === updatedTarget.id ? updatedTarget : r
     );
 
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + res.cashDelta,
       partner: updatedTarget,
       relationships: updatedRelationships,
       isPregnant: character.gender === 'female' ? res.success || character.isPregnant : false,
-    };
+    });
 
     setActiveModal(null);
 
@@ -1224,11 +1225,11 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     }
 
     const currentChildren = character.children || [];
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash + res.cashDelta,
       children: [...currentChildren, res.child!],
-    };
+    });
 
     setActiveModal(null);
 
@@ -1298,11 +1299,11 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     const updatedChildren = (character.children || []).map((c) =>
       c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 10), happiness: Math.min(100, c.happiness + 15) } : c
     );
-    const updatedChar: CharacterProfile = {
+    const updatedChar = stampPlayerNetWorth({
       ...character,
       cash: character.cash - amount,
       children: updatedChildren,
-    };
+    });
     setActiveModal(null);
     triggerRomanceReaction(updatedChar, {
       title: `Allowance for ${child.firstName}`,
@@ -2068,11 +2069,11 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
             const updatedChildren = (character.children || []).map((c) =>
               c.id === selectedChild.id ? { ...c, relationship: 100, occupation: 'College Graduate' } : c
             );
-            const updatedChar: CharacterProfile = {
+            const updatedChar = stampPlayerNetWorth({
               ...character,
               cash: character.cash - 15000,
               children: updatedChildren,
-            };
+            });
             setActiveModal(null);
             triggerRomanceReaction(updatedChar, {
               title: `College Tuition for ${selectedChild.firstName}`,
