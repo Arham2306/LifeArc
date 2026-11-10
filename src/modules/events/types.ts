@@ -1,7 +1,61 @@
-import type { LifeEventCategory, PersonProfile, RelationshipType, StatEffects } from '../../types/game'
+import type { LifeEventCategory, PersonProfile, RelationshipType, RomanticStage, StatEffects } from '../../types/game'
 import type { SchoolStage } from '../education/types'
 import type { CareerField, EmploymentType } from '../career/types'
 import type { BusinessSector } from '../business/types'
+
+/** Dashboard life-stage bands used by contextual eligibility. */
+export type EventLifeStage = 'childhood' | 'teens' | 'adulthood' | 'middle_age' | 'old_age';
+
+/** Cash and student-debt band. Null on the context when either input is invalid. */
+export type FinancialBand = 'dependent' | 'struggling' | 'stable' | 'comfortable' | 'wealthy';
+
+/** One namespaced fact contributed by an event-context provider. */
+export interface EventExtensionFact {
+  providerId: string;
+  key: string;
+  equals: string | number | boolean;
+}
+
+/**
+ * Optional contextual gates. Array fields match with OR.
+ * Separate fields match with AND. Omitted fields are not checked.
+ */
+export interface EventRequirements {
+  lifeStages?: EventLifeStage[];
+  financialBands?: FinancialBand[];
+  minCash?: number;
+  maxCash?: number;
+  minStudentDebt?: number;
+  minKarma?: number;
+  maxKarma?: number;
+  minHealth?: number;
+  maxHealth?: number;
+  requiresPartner?: boolean;
+  requiresSpouse?: boolean;
+  requiresNoPartner?: boolean;
+  partnerStages?: RomanticStage[];
+  minChildren?: number;
+  maxChildren?: number;
+  requiresSchoolAgeChild?: boolean;
+  requiresUnemployed?: boolean;
+  minYearsInJob?: number;
+  extensionAll?: EventExtensionFact[];
+}
+
+/**
+ * Optional rejection rules. A template is ineligible when any present field matches.
+ * An omitted field does not exclude. A present empty array does not exclude.
+ */
+export interface EventExclusions {
+  seenEventIds?: string[];
+  lifeStages?: EventLifeStage[];
+  financialBands?: FinancialBand[];
+  partnerStages?: RomanticStage[];
+  hasPartner?: boolean;
+  hasSpouse?: boolean;
+  hasBusiness?: boolean;
+  isEmployed?: boolean;
+}
 
 /** One possible result of picking a choice. Multiple outcomes = random result. */
 export interface EventOutcome {
@@ -60,5 +114,9 @@ export interface LifeEventTemplate {
   requiresBusiness?: boolean;
   /** Restricts event to specific business sector(s). */
   requiredBusinessSector?: BusinessSector | BusinessSector[];
+  /** Contextual gates. Absent means the template keeps structural eligibility only. */
+  requires?: EventRequirements;
+  /** Contextual rejections. Absent means no extra rejection. */
+  excludes?: EventExclusions;
   choices: EventChoice[];
 }

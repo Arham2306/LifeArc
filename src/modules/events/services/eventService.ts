@@ -5,6 +5,10 @@ import { applyEffects } from '../../character/services/statService'
 import { WEALTH_META } from '../../character/services/familyService'
 import { chance, pickWeighted } from '../../../utils/random'
 import { createId } from '../../../utils/id'
+import { gameEventContextRegistry } from '../../../composition/eventContextRegistry'
+import { buildEventContext, type EventContextRegistry } from './eventContext'
+import { isEventEligible } from './eventEligibility'
+import { scoreEventWeight } from './eventWeight'
 
 /** Chance that an interactive event pops up on any given age up. */
 export const EVENT_TRIGGER_CHANCE = 0.7;
@@ -78,78 +82,13 @@ export function formatEventText(
 }
 
 /** All events that can currently happen to this character. */
-export function getEligibleEvents(character: CharacterProfile): LifeEventTemplate[] {
+export function getEligibleEvents(
+  character: CharacterProfile,
+  registry: EventContextRegistry = gameEventContextRegistry
+): LifeEventTemplate[] {
   if (!character.isAlive) return [];
-  const currentStage = character.education?.currentStage;
-  const currentJob = character.career?.currentJob;
-  const isEmployedOrBusiness = Boolean(currentJob || character.business);
-
-  return EVENT_POOL.filter((event) => {
-    if (character.age < event.minAge || character.age > event.maxAge) return false;
-
-    if (event.requiredStage) {
-      if (Array.isArray(event.requiredStage)) {
-        if (!event.requiredStage.includes(currentStage)) return false;
-      } else if (currentStage !== event.requiredStage) {
-        return false;
-      }
-    }
-
-    // Employment checks: allows both standard employees and active business founders
-    if (event.requiresEmployed && !isEmployedOrBusiness) {
-      return false;
-    }
-
-    if (event.requiredCareerField) {
-      if (!currentJob) return false;
-      if (Array.isArray(event.requiredCareerField)) {
-        if (!event.requiredCareerField.includes(currentJob.field)) return false;
-      } else if (currentJob.field !== event.requiredCareerField) {
-        return false;
-      }
-    }
-
-    if (event.requiredEmploymentType) {
-      if (!currentJob) return false;
-      if (Array.isArray(event.requiredEmploymentType)) {
-        if (!event.requiredEmploymentType.includes(currentJob.type)) return false;
-      } else if (currentJob.type !== event.requiredEmploymentType) {
-        return false;
-      }
-    }
-
-    if (event.requiredJobIds) {
-      if (!currentJob || !event.requiredJobIds.includes(currentJob.jobId)) {
-        return false;
-      }
-    }
-
-    // Business entrepreneur checks
-    if (event.requiresBusiness && !character.business) {
-      return false;
-    }
-
-    if (event.requiredBusinessSector) {
-      if (!character.business) return false;
-      if (Array.isArray(event.requiredBusinessSector)) {
-        if (!event.requiredBusinessSector.includes(character.business.sector)) {
-          return false;
-        }
-      } else if (character.business.sector !== event.requiredBusinessSector) {
-        return false;
-      }
-    }
-
-    // Defensive check: If an event description explicitly features parents who have passed away
-    if (event.description.includes('{fatherName}') && !character.parents?.father?.isAlive) {
-      return false;
-    }
-    if (event.description.includes('{motherName}') && !character.parents?.mother?.isAlive) {
-      return false;
-    }
-
-    return event.repeatable || !character.seenEventIds.includes(event.id);
-  });
+  const context = buildEventContext(character, registry);
+  return EVENT_POOL.filter((event) => isEventEligible(event, character, context));
 }
 
 /** Rolls the dice to see if an event happens this year, and which one. */
@@ -163,7 +102,13 @@ export function rollEventForCharacter(
   const eligible = getEligibleEvents(character);
   if (eligible.length === 0) return null;
 
-  return pickWeighted(eligible);
+  const context = buildEventContext(character, gameEventContextRegistry);
+  const interactiveTitles = new Set(EVENT_POOL.map((event) => event.title));
+  const weighted = eligible.map((event) => ({
+    ...event,
+    weight: scoreEventWeight(event, context, interactiveTitles),
+  }));
+  return pickWeighted(weighted);
 }
 
 /**
