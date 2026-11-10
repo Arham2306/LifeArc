@@ -61,6 +61,9 @@ export class DivorceService {
       cash: playerRetainedCash,
       partner: null,
       exPartners: [...exList, updatedSpouse],
+      relationships: (character.relationships || []).map((person) =>
+        person.id === spouse.id ? updatedSpouse : person
+      ),
       stats: {
         ...character.stats,
         happiness: Math.max(0, character.stats.happiness - 30),

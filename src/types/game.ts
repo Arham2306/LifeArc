@@ -1,6 +1,7 @@
 import type { EducationProfile } from '../modules/education/types'
 import type { PlayerCareerState } from '../modules/career/types'
 import type { ActiveBusinessProfile } from '../modules/business/types'
+import type { WorldSimulationState } from '../modules/autonomy/types'
 
 export interface CharacterStats {
   health: number;      // 0 - 100
@@ -26,6 +27,8 @@ export interface ParentProfile {
   relationship: number;
   /** How generous this parent is when asked for things (0 - 100). */
   generosity: number;
+  /** Optional lineage distinction (defaults to 'biological'). */
+  lineageRelation?: 'biological' | 'adoptive' | 'step';
 }
 
 export interface ParentsInfo {
@@ -198,6 +201,8 @@ export interface CharacterProfile {
   timeline: LifeEvent[];
   /** Ids of one-time interactive events this character has already experienced. */
   seenEventIds: string[];
+  /** Canonical NPC Autonomy Engine world state (Schema Version 2). */
+  worldState?: WorldSimulationState;
 }
 
 export type LifeEventCategory =

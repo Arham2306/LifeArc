@@ -369,10 +369,10 @@ assert(baby.looks >= 70 && baby.smarts >= 70, 'Genetics inherited');
 console.log(`✅ Biological Child: Born with inherited genetics (Looks: ${baby.looks}%, Smarts: ${baby.smarts}%)!`);
 
 // Test 8: Divorce & Asset Protection
-const richChar = createMockCharacter({ cash: 100000, age: 30 });
 const wifeWithPrenup = createMockFriend({
   role: 'Wife',
   romanticStage: 'married',
+  relationshipType: 'spouse',
   age: 30,
   partnerStats: {
     hasPrenup: true,
@@ -382,6 +382,12 @@ const wifeWithPrenup = createMockFriend({
     smarts: 80,
     fertility: 80,
   },
+});
+const richChar = createMockCharacter({
+  cash: 100000,
+  age: 30,
+  partner: wifeWithPrenup,
+  relationships: [wifeWithPrenup],
 });
 
 const { updatedCharacter, settlement } = divorceService.executeDivorce(
@@ -394,6 +400,14 @@ assert(settlement.partnerShareCash === 0, 'Prenup protected all cash from divisi
 assert(updatedCharacter.cash === 100000 - 1500, 'Only paid legal filing fee');
 assert(updatedCharacter.partner === null, 'Partner cleared upon divorce');
 assert((updatedCharacter.exPartners?.length ?? 0) === 1, 'Ex-partner recorded in history');
+assert(
+  updatedCharacter.relationships?.[0]?.relationshipType === 'ex',
+  'Divorce rewrites the relationships copy to ex'
+);
+assert(
+  updatedCharacter.relationships?.[0]?.romanticStage === 'ex',
+  'Divorce clears the married stage on the relationships copy'
+);
 console.log(`✅ Divorce Finalized: Prenup successfully shielded 100% of liquid assets!`);
 
 // Test 9: Aging Lifecycle Integration
