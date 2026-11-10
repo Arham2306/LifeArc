@@ -77,8 +77,15 @@ const bestFriendName = `${player.relationships[0].firstName} ${player.relationsh
 player.relationships[1].relationship = 25;
 
 // Test 3: Middle School Transition at Age 11 (Batch Introduction + Pruning)
-// Fast forward player to age 10
-player.age = 10;
+// The player age jumps ahead of the stored NPC year. Move the baseline to this age
+// so the next Age Up remains one sequential year. The skipped NPC years are not simulated.
+player = {
+  ...player,
+  age: 10,
+  ...(player.worldState
+    ? { worldState: { ...player.worldState, lastSimulatedYear: player.birthYear + 10 } }
+    : {}),
+};
 player = ageUpCharacter(player); // Turns 11 (Middle school entry)
 
 const postMiddleRels = player.relationships || [];
@@ -90,7 +97,13 @@ assert(middleSchoolers.length === 4, 'Introduced 4 new middle school classmates'
 console.log(`✅ Middle School Transition: Retained best friend (${bestFriendName}) and added 4 new middle school peers!`);
 
 // Test 4: High School Transition at Age 14
-player.age = 13;
+player = {
+  ...player,
+  age: 13,
+  ...(player.worldState
+    ? { worldState: { ...player.worldState, lastSimulatedYear: player.birthYear + 13 } }
+    : {}),
+};
 player = ageUpCharacter(player); // Turns 14 (High school entry)
 
 const highSchoolers = (player.relationships || []).filter((r) => r.stageMet === 'high_school');

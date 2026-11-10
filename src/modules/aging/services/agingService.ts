@@ -1,4 +1,6 @@
 import type { CharacterProfile, ChildProfile, LifeEvent, SiblingProfile, StatEffects } from '../../../types/game'
+import { progressAutonomousYear } from '../../autonomy/services/autonomousYearService'
+import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService'
 import { applyEffects } from '../../character/services/statService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
@@ -526,14 +528,28 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       icon: '🪦',
     };
 
-    return {
+    return finishAgeUp(character, {
       ...aged,
       isAlive: false,
       causeOfDeath: cause,
       stats: { ...aged.stats, health: 0 },
       timeline: [...aged.timeline, deathEvent],
-    };
+    });
   }
 
-  return aged;
+  return finishAgeUp(character, aged);
+}
+
+/**
+ * Stores the NPC year on the finished player profile.
+ * Migration uses the incoming character, so the baseline year is the year already represented
+ * by the world. The autonomous call then advances exactly one year.
+ * A thrown pipeline discards this result and leaves the caller on the pre-turn character.
+ */
+function finishAgeUp(source: CharacterProfile, aged: CharacterProfile): CharacterProfile {
+  const migrated = migrateToCanonicalWorldState(source);
+  const baseline = migrated.worldState;
+  if (!baseline) return aged;
+  const worldState = progressAutonomousYear(baseline, source.birthYear + source.age + 1, source.id);
+  return { ...aged, worldState };
 }

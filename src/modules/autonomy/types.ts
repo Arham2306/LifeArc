@@ -466,6 +466,8 @@ export interface WorldSimulationState {
   lastRomanceSimYear?: number;
   /** Last year the NPC mortality pass completed. A repeat or earlier year is a no-op. */
   lastMortalitySimYear?: number;
+  /** Last year the NPC memory pass completed. A repeat or earlier year is a no-op. */
+  lastMemorySimYear?: number;
   familyWealth: FamilyWealth;
 
   /**
