@@ -4,6 +4,7 @@ import type { ActiveBusinessProfile } from '../modules/business/types'
 import type { PlayerAssetPortfolio } from '../modules/assets/types'
 import type { PlayerLifestyle } from '../modules/lifestyle/types'
 import type { PlayerPets } from '../modules/pets/types'
+import type { PlayerHealthcare } from '../modules/healthcare/types'
 import type { WorldSimulationState } from '../modules/autonomy/types'
 
 export interface CharacterStats {
@@ -192,6 +193,8 @@ export interface CharacterProfile {
   lifestyle?: PlayerLifestyle;
   /** Shelter pets and the ones you still remember. Absent until the first adoption. */
   pets?: PlayerPets;
+  /** Doctor visits and named concerns. Absent until the first visit or the first concern. */
+  healthcare?: PlayerHealthcare;
   relationships: PersonProfile[];
   /** Active primary romantic partner (dating / engaged / married) */
   partner?: PersonProfile | null;
