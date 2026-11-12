@@ -6,6 +6,9 @@ export type ConditionClosure = 'recovered' | 'resolved' | 'displaced';
 
 export type VisitKind = 'checkup' | 'treatment';
 
+export type DoctorTierId = 'average' | 'good' | 'excellent';
+export type DoctorReputation = 'average' | 'good' | 'excellent';
+
 export interface ConditionRecord {
   id: string;
   catalogId: ConditionId;
@@ -21,6 +24,7 @@ export interface ConditionRecord {
   coverageThroughAge?: number;
   closedAtAge?: number;
   closure?: ConditionClosure;
+  lastProgressedAge?: number;
 }
 
 export interface VisitRecord {
@@ -30,6 +34,9 @@ export interface VisitRecord {
   pricePaid: number;
   catalogId?: ConditionId;
   complimentary?: boolean;
+  doctorTier?: DoctorTierId;
+  doctorReputation?: DoctorReputation;
+  doctorName?: string;
 }
 
 /** Absent until the first doctor visit or the first concern. */
@@ -37,4 +44,5 @@ export interface PlayerHealthcare {
   conditions: unknown[];
   visits: unknown[];
   lastConsultAge?: number;
+  lastProgressedAge?: number;
 }

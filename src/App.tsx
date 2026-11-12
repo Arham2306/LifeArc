@@ -24,6 +24,7 @@ import { LifestyleScreen } from './modules/lifestyle/components/LifestyleScreen'
 import { PetsScreen } from './modules/pets/components/PetsScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
 import { RomanceScreen } from './modules/romance/components/RomanceScreen'
+import { HealthcareScreen } from './modules/healthcare/components/HealthcareScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
 import type { SchoolMilestoneNotice } from './modules/education/types'
@@ -49,7 +50,7 @@ export default function App() {
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare'>('hub')
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
     setActiveCharacter(newCharacter)
@@ -350,6 +351,12 @@ export default function App() {
                     onBackToMenu={() => setMenuView('hub')}
                     onOpenRelationships={() => setMenuView('relationships')}
                   />
+                ) : menuView === 'healthcare' && activeCharacter.age >= 6 ? (
+                  <HealthcareScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                  />
                 ) : (
                   <MenuScreen
                     character={activeCharacter}
@@ -372,6 +379,11 @@ export default function App() {
                     onOpenPets={() => {
                       if (activeCharacter.age >= 16) {
                         setMenuView('pets');
+                      }
+                    }}
+                    onOpenHealthcare={() => {
+                      if (activeCharacter.age >= 6) {
+                        setMenuView('healthcare');
                       }
                     }}
                   />

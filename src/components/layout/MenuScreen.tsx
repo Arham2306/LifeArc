@@ -21,6 +21,7 @@ interface MenuScreenProps {
   onOpenAssets?: () => void;
   onOpenLifestyle?: () => void;
   onOpenPets?: () => void;
+  onOpenHealthcare?: () => void;
 }
 
 interface MenuTile {
@@ -42,11 +43,13 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenAssets,
   onOpenLifestyle,
   onOpenPets,
+  onOpenHealthcare,
 }) => {
   const isRomanceUnlocked = character.age >= 16;
   const isAssetsUnlocked = character.age >= 18;
   const isLifestyleUnlocked = character.age >= 16;
   const isPetsUnlocked = character.age >= 16;
+  const isHealthcareUnlocked = character.age >= 6;
 
   const menuTiles: MenuTile[] = [
     {
@@ -107,12 +110,15 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     {
       id: 'health',
       title: 'Doctor & Healthcare',
-      subtitle: 'Medical checkups, mental health therapy, and plastic surgery',
+      subtitle: isHealthcareUnlocked
+        ? 'Routine checkups, condition diagnoses, and medical treatments'
+        : 'Unlocks at age 6 (Checkups, diagnoses, and medical treatments)',
       icon: <Stethoscope className="w-5 h-5 stroke-[2.5] text-emerald-950" />,
-      iconBg: 'bg-emerald-400',
-      badgeLabel: 'Module 10',
-      badgeVariant: 'slate',
-      isAvailable: false,
+      iconBg: isHealthcareUnlocked ? 'bg-emerald-400' : 'bg-emerald-300',
+      badgeLabel: isHealthcareUnlocked ? undefined : 'Age 6',
+      badgeVariant: isHealthcareUnlocked ? undefined : 'slate',
+      isAvailable: isHealthcareUnlocked,
+      onClick: isHealthcareUnlocked ? onOpenHealthcare : undefined,
     },
     {
       id: 'crime',

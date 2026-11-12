@@ -6,9 +6,15 @@ import {
   getConditionListing,
   isConditionEligible,
 } from '../data/conditionCatalog';
+import {
+  DEFAULT_DOCTOR_TIER,
+  getDoctorTierListing,
+  isValidDoctorTier,
+} from '../data/doctorCatalog';
 import type {
   ConditionId,
   ConditionRecord,
+  DoctorTierId,
   PlayerHealthcare,
   VisitRecord,
 } from '../types';
@@ -82,6 +88,7 @@ export function isValidCondition(value: unknown): value is ConditionRecord {
   if (!optionalAge(value, 'declinedAtAge')) return false;
   if (!optionalAge(value, 'treatedAtAge')) return false;
   if (!optionalAge(value, 'coverageThroughAge')) return false;
+  if (!optionalAge(value, 'lastProgressedAge')) return false;
   if (!optionalBoolean(value, 'procedureCompleted')) return false;
   if (!optionalBoolean(value, 'enrolled')) return false;
   if (value.closure !== undefined && !CLOSURES.includes(value.closure as (typeof CLOSURES)[number])) {
@@ -106,6 +113,20 @@ export function isValidVisit(value: unknown): value is VisitRecord {
     return false;
   }
   if (!optionalBoolean(value, 'complimentary')) return false;
+  if (value.doctorTier !== undefined && (typeof value.doctorTier !== 'string' || !isValidDoctorTier(value.doctorTier))) {
+    return false;
+  }
+  if (
+    value.doctorReputation !== undefined
+    && value.doctorReputation !== 'average'
+    && value.doctorReputation !== 'good'
+    && value.doctorReputation !== 'excellent'
+  ) {
+    return false;
+  }
+  if (value.doctorName !== undefined && !nonEmptyString(value.doctorName)) {
+    return false;
+  }
   return true;
 }
 
@@ -239,11 +260,19 @@ function journal(character: CharacterProfile, message: string): LifeEvent {
   };
 }
 
-function shortCashReason(character: CharacterProfile): string {
-  return `A visit costs $${CONSULT_PRICE}. You have $${spendableCash(character)}. The bank is not used.`;
+function shortCashReason(price: number, character: CharacterProfile): string {
+  return `A visit costs $${price}. You have $${spendableCash(character)}. The bank is not used.`;
 }
 
-export function consultDoctor(character: CharacterProfile): HealthcareResult {
+export interface DoctorConsultOptions {
+  tierId?: DoctorTierId;
+  doctorName?: string;
+}
+
+export function consultDoctor(
+  character: CharacterProfile,
+  options?: DoctorConsultOptions,
+): HealthcareResult {
   if (!character.isAlive) return fail(character, 'You cannot see a doctor.');
   if (!Number.isInteger(character.age) || character.age < DOCTOR_MIN_AGE) {
     return fail(character, 'You can see a doctor from age 6.');
@@ -259,17 +288,39 @@ export function consultDoctor(character: CharacterProfile): HealthcareResult {
     }
   }
 
+  const tierId = options?.tierId ?? DEFAULT_DOCTOR_TIER;
+  const tierListing = getDoctorTierListing(tierId);
+  if (!tierListing) {
+    return fail(character, 'Invalid doctor selected.');
+  }
+
+  if (options?.doctorName !== undefined) {
+    if (typeof options.doctorName !== 'string' || options.doctorName.trim() === '') {
+      return fail(character, 'Invalid doctor identity.');
+    }
+  }
+  const doctorName = options?.doctorName?.trim();
+
   const complimentary = character.age < 16;
-  const price = complimentary ? 0 : CONSULT_PRICE;
-  if (price > 0 && spendableCash(character) < price) return fail(character, shortCashReason(character));
+  const price = complimentary ? 0 : tierListing.consultPrice;
+  if (price > 0 && spendableCash(character) < price) {
+    return fail(character, shortCashReason(price, character));
+  }
 
   const before = rawConditions(character);
   const named: ConditionId[] = [];
+  let unexplainedCount = 0;
+
   const diagnosed = before.map((entry) => {
     if (!isValidCondition(entry) || entry.status !== 'undiagnosed') return entry;
-    named.push(entry.catalogId);
-    return { ...entry, status: 'known' as const, diagnosedAtAge: character.age };
+    if (tierListing.diagnosableConditions.includes(entry.catalogId)) {
+      named.push(entry.catalogId);
+      return { ...entry, status: 'known' as const, diagnosedAtAge: character.age };
+    }
+    unexplainedCount++;
+    return entry;
   });
+
   const knownAlready = before.filter(
     (entry) => isValidCondition(entry) && entry.status === 'known',
   ).length;
@@ -280,16 +331,41 @@ export function consultDoctor(character: CharacterProfile): HealthcareResult {
     kind: 'checkup',
     pricePaid: price,
     ...(complimentary ? { complimentary: true } : {}),
+    doctorTier: tierListing.id,
+    doctorReputation: tierListing.reputation,
+    ...(doctorName ? { doctorName } : {}),
   };
   const healthcare: PlayerHealthcare = {
     conditions: diagnosed,
     visits: trimVisits([...rawVisits(character), visit]),
     lastConsultAge: character.age,
   };
-  const finding = findingSentence(named, knownAlready);
-  const message = complimentary
-    ? `You saw the doctor. ${finding}`
-    : `You paid $${CONSULT_PRICE} to see the doctor. ${finding}`;
+
+  let message: string;
+  if (doctorName) {
+    let findingText: string;
+    if (named.length > 0) {
+      findingText = `The doctor identified ${listPhrases(named)}.`;
+      if (unexplainedCount > 0) {
+        findingText += ' Some symptoms remain unexplained.';
+      }
+    } else if (unexplainedCount > 0) {
+      findingText = 'The doctor found no new conditions, but some symptoms remain unexplained.';
+    } else if (knownAlready > 0) {
+      findingText = 'The doctor found no previously undiagnosed concerns.';
+    } else {
+      findingText = 'The doctor found nothing on your record.';
+    }
+    message = `You visited ${doctorName}. ${findingText}`;
+  } else {
+    let findingText = findingSentence(named, knownAlready);
+    if (unexplainedCount > 0) {
+      findingText += ' Some symptoms remain unexplained.';
+    }
+    message = complimentary
+      ? `You saw the doctor. ${findingText}`
+      : `You paid $${price} to see the doctor. ${findingText}`;
+  }
 
   const recorded = price > 0
     ? applyEffects({ ...character, healthcare }, { cash: -price }).character
@@ -523,4 +599,259 @@ export function cancelEnrollment(character: CharacterProfile, conditionId: strin
     {},
     message,
   );
+}
+
+export interface HealthcareYearProgress {
+  healthcare: PlayerHealthcare | undefined;
+  cashSpent: number;
+  healthDelta: number;
+  happinessDelta: number;
+  events: LifeEvent[];
+  heartAloneCausesDeath: boolean;
+}
+
+export function progressHealthcareForYear(
+  character: CharacterProfile,
+  spendable: number,
+  externalHealthDelta: number = 0,
+): HealthcareYearProgress {
+  if (!character.isAlive || !Number.isInteger(character.age)) {
+    return {
+      healthcare: character.healthcare,
+      cashSpent: 0,
+      healthDelta: 0,
+      happinessDelta: 0,
+      events: [],
+      heartAloneCausesDeath: false,
+    };
+  }
+
+  const existing = character.healthcare;
+  if (existing) {
+    if (!Array.isArray(existing.conditions) || !Array.isArray(existing.visits)) {
+      return {
+        healthcare: character.healthcare,
+        cashSpent: 0,
+        healthDelta: 0,
+        happinessDelta: 0,
+        events: [],
+        heartAloneCausesDeath: false,
+      };
+    }
+  }
+
+  const yearSettled = character.age;
+  const nextAge = yearSettled + 1;
+
+  if (character.healthcare?.lastProgressedAge === yearSettled) {
+    return {
+      healthcare: character.healthcare,
+      cashSpent: 0,
+      healthDelta: 0,
+      happinessDelta: 0,
+      events: [],
+      heartAloneCausesDeath: false,
+    };
+  }
+
+  let remainingSpendable = typeof spendable === 'number' && Number.isFinite(spendable) && spendable > 0
+    ? spendable
+    : 0;
+  let cashSpent = 0;
+  let totalHealthDelta = 0;
+  let totalHappinessDelta = 0;
+  let heartHealthDelta = 0;
+
+  const currentConditions = rawConditions(character);
+  const updatedConditions: unknown[] = [];
+
+  for (const entry of currentConditions) {
+    if (!isValidCondition(entry)) {
+      updatedConditions.push(entry);
+      continue;
+    }
+
+    if (entry.status === 'closed') {
+      updatedConditions.push(entry);
+      continue;
+    }
+
+    // 1. Acquisition-year protection:
+    // A condition acquired at nextAge or later was newly acquired in this turn or step,
+    // so it receives no same-year penalty.
+    if (entry.acquiredAtAge >= nextAge || entry.lastProgressedAge === yearSettled) {
+      updatedConditions.push(entry);
+      continue;
+    }
+
+    const listing = getConditionListing(entry.catalogId);
+    if (!listing) {
+      updatedConditions.push(entry);
+      continue;
+    }
+
+    let condition: ConditionRecord = { ...entry, lastProgressedAge: yearSettled };
+
+    if (entry.catalogId === 'chest') {
+      if (chestCourseAwaitingClose(entry)) {
+        condition = {
+          ...condition,
+          status: 'closed',
+          closedAtAge: nextAge,
+          closure: 'recovered',
+        };
+      } else {
+        totalHealthDelta += listing.untreatedHealth;
+        totalHappinessDelta += listing.untreatedHappiness;
+        const nextUntreated = condition.untreatedYears + 1;
+        if (nextUntreated >= (listing.untreatedYearsToClose ?? 2)) {
+          condition = {
+            ...condition,
+            untreatedYears: nextUntreated,
+            status: 'closed',
+            closedAtAge: nextAge,
+            closure: 'recovered',
+          };
+        } else {
+          condition = {
+            ...condition,
+            untreatedYears: nextUntreated,
+          };
+        }
+      }
+    } else if (entry.catalogId === 'cold') {
+      totalHealthDelta += listing.untreatedHealth;
+      totalHappinessDelta += listing.untreatedHappiness;
+      const nextUntreated = condition.untreatedYears + 1;
+      if (nextUntreated >= (listing.untreatedYearsToClose ?? 1)) {
+        condition = {
+          ...condition,
+          untreatedYears: nextUntreated,
+          status: 'closed',
+          closedAtAge: nextAge,
+          closure: 'recovered',
+        };
+      } else {
+        condition = {
+          ...condition,
+          untreatedYears: nextUntreated,
+        };
+      }
+    } else if (entry.catalogId === 'ankle') {
+      totalHealthDelta += listing.untreatedHealth;
+      totalHappinessDelta += listing.untreatedHappiness;
+      const nextUntreated = condition.untreatedYears + 1;
+      if (nextUntreated >= (listing.untreatedYearsToClose ?? 1)) {
+        condition = {
+          ...condition,
+          untreatedYears: nextUntreated,
+          status: 'closed',
+          closedAtAge: nextAge,
+          closure: 'resolved',
+        };
+      } else {
+        condition = {
+          ...condition,
+          untreatedYears: nextUntreated,
+        };
+      }
+    } else if (entry.catalogId === 'joints' || entry.catalogId === 'heart') {
+      const covered = coverageIncludes(entry, yearSettled);
+      if (covered) {
+        const managed = listing.managedHealth ?? 0;
+        totalHealthDelta += managed;
+        if (entry.catalogId === 'heart') {
+          heartHealthDelta += managed;
+        }
+      } else {
+        const untreated = listing.untreatedHealth;
+        totalHealthDelta += untreated;
+        condition = {
+          ...condition,
+          untreatedYears: condition.untreatedYears + 1,
+        };
+        if (entry.catalogId === 'heart') {
+          heartHealthDelta += untreated;
+        }
+      }
+    }
+
+    updatedConditions.push(condition);
+  }
+
+  // Renewal step for upcoming year (nextAge)
+  const candidatesForRenewal = updatedConditions
+    .filter(
+      (entry): entry is ConditionRecord =>
+        isValidCondition(entry) && entry.status !== 'closed' && !!entry.enrolled,
+    )
+    .sort((a, b) => {
+      const pA = getConditionListing(a.catalogId)?.priority ?? 99;
+      const pB = getConditionListing(b.catalogId)?.priority ?? 99;
+      return pA - pB;
+    });
+
+  for (const cand of candidatesForRenewal) {
+    const listing = getConditionListing(cand.catalogId);
+    if (!listing || listing.enrollPrice === null) continue;
+
+    if (coverageIncludes(cand, nextAge)) {
+      continue;
+    }
+
+    const price = listing.enrollPrice;
+    const idx = updatedConditions.findIndex((c) => isValidCondition(c) && c.id === cand.id);
+    if (idx === -1) continue;
+
+    if (remainingSpendable >= price) {
+      remainingSpendable -= price;
+      cashSpent += price;
+      updatedConditions[idx] = {
+        ...(updatedConditions[idx] as ConditionRecord),
+        enrolled: true,
+        coverageThroughAge: nextAge,
+      };
+    } else {
+      // Failed renewal: lapses without automatic re-enrollment
+      updatedConditions[idx] = {
+        ...(updatedConditions[idx] as ConditionRecord),
+        enrolled: false,
+      };
+    }
+  }
+
+  // Acquire new condition for nextAge if eligible
+  const projectedHealthBeforeHealthcare = character.stats.health + externalHealthDelta;
+  const conditionsWithAcquisitions = acquireForYear(
+    updatedConditions,
+    projectedHealthBeforeHealthcare,
+    nextAge,
+  );
+  const trimmed = trimClosed(conditionsWithAcquisitions);
+
+  // Death attribution calculation
+  const otherHealthLoss = totalHealthDelta - heartHealthDelta;
+  const healthWithoutHeart = character.stats.health + externalHealthDelta + otherHealthLoss;
+  const healthWithHeart = healthWithoutHeart + heartHealthDelta;
+  const heartAloneCausesDeath =
+    heartHealthDelta < 0 && healthWithoutHeart > 0 && healthWithHeart <= 0;
+
+  let nextHealthcare: PlayerHealthcare | undefined = undefined;
+  if (trimmed.length > 0 || rawVisits(character).length > 0 || character.healthcare !== undefined) {
+    nextHealthcare = {
+      ...(character.healthcare ?? { conditions: [], visits: [] }),
+      conditions: trimmed,
+      visits: rawVisits(character),
+      lastProgressedAge: yearSettled,
+    };
+  }
+
+  return {
+    healthcare: nextHealthcare,
+    cashSpent,
+    healthDelta: totalHealthDelta,
+    happinessDelta: totalHappinessDelta,
+    events: [],
+    heartAloneCausesDeath,
+  };
 }

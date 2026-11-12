@@ -4,6 +4,7 @@ import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationS
 import { applyEffects } from '../../character/services/statService'
 import { progressPropertiesForYear } from '../../assets/services/assetService'
 import { progressPetsForYear } from '../../pets/services/petService'
+import { progressHealthcareForYear } from '../../healthcare/services/healthcareService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
@@ -465,6 +466,16 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
   const incomingPool = Number.isFinite(incomingCash) ? Math.max(0, incomingCash) : 0;
   const petSpendable = Math.max(0, cashOnHand + incomingPool - propertyYear.cashSpent);
   const petYear = progressPetsForYear(character, petSpendable);
+  const healthcareSpendable = Math.max(
+    0,
+    cashOnHand + incomingPool - propertyYear.cashSpent - petYear.cashSpent
+  );
+  const externalHealthDelta = (yearlyChanges.health ?? 0) + (eduEffects.health ?? 0);
+  const healthcareYear = progressHealthcareForYear(
+    character,
+    healthcareSpendable,
+    externalHealthDelta
+  );
 
   const combinedChanges: StatEffects = {
     happiness:
@@ -474,12 +485,20 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       griefHappinessDelta +
       babyHappinessDelta +
       childBirthHappinessDelta +
-      petYear.happinessDelta,
-    health: (yearlyChanges.health ?? 0) + (eduEffects.health ?? 0),
+      petYear.happinessDelta +
+      healthcareYear.happinessDelta,
+    health:
+      (yearlyChanges.health ?? 0) +
+      (eduEffects.health ?? 0) +
+      healthcareYear.healthDelta,
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
     looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
     parents: eduEffects.parents,
-    cash: incomingCash - propertyYear.cashSpent - petYear.cashSpent,
+    cash:
+      incomingCash -
+      propertyYear.cashSpent -
+      petYear.cashSpent -
+      healthcareYear.cashSpent,
   };
 
   const { character: aged } = applyEffects(
@@ -507,6 +526,12 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       },
       career: careerProgress.career,
       business: updatedBusiness,
+      ...(healthcareYear.heartAloneCausesDeath ? { causeOfDeath: 'A tired heart' } : {}),
+      ...(healthcareYear.healthcare !== undefined
+        ? { healthcare: healthcareYear.healthcare }
+        : character.healthcare
+        ? { healthcare: character.healthcare }
+        : {}),
       ...(character.assets ? { assets: { properties: propertyYear.properties } } : {}),
       ...(Array.isArray(character.pets?.animals) ? { pets: { animals: petYear.animals } } : {}),
       timeline: [
@@ -520,6 +545,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...businessEvents,
         ...cohortEvents,
         ...petYear.events,
+        ...healthcareYear.events,
       ],
     },
     combinedChanges
