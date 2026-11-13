@@ -5,6 +5,7 @@ import type { PlayerAssetPortfolio } from '../modules/assets/types'
 import type { PlayerLifestyle } from '../modules/lifestyle/types'
 import type { PlayerPets } from '../modules/pets/types'
 import type { PlayerHealthcare } from '../modules/healthcare/types'
+import type { PlayerCrimeState } from '../modules/crime/types'
 import type { WorldSimulationState } from '../modules/autonomy/types'
 
 export interface CharacterStats {
@@ -195,6 +196,8 @@ export interface CharacterProfile {
   pets?: PlayerPets;
   /** Doctor visits and named concerns. Absent until the first visit or the first concern. */
   healthcare?: PlayerHealthcare;
+  /** Criminal activity, legal records, probation, and incarceration state. Absent until crime interaction. */
+  crime?: PlayerCrimeState;
   relationships: PersonProfile[];
   /** Active primary romantic partner (dating / engaged / married) */
   partner?: PersonProfile | null;
