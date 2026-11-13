@@ -1,4 +1,5 @@
 import type { CharacterProfile, PersonProfile, ChildProfile } from '../../../types/game';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import { createId } from '../../../utils/id';
 import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names';
 
@@ -237,6 +238,14 @@ export class ReproductionService {
     customFirstName?: string
   ): { success: boolean; child?: ChildProfile; message: string; cashDelta: number } {
     const fee = 6000;
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        success: false,
+        message: 'The adoption agency cannot approve placements while a prospective parent is incarcerated.',
+        cashDelta: 0,
+      };
+    }
+
     if (character.age < 21) {
       return {
         success: false,

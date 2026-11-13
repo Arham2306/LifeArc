@@ -217,12 +217,21 @@ export function getSanitizedCrimeState(
   const rawRecords = Array.isArray(raw.records) ? raw.records : [];
   const records = rawRecords.filter(isValidCrimeRecord);
 
+  const rawPrison = raw.prison as Partial<PrisonState> | null;
+  const priorRetirementOccupation =
+    rawPrison?.priorRetirementOccupation === 'Retired' ||
+    rawPrison?.priorRetirementOccupation === 'Retired Entrepreneur' ||
+    rawPrison?.priorRetirementOccupation === null
+      ? rawPrison.priorRetirementOccupation
+      : undefined;
+
   const prison = isValidPrisonState(raw.prison)
     ? {
         ...raw.prison,
         behaviorScore: clamp0to100(raw.prison.behaviorScore, 50),
         lastActionAge: toNullableAge(raw.prison.lastActionAge),
         lastProgressedAge: toNullableAge(raw.prison.lastProgressedAge),
+        ...(priorRetirementOccupation !== undefined ? { priorRetirementOccupation } : {}),
       }
     : null;
 
@@ -371,24 +380,36 @@ export function getUnpaidFines(character: Pick<CharacterProfile, 'crime'>): numb
   return getSanitizedCrimeState(character).unpaidFines;
 }
 
+export const EXPUNGEMENT_MISDEMEANOR_CLEAN_YEARS = 5;
+export const EXPUNGEMENT_FELONY_CLEAN_YEARS = 8;
+
 export function getExpungementEligibleRecords(
   character: Pick<CharacterProfile, 'age' | 'crime'>,
   referenceAge = character.age,
 ): CrimeRecordEntry[] {
-  if (
-    isCurrentlyIncarcerated(character) ||
-    isOnProbation(character) ||
-    getUnpaidFines(character) > 0
-  ) {
+  if (isCurrentlyIncarcerated(character) || isOnProbation(character)) {
     return [];
   }
 
+  const sanitized = getSanitizedCrimeState(character);
+  const convictionOrAdjudicationRecords = sanitized.records.filter((entry) =>
+    CONVICTION_OR_ADJUDICATION_OUTCOMES.has(entry.outcome),
+  );
+  const latestConvictionResolutionAge =
+    convictionOrAdjudicationRecords.length > 0
+      ? Math.max(...convictionOrAdjudicationRecords.map((r) => r.age + r.sentenceYears))
+      : 0;
+
   return getActiveAdultConvictions(character).filter((entry) => {
-    const yearsSinceResolution = referenceAge - (entry.age + entry.sentenceYears);
+    const cleanStartAge = Math.max(
+      entry.age + entry.sentenceYears,
+      latestConvictionResolutionAge,
+    );
+    const cleanYears = referenceAge - cleanStartAge;
     if (entry.offenseClass === 'misdemeanor') {
-      return yearsSinceResolution >= 3;
+      return cleanYears >= EXPUNGEMENT_MISDEMEANOR_CLEAN_YEARS;
     }
-    return entry.outcome !== 'imprisoned' && yearsSinceResolution >= 7;
+    return entry.outcome !== 'imprisoned' && cleanYears >= EXPUNGEMENT_FELONY_CLEAN_YEARS;
   });
 }
 

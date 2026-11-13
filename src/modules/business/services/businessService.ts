@@ -13,6 +13,7 @@ import type {
 import { getBusinessTemplateById } from '../data/businessCatalog';
 import { createId } from '../../../utils/id';
 import { stampPlayerNetWorth } from '../../assets/services/assetService';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import { randomInt } from '../../../utils/random';
 
 const clamp = (val: number, min = 0, max = 100) => Math.min(max, Math.max(min, Math.round(val)));
@@ -269,6 +270,51 @@ export function progressBusinessForYear(
   const template = getBusinessTemplateById(business.templateId);
   const nextYear = character.birthYear + nextAge;
   const events: LifeEvent[] = [];
+
+  if (isCurrentlyIncarcerated(character)) {
+    const suspendedReport: BusinessFiscalReport = {
+      grossRevenue: 0,
+      cogs: 0,
+      payrollExpense: 0,
+      marketingExpense: 0,
+      rndExpense: 0,
+      facilityExpense: 0,
+      loanPayment: 0,
+      operatingExpenses: 0,
+      preTaxProfit: 0,
+      taxesPaid: 0,
+      netProfit: 0,
+      ownerDividendPaid: 0,
+      ownerSalaryPaid: 0,
+      totalPayoutToPlayer: 0,
+      netTreasuryAddition: 0,
+      endingTreasury: business.treasury,
+      endingValuation: business.valuation,
+      climate: 'stable',
+      climateMultiplier: 1.0,
+    };
+
+    return {
+      business: {
+        ...business,
+        actionCooldowns: {},
+        lastFiscalReport: suspendedReport,
+      },
+      netPayoutToPlayer: 0,
+      events: [
+        {
+          id: createId(),
+          age: nextAge,
+          year: nextYear,
+          title: 'Business Operations Suspended',
+          message: `Personal income and owner payouts from ${business.name} were suspended while you remained incarcerated.`,
+          category: 'business',
+          icon: '🏢',
+        },
+      ],
+      annualReport: suspendedReport,
+    };
+  }
 
   // 1. Macroeconomic Climate Roll
   const climateRoll = randomInt(1, 100);

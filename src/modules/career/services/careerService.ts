@@ -18,6 +18,11 @@ import {
 } from '../data/jobCatalog';
 import { getPromotionLadderForJob } from '../data/careerLadders';
 import { applyEffects } from '../../character/services/statService';
+import {
+  hasSensitiveFieldConviction,
+  isCurrentlyIncarcerated,
+  SENSITIVE_CAREER_FIELDS,
+} from '../../crime/services/crimeSelectors';
 import { cohortService } from '../../relationships/services/cohortService';
 import { createId } from '../../../utils/id';
 import { chance, randomInt } from '../../../utils/random';
@@ -98,9 +103,17 @@ export function evaluateJobEligibility(
   const meetsLooks = !job.minLooks || stats.looks >= job.minLooks;
   const meetsStatRequirements = meetsSmarts && meetsHealth && meetsLooks;
 
+  // 5. Legal-state restrictions (incarceration or unexpunged adult conviction in sensitive fields)
+  const blockedByIncarceration = isCurrentlyIncarcerated(character);
+  const blockedBySensitiveRecord =
+    SENSITIVE_CAREER_FIELDS.includes(job.field) &&
+    hasSensitiveFieldConviction(character, job.field);
+
   // Determine primary missing requirement label if ineligible
   let missingRequirementLabel: string | undefined;
-  if (!isAgeEligible) {
+  if (blockedByIncarceration) {
+    missingRequirementLabel = 'Unavailable while incarcerated';
+  } else if (!isAgeEligible) {
     missingRequirementLabel = `Unlocks at Age ${job.minAge}`;
   } else if (!hasRequiredDegree) {
     missingRequirementLabel = `Requires ${
@@ -114,9 +127,13 @@ export function evaluateJobEligibility(
     missingRequirementLabel = `Requires ${job.minHealth} Health`;
   } else if (!meetsLooks) {
     missingRequirementLabel = `Requires ${job.minLooks} Looks`;
+  } else if (blockedBySensitiveRecord) {
+    missingRequirementLabel = 'Criminal record restricts this field';
   }
 
   const isAdmissible =
+    !blockedByIncarceration &&
+    !blockedBySensitiveRecord &&
     isAgeEligible &&
     hasRequiredDegree &&
     hasHSDiploma &&

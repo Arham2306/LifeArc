@@ -83,6 +83,8 @@ export interface PrisonState {
   actionsTakenThisYear: number;
   lastActionAge: number | null;
   lastProgressedAge: number | null;
+  /** Preserves active retirement label when imprisonment overwrites occupation to Incarcerated. */
+  priorRetirementOccupation?: 'Retired' | 'Retired Entrepreneur' | null;
 }
 
 export interface ProbationState {
@@ -150,4 +152,105 @@ export interface CrimeRollEvaluation {
 export interface CrimeEligibilityResult {
   eligible: boolean;
   reason?: string;
+}
+
+export type DefenseStrategyId =
+  | 'public_defender'
+  | 'plea_deal'
+  | 'private_attorney'
+  | 'elite_counsel';
+
+export interface DefenseStrategyTemplate {
+  id: DefenseStrategyId;
+  title: string;
+  description: string;
+  icon: string;
+  feesByTier: Record<CrimeTier, number>;
+  dismissalBonus: number;
+  acquittalBonus: number;
+  sentenceMultiplier: number;
+  fineMultiplier: number;
+  shiftsPrisonToProbationBonus: number;
+}
+
+export interface CrimeAttemptResult {
+  ok: boolean;
+  character: import('../../types/game').CharacterProfile;
+  reason?: string;
+  roll?: CrimeRollEvaluation;
+  record?: CrimeRecordEntry;
+  pendingCase?: PendingCourtCase;
+  message: string;
+}
+
+export interface CourtResolutionResult {
+  ok: boolean;
+  character: import('../../types/game').CharacterProfile;
+  reason?: string;
+  outcome?: CrimeOutcomeStatus;
+  record?: CrimeRecordEntry;
+  releasedPayout: number;
+  fineImposed: number;
+  finePaid: number;
+  unpaidFineAdded: number;
+  attorneyFeePaid: number;
+  sentenceYears: number;
+  probationYears: number;
+  employmentTerminated: boolean;
+  message: string;
+}
+
+export interface FinePaymentResult {
+  ok: boolean;
+  character: import('../../types/game').CharacterProfile;
+  reason?: string;
+  paidAmount: number;
+  remainingUnpaidFines: number;
+  message: string;
+}
+
+export interface ExpungementResult {
+  ok: boolean;
+  character: import('../../types/game').CharacterProfile;
+  reason?: string;
+  expungedRecord?: CrimeRecordEntry;
+  message: string;
+}
+
+export type PrisonActionId =
+  | 'work'
+  | 'study'
+  | 'workout'
+  | 'good_behavior'
+  | 'appeal'
+  | 'parole';
+
+export interface PrisonActionResult {
+  ok: boolean;
+  character: import('../../types/game').CharacterProfile;
+  actionId: PrisonActionId;
+  reason?: string;
+  released: boolean;
+  cashEarned: number;
+  sentenceReductionYears: number;
+  behaviorDelta: number;
+  message: string;
+}
+
+export interface PrisonYearProgress {
+  prison: PrisonState | null;
+  releasedFromPrison: boolean;
+  happinessDelta: number;
+  events: import('../../types/game').LifeEvent[];
+}
+
+export interface CrimeYearProgress {
+  crime: PlayerCrimeState | undefined;
+  cashSpent: number;
+  happinessDelta: number;
+  releasedFromPrison: boolean;
+  probationCompleted: boolean;
+  sealedRecordIds: string[];
+  garnishedAmount: number;
+  events: import('../../types/game').LifeEvent[];
 }

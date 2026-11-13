@@ -1,10 +1,17 @@
 import type { CharacterProfile, ChildProfile, LifeEvent, SiblingProfile, StatEffects } from '../../../types/game'
 import { progressAutonomousYear } from '../../autonomy/services/autonomousYearService'
 import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService'
+import {
+  resolveCharacterOccupation,
+  resolveOccupationForAge,
+  type OccupationResolutionOptions,
+} from '../../character/services/occupationService'
 import { applyEffects } from '../../character/services/statService'
 import { progressPropertiesForYear } from '../../assets/services/assetService'
 import { progressPetsForYear } from '../../pets/services/petService'
 import { progressHealthcareForYear } from '../../healthcare/services/healthcareService'
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors'
+import { progressCrimeForYear } from '../../crime/services/crimeYearService'
 import { progressEducationForYear } from '../../education/services/educationService'
 import { progressCareerForYear } from '../../career/services/careerService'
 import { progressBusinessForYear } from '../../business/services/businessService'
@@ -17,40 +24,23 @@ import { createId } from '../../../utils/id'
 import { chance, pickRandom, randomInt } from '../../../utils/random'
 import { EARLY_MILESTONES, getMilestoneForAge } from '../data/milestones'
 
-/** Resolves the character's occupation label based on age, education stage, active job, and business. */
+/** Resolves the character's occupation label based on age, education stage, active job, business, and retirement state. */
 export function getOccupationForAge(
   age: number,
   currentOccupation?: string,
   educationStage?: string,
   activeJobTitle?: string,
-  activeBusinessName?: string
+  activeBusinessName?: string,
+  options?: OccupationResolutionOptions
 ): string {
-  if (age <= 2) return 'Infant';
-  if (age <= 4) return 'Toddler';
-  if (age <= 10) return 'Elementary Student';
-  if (age <= 13) return 'Middle School Student';
-  if (activeBusinessName) return `Founder & CEO (${activeBusinessName})`;
-  if (activeJobTitle) return activeJobTitle;
-  if (age <= 17) {
-    if (currentOccupation === 'High School Dropout') return 'High School Dropout';
-    return 'High School Student';
-  }
-  if (educationStage === 'university') return 'University Student';
-  if (educationStage === 'professional_school') {
-    return currentOccupation && currentOccupation.endsWith('Student')
-      ? currentOccupation
-      : 'Graduate Student';
-  }
-  if (
-    currentOccupation === 'Retired' ||
-    currentOccupation === 'Retired Entrepreneur'
-  ) {
-    return currentOccupation;
-  }
-  if (currentOccupation === 'High School Dropout' && age < 18) {
-    return 'High School Dropout';
-  }
-  return 'Unemployed';
+  return resolveOccupationForAge(
+    age,
+    currentOccupation,
+    educationStage,
+    activeJobTitle,
+    activeBusinessName,
+    options
+  );
 }
 
 /** Yearly natural health change based on age. */
@@ -344,15 +334,50 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     });
   }
 
-  // Progress schooling (Elementary -> Middle -> High School -> University -> Professional)
-  const eduProgress = progressEducationForYear(character, nextAge);
+  const incarceratedAtStart = isCurrentlyIncarcerated(character);
+
+  // Progress schooling (suppressed while incarcerated)
+  const eduProgress = incarceratedAtStart
+    ? {
+        education: {
+          ...character.education,
+          yearActions: {
+            studiedHard: false,
+            slackedOff: false,
+            askedForTutor: false,
+          },
+          activities: [],
+        },
+        events: [] as LifeEvent[],
+        statEffects: {} as StatEffects,
+      }
+    : progressEducationForYear(character, nextAge);
   const eduEffects = eduProgress.statEffects ?? {};
 
-  // Progress active career & annual salary payout
-  const careerProgress = progressCareerForYear(
-    { ...character, education: eduProgress.education },
-    nextAge
-  );
+  // Progress active career & annual salary payout (civilian salary suppressed while incarcerated)
+  const careerProgress = incarceratedAtStart
+    ? {
+        career: {
+          ...character.career,
+          rejectedJobIdsThisYear: [],
+          yearActions: {
+            workedHarder: false,
+            slackedOff: false,
+            askedForRaise: false,
+            askedForPromotion: false,
+            socializedWithCoworkers: false,
+          },
+        },
+        events: [] as LifeEvent[],
+        netPayEarned: 0,
+        studentLoanPaid: 0,
+        remainingStudentDebt: character.education.studentDebt || 0,
+        statEffects: {} as StatEffects,
+      }
+    : progressCareerForYear(
+        { ...character, education: eduProgress.education },
+        nextAge
+      );
 
   // Progress active business & corporate financials (if player owns a company)
   let businessEvents: LifeEvent[] = [];
@@ -476,6 +501,18 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     healthcareSpendable,
     externalHealthDelta
   );
+  const postExpenseSpendableCash = Math.max(
+    0,
+    cashOnHand +
+      incomingPool -
+      propertyYear.cashSpent -
+      petYear.cashSpent -
+      healthcareYear.cashSpent
+  );
+  const crimeYear = progressCrimeForYear(character, nextAge, {
+    incomingCash: incomingPool,
+    postExpenseSpendableCash,
+  });
 
   const combinedChanges: StatEffects = {
     happiness:
@@ -486,7 +523,8 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       babyHappinessDelta +
       childBirthHappinessDelta +
       petYear.happinessDelta +
-      healthcareYear.happinessDelta,
+      healthcareYear.happinessDelta +
+      crimeYear.happinessDelta,
     health:
       (yearlyChanges.health ?? 0) +
       (eduEffects.health ?? 0) +
@@ -498,20 +536,31 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       incomingCash -
       propertyYear.cashSpent -
       petYear.cashSpent -
-      healthcareYear.cashSpent,
+      healthcareYear.cashSpent -
+      crimeYear.cashSpent,
   };
+
+  const stillIncarceratedAfterAgeUp =
+    crimeYear.crime?.prison !== null && (crimeYear.crime?.prison?.yearsRemaining ?? 0) > 0;
+  const occupationBaseline = crimeYear.releasedFromPrison
+    ? 'Unemployed'
+    : character.occupation;
 
   const { character: aged } = applyEffects(
     {
       ...character,
       age: nextAge,
-      occupation: getOccupationForAge(
-        nextAge,
-        character.occupation,
-        eduProgress.education.currentStage,
-        careerProgress.career.currentJob?.title,
-        updatedBusiness?.name
-      ),
+      occupation: stillIncarceratedAfterAgeUp
+        ? 'Incarcerated'
+        : resolveCharacterOccupation(character, {
+            age: nextAge,
+            currentOccupationBaseline: occupationBaseline,
+            educationStage: eduProgress.education.currentStage,
+            professionalSchool: eduProgress.education.professionalSchool,
+            activeJobTitle: careerProgress.career.currentJob?.title,
+            business: updatedBusiness,
+            prisonContext: crimeYear.releasedFromPrison ? character.crime?.prison ?? null : null,
+          }),
       parents: updatedParents,
       siblings: updatedSiblings,
       relationships: agedRelationships,
@@ -532,6 +581,11 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         : character.healthcare
         ? { healthcare: character.healthcare }
         : {}),
+      ...(crimeYear.crime !== undefined
+        ? { crime: crimeYear.crime }
+        : character.crime
+        ? { crime: character.crime }
+        : {}),
       ...(character.assets ? { assets: { properties: propertyYear.properties } } : {}),
       ...(Array.isArray(character.pets?.animals) ? { pets: { animals: petYear.animals } } : {}),
       timeline: [
@@ -546,6 +600,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...cohortEvents,
         ...petYear.events,
         ...healthcareYear.events,
+        ...crimeYear.events,
       ],
     },
     combinedChanges
