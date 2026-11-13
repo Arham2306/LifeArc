@@ -13,6 +13,12 @@ import {
 } from 'lucide-react';
 import { Badge } from '../ui/Badge';
 import type { CharacterProfile } from '../../types/game';
+import { CRIME_MENU_MIN_AGE } from '../../modules/crime/components/crimeDisplay';
+import {
+  hasPendingCourtCase,
+  isCurrentlyIncarcerated,
+  isOnProbation,
+} from '../../modules/crime/services/crimeSelectors';
 
 interface MenuScreenProps {
   character: CharacterProfile;
@@ -22,6 +28,7 @@ interface MenuScreenProps {
   onOpenLifestyle?: () => void;
   onOpenPets?: () => void;
   onOpenHealthcare?: () => void;
+  onOpenCrime?: () => void;
 }
 
 interface MenuTile {
@@ -44,12 +51,35 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenLifestyle,
   onOpenPets,
   onOpenHealthcare,
+  onOpenCrime,
 }) => {
   const isRomanceUnlocked = character.age >= 16;
   const isAssetsUnlocked = character.age >= 18;
   const isLifestyleUnlocked = character.age >= 16;
   const isPetsUnlocked = character.age >= 16;
   const isHealthcareUnlocked = character.age >= 6;
+  const isCrimeUnlocked = character.age >= CRIME_MENU_MIN_AGE;
+  const isCrimeIncarcerated = isCurrentlyIncarcerated(character);
+  const isCrimePendingCourt = hasPendingCourtCase(character);
+  const isCrimeOnProbation = isOnProbation(character);
+
+  const crimeBadgeLabel = !isCrimeUnlocked
+    ? `Age ${CRIME_MENU_MIN_AGE}`
+    : isCrimePendingCourt
+      ? 'Court Pending'
+      : isCrimeIncarcerated
+        ? 'In Prison'
+        : isCrimeOnProbation
+          ? 'Probation'
+          : 'Unlocked';
+
+  const crimeBadgeVariant: MenuTile['badgeVariant'] = !isCrimeUnlocked
+    ? 'slate'
+    : isCrimePendingCourt || isCrimeIncarcerated
+      ? 'rose'
+      : isCrimeOnProbation
+        ? 'amber'
+        : 'emerald';
 
   const menuTiles: MenuTile[] = [
     {
@@ -123,12 +153,17 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     {
       id: 'crime',
       title: 'Crime & High Stakes',
-      subtitle: 'Pickpocketing, bank heists, illicit deals, and prison life',
+      subtitle: isCrimeUnlocked
+        ? isCrimeIncarcerated
+          ? 'Manage your sentence, prison actions, appeal, and legal status'
+          : 'Pickpocketing, bank heists, illicit deals, and legal defense'
+        : `Unlocks at age ${CRIME_MENU_MIN_AGE} (Juvenile & adult crime and legal system)`,
       icon: <ShieldAlert className="w-5 h-5 stroke-[2.5] text-violet-950" />,
       iconBg: 'bg-violet-400',
-      badgeLabel: 'Module 11',
-      badgeVariant: 'slate',
-      isAvailable: false,
+      badgeLabel: crimeBadgeLabel,
+      badgeVariant: crimeBadgeVariant,
+      isAvailable: isCrimeUnlocked,
+      onClick: isCrimeUnlocked ? onOpenCrime : undefined,
     },
     {
       id: 'identity',

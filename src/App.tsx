@@ -25,6 +25,10 @@ import { PetsScreen } from './modules/pets/components/PetsScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
 import { RomanceScreen } from './modules/romance/components/RomanceScreen'
 import { HealthcareScreen } from './modules/healthcare/components/HealthcareScreen'
+import { CrimeScreen } from './modules/crime/components/CrimeScreen'
+import { CourtDefenseModal } from './modules/crime/components/CourtDefenseModal'
+import { CRIME_MENU_MIN_AGE } from './modules/crime/components/crimeDisplay'
+import { hasPendingCourtCase } from './modules/crime/services/crimeSelectors'
 import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
 import type { SchoolMilestoneNotice } from './modules/education/types'
@@ -50,13 +54,15 @@ export default function App() {
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare' | 'crime'>('hub')
+  const [isHoldingCourtForArrest, setIsHoldingCourtForArrest] = useState(false)
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
     setActiveCharacter(newCharacter)
     setSelectedStage('childhood')
     setCurrentTab('life')
     setMenuView('hub')
+    setIsHoldingCourtForArrest(false)
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
     setPendingNewbornBirth(null)
@@ -66,7 +72,17 @@ export default function App() {
   }
 
   const handleAgeUp = () => {
-    if (!activeCharacter || !activeCharacter.isAlive || pendingEvent || schoolMilestone || activeFiscalReport || pendingNewbornBirth) return
+    if (
+      !activeCharacter ||
+      !activeCharacter.isAlive ||
+      pendingEvent ||
+      schoolMilestone ||
+      activeFiscalReport ||
+      pendingNewbornBirth ||
+      hasPendingCourtCase(activeCharacter)
+    ) {
+      return
+    }
 
     const agedCharacter = ageUpCharacter(activeCharacter)
     setActiveCharacter(agedCharacter)
@@ -177,6 +193,7 @@ export default function App() {
     setIsDeathModalOpen(false)
     setIsMenuOpen(false)
     setMenuView('hub')
+    setIsHoldingCourtForArrest(false)
   }
 
   // Filter journal by the selected life stage
@@ -261,7 +278,13 @@ export default function App() {
                       size="lg"
                       fullWidth
                       onClick={handleAgeUp}
-                      disabled={!!pendingEvent || !!schoolMilestone || !!activeFiscalReport}
+                      disabled={
+                        !!pendingEvent ||
+                        !!schoolMilestone ||
+                        !!activeFiscalReport ||
+                        !!pendingNewbornBirth ||
+                        hasPendingCourtCase(activeCharacter)
+                      }
                       icon={<span className="text-xl">⏳</span>}
                     >
                       AGE UP (+1 YEAR) •{' '}
@@ -357,6 +380,16 @@ export default function App() {
                     onUpdateCharacter={setActiveCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
+                ) : menuView === 'crime' && activeCharacter.age >= CRIME_MENU_MIN_AGE ? (
+                  <CrimeScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => {
+                      setIsHoldingCourtForArrest(false);
+                      setMenuView('hub');
+                    }}
+                    onArrestSummaryVisibilityChange={setIsHoldingCourtForArrest}
+                  />
                 ) : (
                   <MenuScreen
                     character={activeCharacter}
@@ -386,6 +419,11 @@ export default function App() {
                         setMenuView('healthcare');
                       }
                     }}
+                    onOpenCrime={() => {
+                      if (activeCharacter.age >= CRIME_MENU_MIN_AGE) {
+                        setMenuView('crime');
+                      }
+                    }}
                   />
                 )}
               </div>
@@ -396,7 +434,12 @@ export default function App() {
                 currentTab={currentTab}
                 onTabChange={(tab) => {
                   setCurrentTab(tab);
-                  if (tab === 'menu') setMenuView('hub');
+                  if (tab === 'menu') {
+                    setIsHoldingCourtForArrest(false);
+                    setMenuView('hub');
+                  } else {
+                    setIsHoldingCourtForArrest(false);
+                  }
                 }}
               />
             </div>
@@ -459,6 +502,16 @@ export default function App() {
           businessName={activeCharacter.business?.name || 'Your Company'}
           report={activeFiscalReport}
           onClose={() => setActiveFiscalReport(null)}
+        />
+      )}
+
+      {/* Non-dismissible Court Defense & Sentencing Modal */}
+      {activeCharacter && (
+        <CourtDefenseModal
+          character={activeCharacter}
+          pendingCase={activeCharacter.isAlive ? (activeCharacter.crime?.pendingCase ?? null) : null}
+          onUpdateCharacter={setActiveCharacter}
+          holdOpenForArrestSummary={isHoldingCourtForArrest}
         />
       )}
 
