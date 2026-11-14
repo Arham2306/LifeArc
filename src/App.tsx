@@ -29,6 +29,7 @@ import { CrimeScreen } from './modules/crime/components/CrimeScreen'
 import { CourtDefenseModal } from './modules/crime/components/CourtDefenseModal'
 import { CRIME_MENU_MIN_AGE } from './modules/crime/components/crimeDisplay'
 import { hasPendingCourtCase } from './modules/crime/services/crimeSelectors'
+import { IdentityHeritageScreen } from './modules/identity/components/IdentityHeritageScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
 import type { SchoolMilestoneNotice } from './modules/education/types'
@@ -54,7 +55,8 @@ export default function App() {
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare' | 'crime'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare' | 'crime' | 'identity'>('hub')
+  const [openedIdentityFromDeath, setOpenedIdentityFromDeath] = useState(false)
   const [isHoldingCourtForArrest, setIsHoldingCourtForArrest] = useState(false)
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
@@ -62,6 +64,7 @@ export default function App() {
     setSelectedStage('childhood')
     setCurrentTab('life')
     setMenuView('hub')
+    setOpenedIdentityFromDeath(false)
     setIsHoldingCourtForArrest(false)
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
@@ -193,6 +196,7 @@ export default function App() {
     setIsDeathModalOpen(false)
     setIsMenuOpen(false)
     setMenuView('hub')
+    setOpenedIdentityFromDeath(false)
     setIsHoldingCourtForArrest(false)
   }
 
@@ -390,6 +394,22 @@ export default function App() {
                     }}
                     onArrestSummaryVisibilityChange={setIsHoldingCourtForArrest}
                   />
+                ) : menuView === 'identity' ? (
+                  <IdentityHeritageScreen
+                    key={activeCharacter.id}
+                    character={activeCharacter}
+                    backLabel={openedIdentityFromDeath ? 'Obituary' : 'Menu'}
+                    onBackToMenu={() => {
+                      if (openedIdentityFromDeath) {
+                        setOpenedIdentityFromDeath(false);
+                        setMenuView('hub');
+                        setCurrentTab('life');
+                        setIsDeathModalOpen(true);
+                      } else {
+                        setMenuView('hub');
+                      }
+                    }}
+                  />
                 ) : (
                   <MenuScreen
                     character={activeCharacter}
@@ -424,6 +444,10 @@ export default function App() {
                         setMenuView('crime');
                       }
                     }}
+                    onOpenIdentity={() => {
+                      setOpenedIdentityFromDeath(false);
+                      setMenuView('identity');
+                    }}
                   />
                 )}
               </div>
@@ -434,6 +458,7 @@ export default function App() {
                 currentTab={currentTab}
                 onTabChange={(tab) => {
                   setCurrentTab(tab);
+                  setOpenedIdentityFromDeath(false);
                   if (tab === 'menu') {
                     setIsHoldingCourtForArrest(false);
                     setMenuView('hub');
@@ -521,6 +546,12 @@ export default function App() {
           character={activeCharacter}
           isOpen={isDeathModalOpen}
           onStartNewLife={handleRestart}
+          onViewIdentity={() => {
+            setIsDeathModalOpen(false)
+            setOpenedIdentityFromDeath(true)
+            setCurrentTab('menu')
+            setMenuView('identity')
+          }}
           onClose={() => setIsDeathModalOpen(false)}
         />
       )}

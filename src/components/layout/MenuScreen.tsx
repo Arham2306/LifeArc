@@ -29,6 +29,7 @@ interface MenuScreenProps {
   onOpenPets?: () => void;
   onOpenHealthcare?: () => void;
   onOpenCrime?: () => void;
+  onOpenIdentity?: () => void;
 }
 
 interface MenuTile {
@@ -52,6 +53,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenPets,
   onOpenHealthcare,
   onOpenCrime,
+  onOpenIdentity,
 }) => {
   const isRomanceUnlocked = character.age >= 16;
   const isAssetsUnlocked = character.age >= 18;
@@ -168,12 +170,11 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     {
       id: 'identity',
       title: 'Identity & Heritage',
-      subtitle: 'Diploma credentials, career records, family tree, and wills',
+      subtitle: 'Biography, records, family tree, and recorded estates',
       icon: <Award className="w-5 h-5 stroke-[2.5] text-indigo-950" />,
       iconBg: 'bg-indigo-400',
-      badgeLabel: 'Module 12',
-      badgeVariant: 'slate',
-      isAvailable: false,
+      isAvailable: true,
+      onClick: onOpenIdentity,
     },
   ];
 

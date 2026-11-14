@@ -1,4 +1,5 @@
 import React from 'react'
+import { Award } from 'lucide-react'
 import type { CharacterProfile } from '../../types/game'
 import { Modal } from '../ui/Modal'
 import { CartoonButton } from '../ui/CartoonButton'
@@ -8,6 +9,7 @@ interface DeathModalProps {
   character: CharacterProfile;
   isOpen: boolean;
   onStartNewLife: () => void;
+  onViewIdentity?: () => void;
   onClose: () => void;
 }
 
@@ -15,6 +17,7 @@ export const DeathModal: React.FC<DeathModalProps> = ({
   character,
   isOpen,
   onStartNewLife,
+  onViewIdentity,
   onClose,
 }) => {
   return (
@@ -25,6 +28,17 @@ export const DeathModal: React.FC<DeathModalProps> = ({
       icon="🪦"
       actions={
         <>
+          {onViewIdentity && (
+            <CartoonButton
+              variant="sky"
+              size="md"
+              fullWidth
+              onClick={onViewIdentity}
+              icon={<Award className="w-4 h-4 stroke-[2.5]" />}
+            >
+              View Identity & Heritage
+            </CartoonButton>
+          )}
           <CartoonButton variant="emerald" size="md" fullWidth onClick={onStartNewLife}>
             Start a New Life
           </CartoonButton>
