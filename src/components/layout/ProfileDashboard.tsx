@@ -1,5 +1,5 @@
 import React from 'react'
-import { Dices, Menu, Calendar, User, Briefcase, Landmark, PieChart } from 'lucide-react'
+import { Menu, Calendar, User, Briefcase, Landmark, PieChart } from 'lucide-react'
 import type { CharacterProfile } from '../../types/game'
 import { calculatePlayerNetWorth } from '../../modules/assets/services/assetService'
 
@@ -72,8 +72,12 @@ export const ProfileDashboard: React.FC<ProfileDashboardProps> = ({
       <div className="bg-[#1864ab] text-white px-4 py-2.5 flex items-center justify-between border-b-[2.5px] border-slate-900">
         {/* Brand */}
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-white border-2 border-slate-900 flex items-center justify-center text-slate-950 shadow-[1.5px_1.5px_0_#0f172a]">
-            <Dices className="w-4 h-4 stroke-[2.5]" />
+          <div className="w-8 h-8 rounded-lg bg-white border-2 border-slate-900 flex items-center justify-center p-0.5 overflow-hidden shadow-[1.5px_1.5px_0_#0f172a]">
+            <img
+              src="/lifearc-favicon.png"
+              alt="LifeArc logo"
+              className="w-full h-full object-contain"
+            />
           </div>
           <span className="font-black text-base tracking-wide font-display text-white">
             LifeArc

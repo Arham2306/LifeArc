@@ -19,6 +19,7 @@ import { CareerScreen } from './modules/career/components/CareerScreen'
 import { BusinessScreen } from './modules/business/components/BusinessScreen'
 import { FiscalYearReportModal } from './modules/business/components/FiscalYearReportModal'
 import { MenuScreen } from './components/layout/MenuScreen'
+import { GameIntroPanel } from './components/layout/GameIntroPanel'
 import { AssetsScreen } from './modules/assets/components/AssetsScreen'
 import { LifestyleScreen } from './modules/lifestyle/components/LifestyleScreen'
 import { PetsScreen } from './modules/pets/components/PetsScreen'
@@ -212,16 +213,23 @@ export default function App() {
     ) || []
 
   return (
-    <div className="h-screen max-h-screen w-screen overflow-hidden p-2 sm:p-4 flex flex-col items-center justify-center">
-      {/* Mobile Simulation Frame */}
-      <main className="w-full max-w-[430px] h-full sm:h-[94vh] max-h-[880px] cartoon-card rounded-[32px] overflow-hidden flex flex-col transition-all duration-200">
+    <div className="h-screen max-h-screen w-screen overflow-hidden p-2 sm:p-4 flex items-center justify-center">
+      <div className="w-full max-w-[1520px] h-full min-h-0 flex items-center justify-center lg:grid lg:grid-cols-[minmax(0,1fr)_430px_minmax(0,1fr)] lg:items-center lg:gap-8 xl:gap-10">
+        <GameIntroPanel />
+
+        {/* Mobile Simulation Frame */}
+        <main className="w-full max-w-[430px] h-full sm:h-[94vh] max-h-[880px] cartoon-card rounded-[32px] overflow-hidden flex flex-col transition-all duration-200">
         {/* VIEW 1: Character Creation Screen */}
         {!activeCharacter ? (
           <div className="flex flex-col h-full min-h-0">
             <header className="bg-amber-400 border-b-[3px] border-slate-900 px-5 py-4 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-white border-2 border-slate-900 flex items-center justify-center text-xl shadow-[2px_2px_0_#0f172a]">
-                  ✨
+                <div className="w-10 h-10 rounded-2xl bg-white border-2 border-slate-900 flex items-center justify-center p-1 overflow-hidden shadow-[2px_2px_0_#0f172a]">
+                  <img
+                    src="/lifearc-favicon.png"
+                    alt="LifeArc logo"
+                    className="w-full h-full object-contain"
+                  />
                 </div>
                 <div>
                   <h1 className="text-lg font-black text-slate-950 leading-tight">
@@ -470,7 +478,10 @@ export default function App() {
             </div>
           </div>
         )}
-      </main>
+        </main>
+
+        <div className="hidden lg:block" aria-hidden="true" />
+      </div>
 
       {/* School Enrollment & Graduation Milestone Modal */}
       {activeCharacter && (
