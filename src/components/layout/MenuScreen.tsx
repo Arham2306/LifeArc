@@ -19,6 +19,7 @@ import {
   isCurrentlyIncarcerated,
   isOnProbation,
 } from '../../modules/crime/services/crimeSelectors';
+import { getHousingSummary } from '../../modules/assets/services/housingService';
 
 interface MenuScreenProps {
   character: CharacterProfile;
@@ -64,6 +65,25 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   const isCrimeIncarcerated = isCurrentlyIncarcerated(character);
   const isCrimePendingCourt = hasPendingCourtCase(character);
   const isCrimeOnProbation = isOnProbation(character);
+  const housingSummary = getHousingSummary(character);
+
+  const assetsBadgeLabel = !isAssetsUnlocked
+    ? 'Age 18'
+    : housingSummary.status === 'unhoused'
+      ? 'Unhoused!'
+      : housingSummary.status === 'with_parents'
+        ? housingSummary.yearsUntilDeadline <= 1
+          ? '1 Year Left'
+          : `Move by ${housingSummary.moveOutDeadlineAge}`
+        : 'Housed';
+
+  const assetsBadgeVariant: MenuTile['badgeVariant'] = !isAssetsUnlocked
+    ? 'slate'
+    : housingSummary.status === 'unhoused'
+      ? 'rose'
+      : housingSummary.status === 'with_parents'
+        ? 'amber'
+        : 'emerald';
 
   const crimeBadgeLabel = !isCrimeUnlocked
     ? `Age ${CRIME_MENU_MIN_AGE}`
@@ -109,11 +129,17 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     {
       id: 'assets',
       title: 'Assets & Real Estate',
-      subtitle: 'Houses, luxury cars, private jets, and investments',
+      subtitle: isAssetsUnlocked
+        ? housingSummary.status === 'unhoused'
+          ? 'Unhoused — purchase a home to end yearly Health & Happiness loss'
+          : housingSummary.status === 'with_parents'
+            ? `Living with parents — buy a home before age ${housingSummary.moveOutDeadlineAge}`
+            : 'Owned homes, market appreciation, and property management'
+        : 'Unlocks at age 18 (Buy homes & real estate)',
       icon: <Home className="w-5 h-5 stroke-[2.5] text-sky-950" />,
       iconBg: isAssetsUnlocked ? 'bg-sky-400' : 'bg-sky-300',
-      badgeLabel: isAssetsUnlocked ? undefined : 'Age 18',
-      badgeVariant: isAssetsUnlocked ? undefined : 'slate',
+      badgeLabel: assetsBadgeLabel,
+      badgeVariant: assetsBadgeVariant,
       isAvailable: isAssetsUnlocked,
       onClick: isAssetsUnlocked ? onOpenAssets : undefined,
     },

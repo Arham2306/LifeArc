@@ -1,7 +1,7 @@
 import type { EducationProfile } from '../modules/education/types'
 import type { PlayerCareerState } from '../modules/career/types'
 import type { ActiveBusinessProfile } from '../modules/business/types'
-import type { PlayerAssetPortfolio } from '../modules/assets/types'
+import type { PlayerAssetPortfolio, PlayerHousingState } from '../modules/assets/types'
 import type { PlayerLifestyle } from '../modules/lifestyle/types'
 import type { PlayerPets } from '../modules/pets/types'
 import type { PlayerHealthcare } from '../modules/healthcare/types'
@@ -190,6 +190,8 @@ export interface CharacterProfile {
   business?: ActiveBusinessProfile | null;
   /** Personally owned residential property. Absent on lives started before Module 8. */
   assets?: PlayerAssetPortfolio;
+  /** Independent housing, parental move-out timeline, and unhoused tracking. */
+  housing?: PlayerHousingState;
   /** Books, equipment, and hobbies. Absent until the first lifestyle purchase. */
   lifestyle?: PlayerLifestyle;
   /** Shelter pets and the ones you still remember. Absent until the first adoption. */

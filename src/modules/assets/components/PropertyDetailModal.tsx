@@ -31,6 +31,7 @@ interface PropertyDetailModalProps {
   imageSrc: string | null;
   cash: number;
   error: string | null;
+  saleHousingWarning?: string | null;
   actionsDisabled: boolean;
   confirmingSale: boolean;
   onClose: () => void;
@@ -46,6 +47,7 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   imageSrc,
   cash,
   error,
+  saleHousingWarning,
   actionsDisabled,
   confirmingSale,
   onClose,
@@ -191,6 +193,11 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
       <p className="text-[10px] font-bold text-slate-500">
         Market value rises about {appreciation}% each Age Up. Selling costs {saleFee}% of the current market value and pays off any remaining principal.
       </p>
+      {confirmingSale && saleHousingWarning ? (
+        <div className="rounded-xl border-2 border-amber-700 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950">
+          {saleHousingWarning}
+        </div>
+      ) : null}
       {error ? (
         <div className="rounded-xl border-2 border-rose-700 bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-900">
           {error}

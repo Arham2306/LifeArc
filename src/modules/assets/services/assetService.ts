@@ -2,6 +2,10 @@ import type { CharacterProfile, LifeEvent } from '../../../types/game';
 import { createId } from '../../../utils/id';
 import { getPropertyListing } from '../data/propertyCatalog';
 import type { OwnedProperty, PlayerAssetPortfolio, PropertyMortgage, PropertyType } from '../types';
+import {
+  applyHousingOnPropertyPurchased,
+  applyHousingOnPropertySold,
+} from './housingService';
 
 export const PROPERTY_PURCHASE_AGE = 18;
 export const PROPERTY_PORTFOLIO_CAP = 4;
@@ -157,12 +161,15 @@ export function purchaseProperty(
       ? `You bought ${listing.name} in ${listing.city} for $${listing.purchasePrice.toLocaleString()} in cash.`
       : `You bought ${listing.name} in ${listing.city} for $${listing.purchasePrice.toLocaleString()} with $${downPayment.toLocaleString()} down.`;
 
+  const nextHousing = applyHousingOnPropertyPurchased(character);
+
   return {
     ok: true,
     character: stampPlayerNetWorth({
       ...character,
       cash: cash - cashDue,
       assets: portfolioWith([...rawProperties(character), property]),
+      housing: nextHousing,
       timeline: [...(character.timeline ?? []), journal(character, `Bought ${listing.name}`, message)],
     }),
   };
@@ -192,6 +199,9 @@ export function sellProperty(character: CharacterProfile, propertyId: string): A
       ? `a gain of $${realizedProfit.toLocaleString()}`
       : `a loss of $${Math.abs(realizedProfit).toLocaleString()}`;
 
+  const remainingOwnedCount = nextProperties.filter(isValidOwnedProperty).length;
+  const nextHousing = applyHousingOnPropertySold(character, remainingOwnedCount);
+
   return {
     ok: true,
     realizedProfit,
@@ -199,6 +209,7 @@ export function sellProperty(character: CharacterProfile, propertyId: string): A
       ...character,
       cash: cash + cashProceeds,
       assets: portfolioWith(nextProperties),
+      housing: nextHousing,
       timeline: [
         ...(character.timeline ?? []),
         journal(

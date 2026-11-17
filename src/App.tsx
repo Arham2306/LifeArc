@@ -21,6 +21,14 @@ import { FiscalYearReportModal } from './modules/business/components/FiscalYearR
 import { MenuScreen } from './components/layout/MenuScreen'
 import { GameIntroPanel } from './components/layout/GameIntroPanel'
 import { AssetsScreen } from './modules/assets/components/AssetsScreen'
+import { HousingNoticeModal } from './modules/assets/components/HousingNoticeModal'
+import {
+  getHousingSummary,
+  getPendingHousingNotice,
+  hydrateHousingStateOnLoad,
+  markHousingNoticeAcknowledged,
+  resolvePostAgeUpModalStep,
+} from './modules/assets/services/housingService'
 import { LifestyleScreen } from './modules/lifestyle/components/LifestyleScreen'
 import { PetsScreen } from './modules/pets/components/PetsScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
@@ -61,12 +69,14 @@ export default function App() {
   const [isHoldingCourtForArrest, setIsHoldingCourtForArrest] = useState(false)
 
   const handleStartLife = (newCharacter: CharacterProfile) => {
-    setActiveCharacter(newCharacter)
+    setActiveCharacter(hydrateHousingStateOnLoad(newCharacter))
     setSelectedStage('childhood')
     setCurrentTab('life')
     setMenuView('hub')
     setOpenedIdentityFromDeath(false)
     setIsHoldingCourtForArrest(false)
+    setPendingEvent(null)
+    setEventResult(null)
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
     setPendingNewbornBirth(null)
@@ -75,12 +85,42 @@ export default function App() {
     setActiveFiscalReport(null)
   }
 
+  const pendingHousingNotice = activeCharacter
+    ? getPendingHousingNotice(activeCharacter)
+    : null
+  const isAdmissionsModalOpen = isUniversityModalOpen || isProfessionalModalOpen
+  const isCourtBlockingPostAgeUp =
+    Boolean(activeCharacter && activeCharacter.isAlive && hasPendingCourtCase(activeCharacter)) ||
+    isHoldingCourtForArrest
+
+  const activePostAgeUpStep = activeCharacter
+    ? resolvePostAgeUpModalStep({
+        isDeathOpen: isDeathModalOpen,
+        hasBabyNotice: Boolean(pendingNewbornBirth),
+        hasSchoolNotice: Boolean(schoolMilestone),
+        isAdmissionsOpen: isAdmissionsModalOpen,
+        hasHousingNotice: Boolean(pendingHousingNotice),
+        hasFiscalReport: Boolean(activeFiscalReport),
+        hasPendingEvent: Boolean(pendingEvent),
+        isCourtBlocking: isCourtBlockingPostAgeUp,
+      })
+    : null
+
+  const showBabyModal = activePostAgeUpStep === 'baby'
+  const showSchoolModal = activePostAgeUpStep === 'school'
+  const showHousingModal = activePostAgeUpStep === 'housing'
+  const showFiscalModal = activePostAgeUpStep === 'fiscal'
+  const showEventModal = activePostAgeUpStep === 'event'
+
   const handleAgeUp = () => {
     if (
       !activeCharacter ||
       !activeCharacter.isAlive ||
+      isDeathModalOpen ||
       pendingEvent ||
       schoolMilestone ||
+      isAdmissionsModalOpen ||
+      pendingHousingNotice ||
       activeFiscalReport ||
       pendingNewbornBirth ||
       hasPendingCourtCase(activeCharacter)
@@ -93,31 +133,23 @@ export default function App() {
     setSelectedStage(getLifeStageForAge(agedCharacter.age))
 
     if (!agedCharacter.isAlive) {
+      setPendingNewbornBirth(null)
+      setSchoolMilestone(null)
+      setActiveFiscalReport(null)
+      setPendingEvent(null)
+      setEventResult(null)
+      setIsUniversityModalOpen(false)
+      setIsProfessionalModalOpen(false)
       setIsDeathModalOpen(true)
       return
     }
 
-    // Prioritize baby birth announcement modal if pregnancy resolved
-    if (agedCharacter.newbornAnnouncement) {
-      setPendingNewbornBirth(agedCharacter.newbornAnnouncement)
-      return
-    }
-
-    // Show a milestone modal when enrolling in Elementary/Middle/High School or Graduating
-    const schoolNotice = getSchoolMilestoneNotice(agedCharacter)
-    if (schoolNotice) {
-      setSchoolMilestone(schoolNotice)
-      return
-    }
-
-    // Show annual fiscal year report if player runs an active business
-    if (agedCharacter.business?.lastFiscalReport) {
-      setActiveFiscalReport(agedCharacter.business.lastFiscalReport)
-    }
-
-    // Roll random life event for the current year
-    const event = rollEventForCharacter(agedCharacter)
-    if (event) setPendingEvent(event)
+    // Queue all triggered post-Age-Up notifications sequentially so closing one
+    // modal never drops downstream milestones, housing notices, fiscal reports, or events.
+    setPendingNewbornBirth(agedCharacter.newbornAnnouncement ?? null)
+    setSchoolMilestone(getSchoolMilestoneNotice(agedCharacter))
+    setActiveFiscalReport(agedCharacter.business?.lastFiscalReport ?? null)
+    setPendingEvent(rollEventForCharacter(agedCharacter))
   }
 
   const handleConfirmBabyNaming = (firstName: string, lastName: string) => {
@@ -149,20 +181,11 @@ export default function App() {
 
     setActiveCharacter(updatedCharacter)
     setPendingNewbornBirth(null)
+  }
 
-    // Resume age-up milestone checks after naming baby
-    const schoolNotice = getSchoolMilestoneNotice(updatedCharacter)
-    if (schoolNotice) {
-      setSchoolMilestone(schoolNotice)
-      return
-    }
-
-    if (updatedCharacter.business?.lastFiscalReport) {
-      setActiveFiscalReport(updatedCharacter.business.lastFiscalReport)
-    }
-
-    const event = rollEventForCharacter(updatedCharacter)
-    if (event) setPendingEvent(event)
+  const acknowledgeHousingModal = (afterAcknowledge?: () => void) => {
+    setActiveCharacter((prev) => (prev ? markHousingNoticeAcknowledged(prev) : prev))
+    afterAcknowledge?.()
   }
 
   const handleChooseOption = (choice: EventChoice, boundPerson?: PersonProfile) => {
@@ -183,6 +206,11 @@ export default function App() {
     setPendingEvent(null)
     setEventResult(null)
     if (diedDuringEvent) {
+      setPendingNewbornBirth(null)
+      setSchoolMilestone(null)
+      setActiveFiscalReport(null)
+      setIsUniversityModalOpen(false)
+      setIsProfessionalModalOpen(false)
       setIsDeathModalOpen(true)
     }
   }
@@ -194,12 +222,16 @@ export default function App() {
     setSchoolMilestone(null)
     setPendingNewbornBirth(null)
     setIsUniversityModalOpen(false)
+    setIsProfessionalModalOpen(false)
+    setActiveFiscalReport(null)
     setIsDeathModalOpen(false)
     setIsMenuOpen(false)
     setMenuView('hub')
     setOpenedIdentityFromDeath(false)
     setIsHoldingCourtForArrest(false)
   }
+
+  const housingSummary = activeCharacter ? getHousingSummary(activeCharacter) : null
 
   // Filter journal by the selected life stage
   const activeStageId =
@@ -280,8 +312,24 @@ export default function App() {
                   <LifeTimeline events={filteredEvents} stageLabel={currentStageInfo?.label} />
                 </div>
 
-                {/* 2. Pinned Bottom Dock: Horizontal Stats Strip + Primary Action */}
+                {/* 2. Pinned Bottom Dock: Housing Alert + Horizontal Stats Strip + Primary Action */}
                 <div className="pt-1.5 flex flex-col gap-1.5 flex-shrink-0">
+                  {activeCharacter.isAlive && housingSummary?.status === 'unhoused' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCurrentTab('menu');
+                        setMenuView('assets');
+                      }}
+                      className="w-full rounded-xl border-2 border-slate-900 bg-rose-100 hover:bg-rose-200 px-2.5 py-1.5 shadow-[1.5px_1.5px_0_#0f172a] flex items-center justify-between gap-2 text-[11px] font-black text-rose-950 transition-colors cursor-pointer"
+                    >
+                      <span className="truncate">
+                        🏚️ Unhoused ({housingSummary.yearsUnhoused}y) • Losing Health &amp; Happiness yearly
+                      </span>
+                      <span className="shrink-0 underline">Buy Home →</span>
+                    </button>
+                  )}
+
                   <VitalityCard stats={activeCharacter.stats} />
 
                   {activeCharacter.isAlive ? (
@@ -293,6 +341,8 @@ export default function App() {
                       disabled={
                         !!pendingEvent ||
                         !!schoolMilestone ||
+                        isAdmissionsModalOpen ||
+                        !!pendingHousingNotice ||
                         !!activeFiscalReport ||
                         !!pendingNewbornBirth ||
                         hasPendingCourtCase(activeCharacter)
@@ -486,7 +536,7 @@ export default function App() {
       {/* School Enrollment & Graduation Milestone Modal */}
       {activeCharacter && (
         <SchoolMilestoneModal
-          notice={schoolMilestone}
+          notice={showSchoolModal ? schoolMilestone : null}
           onClose={() => setSchoolMilestone(null)}
           onOpenSchoolTab={() => {
             setSchoolMilestone(null)
@@ -510,7 +560,7 @@ export default function App() {
       )}
 
       {/* Baby Birth Announcement & Naming Modal */}
-      {pendingNewbornBirth && activeCharacter && (
+      {showBabyModal && activeCharacter && pendingNewbornBirth && (
         <BabyNamingModal
           isOpen={true}
           baby={pendingNewbornBirth}
@@ -520,10 +570,31 @@ export default function App() {
         />
       )}
 
+      {/* Age 18 Independence, Final Warning & Move-Out Housing Modal */}
+      {activeCharacter && (
+        <HousingNoticeModal
+          isOpen={showHousingModal}
+          noticeKind={showHousingModal ? pendingHousingNotice : null}
+          character={activeCharacter}
+          onBrowseHomes={() =>
+            acknowledgeHousingModal(() => {
+              setCurrentTab('menu')
+              setMenuView('assets')
+            })
+          }
+          onExploreCareers={() =>
+            acknowledgeHousingModal(() => {
+              setCurrentTab('careers')
+            })
+          }
+          onDismiss={() => acknowledgeHousingModal()}
+        />
+      )}
+
       {/* Interactive Life Event */}
       {activeCharacter && (
         <EventModal
-          event={pendingEvent}
+          event={showEventModal ? pendingEvent : null}
           character={activeCharacter}
           result={eventResult}
           onChoose={handleChooseOption}
@@ -534,7 +605,7 @@ export default function App() {
       {/* Fiscal Year Financial Report Modal */}
       {activeCharacter && (
         <FiscalYearReportModal
-          isOpen={Boolean(activeFiscalReport)}
+          isOpen={showFiscalModal}
           businessName={activeCharacter.business?.name || 'Your Company'}
           report={activeFiscalReport}
           onClose={() => setActiveFiscalReport(null)}

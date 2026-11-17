@@ -13,6 +13,7 @@ import {
 import { createBirthJournalEntry, generateParents, generateSiblings } from '../services/familyService'
 import { createInitialEducation } from '../../education/services/educationService'
 import { createInitialCareerState } from '../../career/services/careerService'
+import { createInitialHousingState } from '../../assets/services/housingService'
 import { getRandomName, LAST_NAMES, MALE_NAMES, FEMALE_NAMES, NON_BINARY_NAMES } from '../data/names'
 import type { CharacterProfile } from '../../../types/game'
 import { createId } from '../../../utils/id'
@@ -196,6 +197,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
       education: createInitialEducation(),
       career: createInitialCareerState(),
       assets: { properties: [] },
+      housing: createInitialHousingState(),
       relationships: [],
       seenEventIds: [],
       timeline: [birthEntry],

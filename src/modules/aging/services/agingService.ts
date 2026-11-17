@@ -8,6 +8,10 @@ import {
 } from '../../character/services/occupationService'
 import { applyEffects } from '../../character/services/statService'
 import { progressPropertiesForYear } from '../../assets/services/assetService'
+import {
+  evaluateHousingForYear,
+  HOMELESSNESS_DEATH_CAUSE,
+} from '../../assets/services/housingService'
 import { progressPetsForYear } from '../../pets/services/petService'
 import { progressHealthcareForYear } from '../../healthcare/services/healthcareService'
 import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors'
@@ -491,11 +495,17 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
   const incomingPool = Number.isFinite(incomingCash) ? Math.max(0, incomingCash) : 0;
   const petSpendable = Math.max(0, cashOnHand + incomingPool - propertyYear.cashSpent);
   const petYear = progressPetsForYear(character, petSpendable);
+  const housingYear = evaluateHousingForYear(character, nextAge, {
+    isIncarceratedForYear: incarceratedAtStart,
+  });
   const healthcareSpendable = Math.max(
     0,
     cashOnHand + incomingPool - propertyYear.cashSpent - petYear.cashSpent
   );
-  const externalHealthDelta = (yearlyChanges.health ?? 0) + (eduEffects.health ?? 0);
+  const externalHealthDelta =
+    (yearlyChanges.health ?? 0) +
+    (eduEffects.health ?? 0) +
+    housingYear.healthDelta;
   const healthcareYear = progressHealthcareForYear(
     character,
     healthcareSpendable,
@@ -523,11 +533,13 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       babyHappinessDelta +
       childBirthHappinessDelta +
       petYear.happinessDelta +
+      housingYear.happinessDelta +
       healthcareYear.happinessDelta +
       crimeYear.happinessDelta,
     health:
       (yearlyChanges.health ?? 0) +
       (eduEffects.health ?? 0) +
+      housingYear.healthDelta +
       healthcareYear.healthDelta,
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
     looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
@@ -587,6 +599,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ? { crime: character.crime }
         : {}),
       ...(character.assets ? { assets: { properties: propertyYear.properties } } : {}),
+      housing: housingYear.housing,
       ...(Array.isArray(character.pets?.animals) ? { pets: { animals: petYear.animals } } : {}),
       timeline: [
         ...character.timeline,
@@ -599,6 +612,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...businessEvents,
         ...cohortEvents,
         ...petYear.events,
+        ...housingYear.events,
         ...healthcareYear.events,
         ...crimeYear.events,
       ],
@@ -609,9 +623,24 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
   // Check if the character died from 0 health or natural old age
   const diedOfOldAge = aged.isAlive && rollNaturalOldAgeDeath(nextAge, aged.stats.health);
   if (!aged.isAlive || diedOfOldAge) {
+    const nonHousingHealthDelta =
+      (yearlyChanges.health ?? 0) +
+      (eduEffects.health ?? 0) +
+      healthcareYear.healthDelta;
+    const survivedWithoutHousingLoss =
+      Math.round(character.stats.health + nonHousingHealthDelta) > 0;
+    const homelessnessDecisiveDeath =
+      !aged.isAlive &&
+      !diedOfOldAge &&
+      !healthcareYear.heartAloneCausesDeath &&
+      housingYear.healthDelta < 0 &&
+      survivedWithoutHousingLoss;
+
     const cause = diedOfOldAge
       ? 'Passed away peacefully in sleep of old age'
-      : aged.causeOfDeath || 'Succumbed to poor health';
+      : homelessnessDecisiveDeath
+        ? HOMELESSNESS_DEATH_CAUSE
+        : aged.causeOfDeath || 'Succumbed to poor health';
 
     const deathEvent: LifeEvent = {
       id: createId(),

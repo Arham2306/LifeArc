@@ -12,7 +12,9 @@ import {
   sellProperty,
   validProperties,
 } from '../services/assetService';
+import { getHousingSummary } from '../services/housingService';
 import type { OwnedProperty, PropertyType } from '../types';
+import { HousingStatusBanner } from './HousingStatusBanner';
 import { PropertyArtwork } from './PropertyArtwork';
 import { PropertyDetailModal } from './PropertyDetailModal';
 import { PropertyListingCard } from './PropertyListingCard';
@@ -128,6 +130,9 @@ export const AssetsScreen: React.FC<AssetsScreenProps> = ({
         </div>
       </div>
 
+      {/* Housing Status Banner */}
+      <HousingStatusBanner character={character} />
+
       {malformedCount > 0 && (
         <p className="text-[10px] font-bold text-amber-800">
           {malformedCount} saved record{malformedCount === 1 ? '' : 's'} could not be read and
@@ -238,6 +243,15 @@ const AssetDetailSession: React.FC<{
     onClose();
   };
 
+  const ownedCount = validProperties(character).length;
+  const housingSummary = getHousingSummary(character);
+  const saleHousingWarning =
+    owned !== null &&
+    ownedCount === 1 &&
+    (character.age >= housingSummary.moveOutDeadlineAge || housingSummary.movedOutAtAge !== null)
+      ? 'Warning: Selling your only home will leave you unhoused, causing yearly Health and Happiness loss until you buy another home.'
+      : null;
+
   return (
     <PropertyDetailModal
       listing={listing ?? null}
@@ -245,6 +259,7 @@ const AssetDetailSession: React.FC<{
       imageSrc={listing ? propertyIllustration(listing.id) : null}
       cash={character.cash}
       error={detailError}
+      saleHousingWarning={saleHousingWarning}
       actionsDisabled={actionsDisabled}
       confirmingSale={confirmingSale}
       onClose={onClose}
