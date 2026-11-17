@@ -23,7 +23,13 @@ import { WeddingPlannerModal } from './WeddingPlannerModal';
 import { ChildDetailModal } from './ChildDetailModal';
 import { DatingAppModal } from './DatingAppModal';
 import { romanceService } from '../services/romanceService';
-import { reproductionService } from '../services/reproductionService';
+import {
+  getTryForBabyAttemptsThisYear,
+  recordTryForBabyAttempt,
+  reproductionService,
+  TRY_FOR_BABY_ACTION_KEY,
+  TRY_FOR_BABY_MAX_PER_YEAR,
+} from '../services/reproductionService';
 import { divorceService } from '../services/divorceService';
 import { createId } from '../../../utils/id';
 import { stampPlayerNetWorth } from '../../assets/services/assetService';
@@ -168,16 +174,20 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     let finalChar = baseChar;
 
     if (reaction.actionKey && reaction.targetId) {
-      const currentActions = finalChar.yearlySocialActions?.[reaction.targetId] || [];
-      const actionCount = currentActions.filter((a) => a === reaction.actionKey).length;
-      if (actionCount < 2) {
-        finalChar = {
-          ...finalChar,
-          yearlySocialActions: {
-            ...(finalChar.yearlySocialActions || {}),
-            [reaction.targetId]: [...currentActions, reaction.actionKey],
-          },
-        };
+      if (reaction.actionKey === TRY_FOR_BABY_ACTION_KEY) {
+        finalChar = recordTryForBabyAttempt(finalChar, reaction.targetId);
+      } else {
+        const currentActions = finalChar.yearlySocialActions?.[reaction.targetId] || [];
+        const actionCount = currentActions.filter((a) => a === reaction.actionKey).length;
+        if (actionCount < 2) {
+          finalChar = {
+            ...finalChar,
+            yearlySocialActions: {
+              ...(finalChar.yearlySocialActions || {}),
+              [reaction.targetId]: [...currentActions, reaction.actionKey],
+            },
+          };
+        }
       }
     }
 
@@ -503,6 +513,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   // Open Family Planning Picker
   const handleOpenFamilyPlanningPicker = (targetPartner: PersonProfile) => {
     const isExpecting = character.isPregnant || !!targetPartner.partnerStats?.isPregnant;
+    const tryAttempts = getTryForBabyAttemptsThisYear(character);
+    const isTryMaxed = tryAttempts >= TRY_FOR_BABY_MAX_PER_YEAR;
 
     setActionPicker({
       title: `Family Planning with ${targetPartner.firstName}`,
@@ -517,14 +529,20 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           title: 'Try for a Baby Naturally',
           subtitle: isExpecting
             ? 'Currently expecting a baby!'
-            : 'Passionate night trying to conceive',
+            : isTryMaxed
+            ? `Annual limit reached (${tryAttempts}/${TRY_FOR_BABY_MAX_PER_YEAR} this age)`
+            : `Passionate night trying to conceive (${tryAttempts}/${TRY_FOR_BABY_MAX_PER_YEAR} this age)`,
           description: isExpecting
             ? 'You are already expecting! Your child will arrive when you age up (+1 Year).'
+            : isTryMaxed
+            ? `You can try up to ${TRY_FOR_BABY_MAX_PER_YEAR} times per age. Age up (+1 Year) to try again.`
             : 'Take a home pregnancy test together to see if you conceived.',
           emoji: '👶',
           cost: 0,
-          disabled: isExpecting,
-          disabledReason: 'Already Expecting a Baby',
+          disabled: isExpecting || isTryMaxed,
+          disabledReason: isExpecting
+            ? 'Already Expecting a Baby'
+            : `Limit Reached (${tryAttempts}/${TRY_FOR_BABY_MAX_PER_YEAR} this age)`,
           data: 'natural' as const,
         },
         {
@@ -1081,6 +1099,17 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
       return;
     }
 
+    if (res.annualLimitReached) {
+      setReactionModal({
+        title: 'Annual Limit Reached 👶',
+        icon: '⏳',
+        partnerName: partner.firstName,
+        avatarEmoji: partner.avatarEmoji,
+        message: res.message,
+      });
+      return;
+    }
+
     if (res.notViable) {
       setReactionModal({
         title: 'Family Planning Options 🍼',
@@ -1149,8 +1178,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
         happinessDelta: res.happinessDelta,
         isConception: res.conceptionOccurred,
       },
-      actionKey: 'romance_try_baby',
-      targetId: partner.id,
+      actionKey: res.success ? TRY_FOR_BABY_ACTION_KEY : undefined,
+      targetId: res.success ? partner.id : undefined,
     });
   };
 

@@ -1,5 +1,11 @@
 import { romanceService } from '../services/romanceService';
-import { reproductionService } from '../services/reproductionService';
+import {
+  canTryForBabyThisYear,
+  getTryForBabyAttemptsThisYear,
+  recordTryForBabyAttempt,
+  reproductionService,
+  TRY_FOR_BABY_MAX_PER_YEAR,
+} from '../services/reproductionService';
 import { divorceService } from '../services/divorceService';
 import { ageUpCharacter } from '../../aging/services/agingService';
 import { generateParents } from '../../character/services/familyService';
@@ -347,7 +353,39 @@ const malePartner = createMockFriend({ gender: 'male', age: 26 });
 const nonViableTry = reproductionService.executeTryForBaby(maleChar, malePartner);
 assert(nonViableTry.notViable === true, 'Same-sex natural conception flagged as not viable');
 assert(nonViableTry.message.includes('IVF Treatment or Adoption'), 'Guides to IVF/Adoption');
-console.log(`✅ Try for a Baby: Deliberate conception, already-pregnant block, and viability guidance verified!`);
+
+// 7d. Try for a Baby is capped at 3 attempts per age and resets on Age Up
+let limitedChar = createMockCharacter({ gender: 'male', age: 26, cash: 30000, partner: wife });
+assert(getTryForBabyAttemptsThisYear(limitedChar) === 0, 'Starts with 0 Try for a Baby attempts this age');
+for (let i = 0; i < TRY_FOR_BABY_MAX_PER_YEAR; i++) {
+  assert(canTryForBabyThisYear(limitedChar) === true, `Attempt ${i + 1} allowed before cap`);
+  const attemptRes = reproductionService.executeTryForBaby(limitedChar, wife);
+  assert(attemptRes.success === true, `Attempt ${i + 1} executes cleanly`);
+  assert(attemptRes.annualLimitReached !== true, `Attempt ${i + 1} is not blocked by annual cap`);
+  limitedChar = recordTryForBabyAttempt(limitedChar, wife.id);
+}
+assert(getTryForBabyAttemptsThisYear(limitedChar) === 3, 'Records up to 3 attempts at current age');
+assert(canTryForBabyThisYear(limitedChar) === false, 'Disallows 4th Try for a Baby attempt at same age');
+
+const fourthAttempt = reproductionService.executeTryForBaby(limitedChar, wife);
+assert(fourthAttempt.success === false && fourthAttempt.annualLimitReached === true, '4th attempt blocked at same age');
+assert(fourthAttempt.conceptionOccurred === false, 'Blocked 4th attempt cannot conceive');
+
+// Even switching to another partner in the same year remains capped at 3 per age
+const secondPartner = createMockFriend({ id: 'partner-2', firstName: 'Maya', gender: 'female', age: 26 });
+const crossPartnerAttempt = reproductionService.executeTryForBaby(limitedChar, secondPartner);
+assert(crossPartnerAttempt.annualLimitReached === true, 'Annual 3-attempt cap holds across partners at same age');
+
+// Record cap stays at 3 if called again
+const extraRecord = recordTryForBabyAttempt(limitedChar, wife.id);
+assert(getTryForBabyAttemptsThisYear(extraRecord) === 3, 'Cannot record beyond 3 attempts per age');
+
+// Aging up (+1 Year) resets the cap for the new age
+const agedResetChar = ageUpCharacter(limitedChar);
+assert(agedResetChar.age === 27, 'Character aged to 27');
+assert(getTryForBabyAttemptsThisYear(agedResetChar) === 0, 'Try for a Baby count resets on Age Up');
+assert(canTryForBabyThisYear(agedResetChar) === true, 'Can try for a baby again at new age');
+console.log(`✅ Try for a Baby: Deliberate conception, already-pregnant block, 3x/age limit, Age Up reset, and viability guidance verified!`);
 
 const ivfRes = reproductionService.executeIVF(familyChar, wife);
 assert(ivfRes.cashDelta === -15000, 'IVF cost applied');

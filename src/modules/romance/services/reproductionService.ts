@@ -3,10 +3,50 @@ import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import { createId } from '../../../utils/id';
 import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names';
 
+export const TRY_FOR_BABY_ACTION_KEY = 'romance_try_baby';
+export const TRY_FOR_BABY_MAX_PER_YEAR = 3;
+
+export function getTryForBabyAttemptsThisYear(character: CharacterProfile): number {
+  const actionsMap = character.yearlySocialActions;
+  if (!actionsMap) return 0;
+  let count = 0;
+  for (const entries of Object.values(actionsMap)) {
+    if (!Array.isArray(entries)) continue;
+    for (const action of entries) {
+      if (action === TRY_FOR_BABY_ACTION_KEY) {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+export function canTryForBabyThisYear(character: CharacterProfile): boolean {
+  return getTryForBabyAttemptsThisYear(character) < TRY_FOR_BABY_MAX_PER_YEAR;
+}
+
+export function recordTryForBabyAttempt(
+  character: CharacterProfile,
+  partnerId: string
+): CharacterProfile {
+  if (!canTryForBabyThisYear(character)) {
+    return character;
+  }
+  const existingForPartner = character.yearlySocialActions?.[partnerId] || [];
+  return {
+    ...character,
+    yearlySocialActions: {
+      ...(character.yearlySocialActions || {}),
+      [partnerId]: [...existingForPartner, TRY_FOR_BABY_ACTION_KEY],
+    },
+  };
+}
+
 export interface TryForBabyResult {
   success: boolean;
   conceptionOccurred: boolean;
   alreadyPregnant?: boolean;
+  annualLimitReached?: boolean;
   notViable?: boolean;
   message: string;
   relationshipDelta: number;
@@ -17,7 +57,7 @@ export interface TryForBabyResult {
 export class ReproductionService {
   /**
    * Deliberately attempts natural conception with partner.
-   * Evaluates pregnancy status, biological viability, maternal age, and fertility.
+   * Evaluates pregnancy status, annual age limit (3/year), biological viability, maternal age, and fertility.
    */
   executeTryForBaby(
     character: CharacterProfile,
@@ -32,6 +72,19 @@ export class ReproductionService {
         conceptionOccurred: false,
         alreadyPregnant: true,
         message: `You and ${partner.firstName} are already expecting a baby! The little one will arrive when you age up (+1 Year). 🍼`,
+        relationshipDelta: 0,
+        romanceDelta: 0,
+        happinessDelta: 0,
+      };
+    }
+
+    // 2. Enforce annual Try for a Baby cap (max 3 attempts per age)
+    if (!canTryForBabyThisYear(character)) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        annualLimitReached: true,
+        message: `You have already tried for a baby ${TRY_FOR_BABY_MAX_PER_YEAR} times at age ${character.age}. Age up (+1 Year) to try again!`,
         relationshipDelta: 0,
         romanceDelta: 0,
         happinessDelta: 0,
