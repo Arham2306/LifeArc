@@ -1,11 +1,16 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { romanceService } from '../services/romanceService';
 import {
   canTryForBabyThisYear,
+  evaluateFamilyPlanningEligibility,
   getTryForBabyAttemptsThisYear,
   recordTryForBabyAttempt,
   reproductionService,
+  runGuardedFamilyPlanningAction,
   TRY_FOR_BABY_MAX_PER_YEAR,
 } from '../services/reproductionService';
+import { RomanceScreen } from '../components/RomanceScreen';
 import { divorceService } from '../services/divorceService';
 import { ageUpCharacter } from '../../aging/services/agingService';
 import { generateParents } from '../../character/services/familyService';
@@ -405,6 +410,294 @@ assert(baby.age === 0, 'Newborn age is 0');
 assert(baby.occupation === 'Infant', 'Newborn occupation is Infant');
 assert(baby.looks >= 70 && baby.smarts >= 70, 'Genetics inherited');
 console.log(`✅ Biological Child: Born with inherited genetics (Looks: ${baby.looks}%, Smarts: ${baby.smarts}%)!`);
+
+// 7e. Marriage-Gated Family Planning Eligibility & UI/Flow Guards
+{
+  const flirtingPartner = createMockFriend({
+    id: 'fp-flirt',
+    romanticStage: 'flirting',
+    relationshipType: 'crush',
+    romanceMeter: 100,
+    relationship: 100,
+  });
+  const datingPerfect = createMockFriend({
+    id: 'fp-dating',
+    role: 'Girlfriend',
+    relationshipType: 'dating',
+    romanticStage: 'dating',
+    romanceMeter: 100,
+    relationship: 100,
+  });
+  const engagedPerfect = createMockFriend({
+    id: 'fp-engaged',
+    role: 'Fiancée',
+    relationshipType: 'partner',
+    romanticStage: 'engaged',
+    romanceMeter: 100,
+    relationship: 100,
+  });
+  const marriedLowRomance = createMockFriend({
+    id: 'fp-married-low-love',
+    role: 'Wife',
+    relationshipType: 'spouse',
+    romanticStage: 'married',
+    romanceMeter: 39,
+    relationship: 80,
+  });
+  const marriedLowRel = createMockFriend({
+    id: 'fp-married-low-rel',
+    role: 'Wife',
+    relationshipType: 'spouse',
+    romanticStage: 'married',
+    romanceMeter: 75,
+    relationship: 49,
+  });
+  const marriedEligible = createMockFriend({
+    id: 'fp-married-ok',
+    role: 'Wife',
+    relationshipType: 'spouse',
+    romanticStage: 'married',
+    romanceMeter: 40,
+    relationship: 50,
+  });
+
+  // Canonical selector checks
+  const flirtCheck = evaluateFamilyPlanningEligibility(flirtingPartner);
+  assert(flirtCheck.eligible === false && flirtCheck.isMarried === false, 'Flirting unavailable');
+
+  const datingCheck = evaluateFamilyPlanningEligibility(datingPerfect);
+  assert(
+    datingCheck.eligible === false && datingCheck.isMarried === false,
+    'Dating unavailable even at 100% romance and relationship'
+  );
+
+  const engagedCheck = evaluateFamilyPlanningEligibility(engagedPerfect);
+  assert(
+    engagedCheck.eligible === false && engagedCheck.isMarried === false,
+    'Engaged unavailable even at 100% romance and relationship'
+  );
+
+  const lowLoveCheck = evaluateFamilyPlanningEligibility(marriedLowRomance);
+  assert(
+    lowLoveCheck.eligible === false && lowLoveCheck.isMarried === true && lowLoveCheck.meetsBond === false,
+    'Married below 40% romance unavailable'
+  );
+
+  const lowRelCheck = evaluateFamilyPlanningEligibility(marriedLowRel);
+  assert(
+    lowRelCheck.eligible === false && lowRelCheck.isMarried === true && lowRelCheck.meetsBond === false,
+    'Married below 50% relationship unavailable'
+  );
+
+  const marriedCheck = evaluateFamilyPlanningEligibility(marriedEligible);
+  assert(
+    marriedCheck.eligible === true && marriedCheck.isMarried === true && marriedCheck.meetsBond === true,
+    'Married with >= 40% romance and >= 50% relationship available'
+  );
+
+  // Guarded Family Planning flow executions (Natural, IVF, Adoption)
+  for (const blockedPartner of [flirtingPartner, datingPerfect, engagedPerfect, marriedLowRomance, marriedLowRel]) {
+    const nat = reproductionService.executeFamilyPlanningTryForBaby(familyChar, blockedPartner);
+    assert(nat.success === false && nat.conceptionOccurred === false, `Natural conception blocked for ${blockedPartner.romanticStage}`);
+
+    const ivf = reproductionService.executeFamilyPlanningIVF(familyChar, blockedPartner);
+    assert(ivf.success === false && ivf.cashDelta === 0, `IVF blocked with $0 charge for ${blockedPartner.romanticStage}`);
+
+    const adopt = reproductionService.executeFamilyPlanningAdoption(familyChar, blockedPartner, 'infant', 'Test');
+    assert(adopt.success === false && adopt.cashDelta === 0 && !adopt.child, `Adoption blocked with $0 charge for ${blockedPartner.romanticStage}`);
+  }
+
+  // Verify allowed execution paths once married + meeting bond
+  const allowedAdopt = reproductionService.executeFamilyPlanningAdoption(familyChar, marriedEligible, 'infant', 'Claire');
+  assert(allowedAdopt.success === true && allowedAdopt.child?.firstName === 'Claire', 'Family Planning adoption succeeds when married and bonded');
+  const allowedIvf = reproductionService.executeFamilyPlanningIVF(familyChar, marriedEligible);
+  assert(allowedIvf.cashDelta === -15000, 'Family Planning IVF proceeds when married and bonded');
+  const allowedTry = reproductionService.executeFamilyPlanningTryForBaby(maleChar, marriedEligible);
+  assert(allowedTry.success === true, 'Family Planning Try for a Baby proceeds when married and bonded');
+
+  // Direct handler guard invocation while flirting, dating, and engaged: blocked
+  for (const [label, candidate] of [
+    ['flirting', flirtingPartner],
+    ['dating', datingPerfect],
+    ['engaged', engagedPerfect],
+  ] as const) {
+    let opened = false;
+    let blockedMsg = '';
+    const allowed = runGuardedFamilyPlanningAction(
+      candidate,
+      () => {
+        opened = true;
+      },
+      (notice) => {
+        blockedMsg = notice.message;
+      }
+    );
+    assert(
+      allowed === false && opened === false && blockedMsg.includes('after getting married'),
+      `Direct Family Planning handler blocked while ${label}`
+    );
+  }
+
+  // SSR UI rendering across relationship stages
+  const flirtingHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: createMockCharacter({
+        age: 25,
+        gender: 'male',
+        cash: 30000,
+        partner: null,
+        relationships: [flirtingPartner],
+      }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(!flirtingHtml.includes('Family Planning'), 'Flirting prospect UI does not expose Family Planning');
+
+  const datingUiChar = createMockCharacter({
+    age: 25,
+    gender: 'male',
+    cash: 30000,
+    partner: datingPerfect,
+    relationships: [datingPerfect],
+  });
+  const datingHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: datingUiChar,
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(datingHtml.includes('Family (Married Only)'), 'Dating UI shows Family (Married Only)');
+  assert(
+    /<button[^>]*\sdisabled(?:="")?(?=[\s>])[^>]*>(?:(?!<\/button>)[\s\S])*?Family \(Married Only\)<\/span><\/button>/.test(datingHtml),
+    'Dating UI disables Family Planning button'
+  );
+  assert(datingHtml.includes('Make Love (0/2)'), 'Make Love remains available while dating');
+  assert(
+    /<button(?![^>]*\sdisabled(?:="")?(?=[\s>]))[^>]*>(?:(?!<\/button>)[\s\S])*?Make Love \(0\/2\)<\/span><\/button>/.test(datingHtml),
+    'Dating Make Love button is enabled'
+  );
+
+  const engagedUiChar = createMockCharacter({
+    age: 25,
+    gender: 'male',
+    cash: 30000,
+    partner: engagedPerfect,
+    relationships: [engagedPerfect],
+  });
+  const engagedHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: engagedUiChar,
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(
+    /<button[^>]*\sdisabled(?:="")?(?=[\s>])[^>]*>(?:(?!<\/button>)[\s\S])*?Family \(Married Only\)<\/span><\/button>/.test(engagedHtml),
+    'Engaged UI disables Family Planning as Family (Married Only)'
+  );
+
+  const marriedLowHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: createMockCharacter({
+        age: 25,
+        gender: 'male',
+        cash: 30000,
+        partner: marriedLowRomance,
+        relationships: [marriedLowRomance],
+      }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(
+    /<button[^>]*\sdisabled(?:="")?(?=[\s>])[^>]*>(?:(?!<\/button>)[\s\S])*?Family \(40% Love\)<\/span><\/button>/.test(marriedLowHtml),
+    'Married UI below romance threshold shows disabled Family (40% Love)'
+  );
+
+  const marriedLowBothHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: createMockCharacter({
+        age: 25,
+        gender: 'male',
+        cash: 30000,
+        partner: { ...marriedLowRomance, romanceMeter: 20, relationship: 30 },
+        relationships: [{ ...marriedLowRomance, romanceMeter: 20, relationship: 30 }],
+      }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(
+    /<button[^>]*\sdisabled(?:="")?(?=[\s>])[^>]*>(?:(?!<\/button>)[\s\S])*?Family \(40% Love\)<\/span><\/button>/.test(marriedLowBothHtml),
+    'Married UI below both thresholds prioritizes disabled Family (40% Love)'
+  );
+
+  const marriedLowRelHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: createMockCharacter({
+        age: 25,
+        gender: 'male',
+        cash: 30000,
+        partner: marriedLowRel,
+        relationships: [marriedLowRel],
+      }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(
+    /<button[^>]*\sdisabled(?:="")?(?=[\s>])[^>]*>(?:(?!<\/button>)[\s\S])*?Family \(50% Relationship\)<\/span><\/button>/.test(marriedLowRelHtml),
+    'Married UI below relationship threshold with >= 40 romance shows disabled Family (50% Relationship)'
+  );
+
+  const marriedOkHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: createMockCharacter({
+        age: 25,
+        gender: 'male',
+        cash: 30000,
+        partner: marriedEligible,
+        relationships: [marriedEligible],
+      }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(marriedOkHtml.includes('Family Planning'), 'Married eligible UI shows enabled Family Planning');
+  assert(
+    /<button(?![^>]*\sdisabled(?:="")?(?=[\s>]))[^>]*>(?:(?!<\/button>)[\s\S])*?Family Planning<\/span><\/button>/.test(marriedOkHtml),
+    'Married eligible Family Planning button is enabled'
+  );
+
+  const marriedExpectingHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: createMockCharacter({
+        age: 25,
+        gender: 'male',
+        cash: 30000,
+        partner: {
+          ...marriedEligible,
+          partnerStats: { ...marriedEligible.partnerStats!, isPregnant: true },
+        },
+        relationships: [marriedEligible],
+      }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(marriedExpectingHtml.includes('Expecting Baby 🍼'), 'Married expecting UI preserves Expecting Baby 🍼 label');
+  console.log('✅ Family Planning Marriage Gate: Flirting/Dating/Engaged locked, Married threshold-gated, Make Love preserved!');
+}
 
 // Test 8: Divorce & Asset Protection
 const wifeWithPrenup = createMockFriend({

@@ -5,6 +5,83 @@ import { MALE_NAMES, FEMALE_NAMES } from '../../character/data/names';
 
 export const TRY_FOR_BABY_ACTION_KEY = 'romance_try_baby';
 export const TRY_FOR_BABY_MAX_PER_YEAR = 3;
+export const FAMILY_PLANNING_MIN_ROMANCE = 40;
+export const FAMILY_PLANNING_MIN_RELATIONSHIP = 50;
+
+export interface FamilyPlanningEligibility {
+  eligible: boolean;
+  isMarried: boolean;
+  meetsBond: boolean;
+  reason?: string;
+}
+
+/**
+ * Canonical source of truth for whether Family Planning is available with a partner.
+ * Requires the partner to be married (`romanticStage === 'married'`) and meet both
+ * the romance meter (>= 40) and relationship (>= 50) thresholds.
+ */
+export function evaluateFamilyPlanningEligibility(
+  partner: PersonProfile | null | undefined
+): FamilyPlanningEligibility {
+  const isMarried = partner?.romanticStage === 'married';
+  const romance = partner?.romanceMeter ?? 0;
+  const relationship = partner?.relationship ?? 0;
+  const meetsBond =
+    romance >= FAMILY_PLANNING_MIN_ROMANCE &&
+    relationship >= FAMILY_PLANNING_MIN_RELATIONSHIP;
+
+  if (!partner || !isMarried) {
+    return {
+      eligible: false,
+      isMarried: false,
+      meetsBond,
+      reason: 'Family Planning is only available after getting married.',
+    };
+  }
+
+  if (!meetsBond) {
+    return {
+      eligible: false,
+      isMarried: true,
+      meetsBond: false,
+      reason: `Requires at least ${FAMILY_PLANNING_MIN_ROMANCE}% Love and ${FAMILY_PLANNING_MIN_RELATIONSHIP}% Relationship with your spouse.`,
+    };
+  }
+
+  return {
+    eligible: true,
+    isMarried: true,
+    meetsBond: true,
+  };
+}
+
+export interface FamilyPlanningBlockedNotice {
+  title: string;
+  icon: string;
+  message: string;
+}
+
+/**
+ * Shared handler guard for Family Planning triggers (picker open and actions).
+ */
+export function runGuardedFamilyPlanningAction(
+  partner: PersonProfile | null | undefined,
+  onAllowed: (verifiedPartner: PersonProfile) => void,
+  onBlocked: (notice: FamilyPlanningBlockedNotice) => void
+): boolean {
+  const eligibility = evaluateFamilyPlanningEligibility(partner);
+  if (eligibility.eligible && partner) {
+    onAllowed(partner);
+    return true;
+  }
+
+  onBlocked({
+    title: eligibility.isMarried ? 'Bond Too Low 💔' : 'Marriage Required 💍',
+    icon: eligibility.isMarried ? '💔' : '💍',
+    message: eligibility.reason || 'Family Planning is only available after getting married.',
+  });
+  return false;
+}
 
 export function getTryForBabyAttemptsThisYear(character: CharacterProfile): number {
   const actionsMap = character.yearlySocialActions;
@@ -351,6 +428,68 @@ export class ReproductionService {
       message: `Congratulations! The court has finalized the adoption paperwork. Welcome little ${child.firstName} ${child.lastName} to your family! 👶🏠`,
       cashDelta: -fee,
     };
+  }
+
+  /**
+   * Family Planning entrypoint for natural conception (enforces marriage + bond eligibility).
+   */
+  executeFamilyPlanningTryForBaby(
+    character: CharacterProfile,
+    partner: PersonProfile | null | undefined
+  ): TryForBabyResult {
+    const eligibility = evaluateFamilyPlanningEligibility(partner);
+    if (!eligibility.eligible || !partner) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        message: eligibility.reason ?? 'Family Planning is only available after getting married.',
+        relationshipDelta: 0,
+        romanceDelta: 0,
+        happinessDelta: 0,
+      };
+    }
+
+    return this.executeTryForBaby(character, partner);
+  }
+
+  /**
+   * Family Planning entrypoint for IVF (enforces marriage + bond eligibility).
+   */
+  executeFamilyPlanningIVF(
+    character: CharacterProfile,
+    partner: PersonProfile | null | undefined
+  ): { success: boolean; message: string; cashDelta: number } {
+    const eligibility = evaluateFamilyPlanningEligibility(partner);
+    if (!eligibility.eligible || !partner) {
+      return {
+        success: false,
+        message: eligibility.reason ?? 'Family Planning is only available after getting married.',
+        cashDelta: 0,
+      };
+    }
+
+    return this.executeIVF(character, partner);
+  }
+
+  /**
+   * Family Planning entrypoint for agency adoption (enforces marriage + bond eligibility).
+   */
+  executeFamilyPlanningAdoption(
+    character: CharacterProfile,
+    partner: PersonProfile | null | undefined,
+    ageGroup: 'infant' | 'toddler' | 'child',
+    customFirstName?: string
+  ): { success: boolean; child?: ChildProfile; message: string; cashDelta: number } {
+    const eligibility = evaluateFamilyPlanningEligibility(partner);
+    if (!eligibility.eligible || !partner) {
+      return {
+        success: false,
+        message: eligibility.reason ?? 'Family Planning is only available after getting married.',
+        cashDelta: 0,
+      };
+    }
+
+    return this.executeAdoption(character, ageGroup, customFirstName);
   }
 
   /**

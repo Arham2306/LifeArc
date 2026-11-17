@@ -24,9 +24,13 @@ import { ChildDetailModal } from './ChildDetailModal';
 import { DatingAppModal } from './DatingAppModal';
 import { romanceService } from '../services/romanceService';
 import {
+  evaluateFamilyPlanningEligibility,
+  FAMILY_PLANNING_MIN_RELATIONSHIP,
+  FAMILY_PLANNING_MIN_ROMANCE,
   getTryForBabyAttemptsThisYear,
   recordTryForBabyAttempt,
   reproductionService,
+  runGuardedFamilyPlanningAction,
   TRY_FOR_BABY_ACTION_KEY,
   TRY_FOR_BABY_MAX_PER_YEAR,
 } from '../services/reproductionService';
@@ -510,8 +514,30 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     });
   };
 
+  const ensureFamilyPlanningEligible = (targetPartner: PersonProfile | null | undefined): targetPartner is PersonProfile => {
+    let allowed = false;
+    runGuardedFamilyPlanningAction(
+      targetPartner,
+      () => {
+        allowed = true;
+      },
+      (notice) => {
+        setReactionModal({
+          title: notice.title,
+          icon: notice.icon,
+          partnerName: targetPartner?.firstName,
+          avatarEmoji: targetPartner?.avatarEmoji,
+          message: notice.message,
+        });
+      }
+    );
+    return allowed;
+  };
+
   // Open Family Planning Picker
   const handleOpenFamilyPlanningPicker = (targetPartner: PersonProfile) => {
+    if (!ensureFamilyPlanningEligible(targetPartner)) return;
+
     const isExpecting = character.isPregnant || !!targetPartner.partnerStats?.isPregnant;
     const tryAttempts = getTryForBabyAttemptsThisYear(character);
     const isTryMaxed = tryAttempts >= TRY_FOR_BABY_MAX_PER_YEAR;
@@ -1085,8 +1111,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Family Planning Handlers
   const handleTryNatural = () => {
-    if (!partner) return;
-    const res = reproductionService.executeTryForBaby(character, partner);
+    if (!ensureFamilyPlanningEligible(partner)) return;
+    const res = reproductionService.executeFamilyPlanningTryForBaby(character, partner);
 
     if (res.alreadyPregnant) {
       setReactionModal({
@@ -1184,8 +1210,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   const handleTryIVF = () => {
-    if (!partner) return;
-    const res = reproductionService.executeIVF(character, partner);
+    if (!ensureFamilyPlanningEligible(partner)) return;
+    const res = reproductionService.executeFamilyPlanningIVF(character, partner);
     if (!res.success && res.cashDelta === 0) {
       setReactionModal({
         title: 'Not Enough Cash',
@@ -1243,7 +1269,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   const handleAdopt = (ageGroup: 'infant' | 'toddler' | 'child') => {
-    const res = reproductionService.executeAdoption(character, ageGroup);
+    if (!ensureFamilyPlanningEligible(partner)) return;
+    const res = reproductionService.executeFamilyPlanningAdoption(character, partner, ageGroup);
     if (!res.success) {
       setReactionModal({
         title: 'Adoption Notice',
@@ -1552,35 +1579,30 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       );
                     })()}
 
-                    {/* Family Planning: Gated behind Committed Relationship & 40% Love */}
+                    {/* Family Planning: Strictly gated behind Marriage & Relationship Thresholds */}
                     {(() => {
-                      const isCommitted =
-                        partner.romanticStage === 'dating' ||
-                        partner.romanticStage === 'engaged' ||
-                        partner.romanticStage === 'married';
-                      const meetsRomance = (partner.romanceMeter ?? 0) >= 40 && partner.relationship >= 50;
+                      const eligibility = evaluateFamilyPlanningEligibility(partner);
                       const isExpecting = character.isPregnant || !!partner.partnerStats?.isPregnant;
-                      const canFamily = isCommitted && meetsRomance;
+                      const canFamily = eligibility.eligible;
+                      const familyLabel = !eligibility.isMarried
+                        ? 'Family (Married Only)'
+                        : !eligibility.meetsBond
+                        ? (partner.romanceMeter ?? 0) < FAMILY_PLANNING_MIN_ROMANCE
+                          ? `Family (${FAMILY_PLANNING_MIN_ROMANCE}% Love)`
+                          : `Family (${FAMILY_PLANNING_MIN_RELATIONSHIP}% Relationship)`
+                        : isExpecting
+                        ? 'Expecting Baby 🍼'
+                        : 'Family Planning';
                       return (
                         <CartoonButton
                           variant={canFamily ? (isExpecting ? 'amber' : 'white') : 'slate'}
                           size="sm"
                           disabled={!canFamily}
                           className={`flex items-center justify-center gap-1.5 ${!canFamily ? 'opacity-60 cursor-not-allowed' : ''}`}
-                          onClick={() => {
-                            if (canFamily) handleOpenFamilyPlanningPicker(partner);
-                          }}
+                          onClick={() => handleOpenFamilyPlanningPicker(partner)}
                         >
                           <Baby className={`w-4 h-4 shrink-0 ${canFamily ? 'text-amber-600' : 'text-slate-400'}`} />
-                          <span>
-                            {!isCommitted
-                              ? 'Family (Partners Only)'
-                              : !meetsRomance
-                              ? 'Family (40% Love)'
-                              : isExpecting
-                              ? 'Expecting Baby 🍼'
-                              : 'Family Planning'}
-                          </span>
+                          <span>{familyLabel}</span>
                         </CartoonButton>
                       );
                     })()}
