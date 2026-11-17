@@ -7,7 +7,7 @@ import { chance, pickWeighted } from '../../../utils/random'
 import { createId } from '../../../utils/id'
 import { gameEventContextRegistry } from '../../../composition/eventContextRegistry'
 import { buildEventContext, type EventContextRegistry } from './eventContext'
-import { isEventEligible } from './eventEligibility'
+import { isEventEligible, type EventEligibilityOptions } from './eventEligibility'
 import { scoreEventWeight } from './eventWeight'
 
 /** Chance that an interactive event pops up on any given age up. */
@@ -84,22 +84,24 @@ export function formatEventText(
 /** All events that can currently happen to this character. */
 export function getEligibleEvents(
   character: CharacterProfile,
-  registry: EventContextRegistry = gameEventContextRegistry
+  registry: EventContextRegistry = gameEventContextRegistry,
+  options?: EventEligibilityOptions
 ): LifeEventTemplate[] {
   if (!character.isAlive) return [];
   const context = buildEventContext(character, registry);
-  return EVENT_POOL.filter((event) => isEventEligible(event, character, context));
+  return EVENT_POOL.filter((event) => isEventEligible(event, character, context, options));
 }
 
 /** Rolls the dice to see if an event happens this year, and which one. */
 export function rollEventForCharacter(
   character: CharacterProfile,
-  triggerChance: number = EVENT_TRIGGER_CHANCE
+  triggerChance: number = EVENT_TRIGGER_CHANCE,
+  options?: EventEligibilityOptions
 ): LifeEventTemplate | null {
   if (!character.isAlive || character.age < MIN_EVENT_AGE) return null;
   if (!chance(triggerChance)) return null;
 
-  const eligible = getEligibleEvents(character);
+  const eligible = getEligibleEvents(character, gameEventContextRegistry, options);
   if (eligible.length === 0) return null;
 
   const context = buildEventContext(character, gameEventContextRegistry);

@@ -37,7 +37,10 @@ import { HealthcareScreen } from './modules/healthcare/components/HealthcareScre
 import { CrimeScreen } from './modules/crime/components/CrimeScreen'
 import { CourtDefenseModal } from './modules/crime/components/CourtDefenseModal'
 import { CRIME_MENU_MIN_AGE } from './modules/crime/components/crimeDisplay'
-import { hasPendingCourtCase } from './modules/crime/services/crimeSelectors'
+import {
+  hasPendingCourtCase,
+  isCurrentlyIncarcerated,
+} from './modules/crime/services/crimeSelectors'
 import { IdentityHeritageScreen } from './modules/identity/components/IdentityHeritageScreen'
 import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
@@ -128,6 +131,7 @@ export default function App() {
       return
     }
 
+    const incarceratedThisYear = isCurrentlyIncarcerated(activeCharacter)
     const agedCharacter = ageUpCharacter(activeCharacter)
     setActiveCharacter(agedCharacter)
     setSelectedStage(getLifeStageForAge(agedCharacter.age))
@@ -148,8 +152,14 @@ export default function App() {
     // modal never drops downstream milestones, housing notices, fiscal reports, or events.
     setPendingNewbornBirth(agedCharacter.newbornAnnouncement ?? null)
     setSchoolMilestone(getSchoolMilestoneNotice(agedCharacter))
-    setActiveFiscalReport(agedCharacter.business?.lastFiscalReport ?? null)
-    setPendingEvent(rollEventForCharacter(agedCharacter))
+    setActiveFiscalReport(
+      incarceratedThisYear || isCurrentlyIncarcerated(agedCharacter)
+        ? null
+        : (agedCharacter.business?.lastFiscalReport ?? null)
+    )
+    setPendingEvent(
+      rollEventForCharacter(agedCharacter, undefined, { incarceratedThisYear })
+    )
   }
 
   const handleConfirmBabyNaming = (firstName: string, lastName: string) => {

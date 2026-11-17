@@ -100,6 +100,10 @@ export interface LifeEventTemplate {
   weight?: number;
   /** If true the event can happen more than once in a life. Defaults to false. */
   repeatable?: boolean;
+  /** If true the event can still trigger while the character is incarcerated. */
+  prisonCompatible?: boolean;
+  /** If true the event requires the character to currently be in a prison year. */
+  requiresIncarcerated?: boolean;
   /** Optional schooling stage requirement (e.g. 'university', 'middle_school', 'high_school'). */
   requiredStage?: SchoolStage | SchoolStage[];
   /** Requires active employment to roll. */

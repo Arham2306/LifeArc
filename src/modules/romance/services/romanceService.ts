@@ -550,14 +550,17 @@ export class RomanceService {
    */
   executeBreakup(
     _character: CharacterProfile,
-    target: PersonProfile
+    target: PersonProfile,
+    options: { relationshipDelta?: number; happinessDelta?: number; message?: string } = {}
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
+    const relationshipDelta = options.relationshipDelta ?? -30;
+    const happinessDelta = options.happinessDelta ?? -25;
     const updatedTarget: PersonProfile = {
       ...target,
       role: 'Ex-Partner',
       relationshipType: 'ex',
       romanticStage: 'ex',
-      relationship: Math.max(0, target.relationship - 30),
+      relationship: Math.max(0, Math.min(100, target.relationship + relationshipDelta)),
       romanceMeter: 0,
     };
 
@@ -565,10 +568,12 @@ export class RomanceService {
       updatedTarget,
       result: {
         success: true,
-        message: `You sat down with ${target.firstName} and had a painful, solemn conversation ending your relationship. You have officially parted ways. 💔`,
-        relationshipDelta: -30,
+        message:
+          options.message ??
+          `You sat down with ${target.firstName} and had a painful, solemn conversation ending your relationship. You have officially parted ways. 💔`,
+        relationshipDelta,
         romanceDelta: -100,
-        happinessDelta: -25,
+        happinessDelta,
         newRomanticStage: 'ex',
       },
     };

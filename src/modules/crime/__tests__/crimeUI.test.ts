@@ -647,8 +647,76 @@ function makeRecord(overrides: Partial<CrimeRecordEntry> = {}): CrimeRecordEntry
   assert(
     prisonScreenHtml.includes('Stateville Penitentiary') &&
       prisonScreenHtml.includes('Prison Work Detail') &&
-      prisonScreenHtml.includes('Parole Hearing'),
-    'Prison CrimeScreen SSR should render facility status and all 6 prison actions',
+      prisonScreenHtml.includes('Parole Hearing') &&
+      prisonScreenHtml.includes('Locked (In Prison)') &&
+      prisonScreenHtml.includes('Street crimes are locked while serving your sentence'),
+    'Prison CrimeScreen SSR renders facility status, all 6 prison actions, and hard-locks street crime catalog',
+  );
+
+  // Prison sentencing notification summary propagation through buildCourtVerdictView
+  const prisonVerdictView = buildCourtVerdictView(
+    {
+      ok: true,
+      character: makeCharacter({ age: 24, occupation: 'Incarcerated' }),
+      outcome: 'imprisoned',
+      releasedPayout: 0,
+      fineImposed: 3000,
+      finePaid: 2000,
+      unpaidFineAdded: 1000,
+      attorneyFeePaid: 0,
+      sentenceYears: 2,
+      probationYears: 0,
+      employmentTerminated: true,
+      prisonConsequences: {
+        facilityName: 'Stateville Penitentiary',
+        securityLevel: 'medium',
+        sentenceYears: 2,
+        paroleEligibleAtServed: 1,
+        paroleEligibleAge: 25,
+        releaseAge: 26,
+        forfeitedProceeds: 25000,
+        fineImposed: 3000,
+        finePaid: 2000,
+        unpaidFineAdded: 1000,
+        attorneyFeePaid: 0,
+        terminatedJobTitle: 'Accountant at Apex Co',
+        closedBusinessName: 'Apex Cafe',
+        businessLiquidationProceeds: 12000,
+        partnerConsequence: {
+          hadPartner: true,
+          partnerName: 'Jordan Hayes',
+          previousStage: 'married',
+          action: 'divorced',
+          relationshipDelta: -45,
+          romanceDelta: -80,
+          resultingRelationship: 45,
+          resultingRomanceMeter: 0,
+        },
+        socialConsequences: {
+          totalImpacted: 3,
+          groups: [
+            { category: 'parents', label: 'Parents', affectedCount: 2, intendedDelta: -22 },
+            {
+              category: 'colleagues',
+              label: 'Colleagues & Coworkers',
+              affectedCount: 1,
+              intendedDelta: -30,
+            },
+          ],
+        },
+        happinessDelta: -18,
+        restrictions: ['Street crimes locked until release'],
+      },
+      message: 'Sentenced to 2 year(s) at Stateville Penitentiary for Bank Heist.',
+    },
+    'adult',
+  );
+  assert(
+    prisonVerdictView.prisonConsequences?.closedBusinessName === 'Apex Cafe' &&
+      prisonVerdictView.prisonConsequences?.businessLiquidationProceeds === 12000 &&
+      prisonVerdictView.prisonConsequences?.partnerConsequence.action === 'divorced' &&
+      prisonVerdictView.prisonConsequences?.socialConsequences.groups.length === 2,
+    'buildCourtVerdictView propagates exact applied prisonConsequences without recalculation',
   );
 
   // Full end-to-end attempt -> court flow determinism check via crimeService

@@ -35,6 +35,7 @@ import type {
   LegalJurisdiction,
   PendingCourtCase,
   PrisonActionId,
+  PrisonConsequencesSummary,
   PrisonState,
 } from '../types';
 
@@ -97,6 +98,7 @@ export interface CourtVerdictView {
   probationYears: number;
   sentenceYears: number;
   employmentTerminated: boolean;
+  prisonConsequences?: PrisonConsequencesSummary;
 }
 
 export interface PrisonActionView {
@@ -285,6 +287,7 @@ export function buildCourtVerdictView(
     probationYears: result.probationYears,
     sentenceYears: result.sentenceYears,
     employmentTerminated: result.employmentTerminated,
+    prisonConsequences: result.prisonConsequences,
   };
 }
 

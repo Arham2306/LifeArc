@@ -2,13 +2,20 @@ import type { CharacterProfile } from '../../../types/game';
 import { ageUpCharacter } from '../../aging/services/agingService';
 import { calculatePlayerNetWorth } from '../../assets/services/assetService';
 import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService';
-import { progressBusinessForYear } from '../../business/services/businessService';
+import {
+  evaluateFundingEligibility,
+  executeBusinessAction,
+  foundBusiness,
+  progressBusinessForYear,
+} from '../../business/services/businessService';
+import { BUSINESS_TEMPLATES } from '../../business/data/businessCatalog';
 import type { ActiveBusinessProfile } from '../../business/types';
 import { createInitialCareerState, evaluateJobEligibility } from '../../career/services/careerService';
 import { JOB_CATALOG } from '../../career/data/jobCatalog';
 import { createInitialEducation } from '../../education/services/educationService';
+import { getEligibleEvents, rollEventForCharacter } from '../../events/services/eventService';
 import { reproductionService } from '../../romance/services/reproductionService';
-import { resolveCourtCase } from '../services/crimeService';
+import { attemptCrime, resolveCourtCase } from '../services/crimeService';
 import {
   calculateAnnualGarnishment,
   progressCrimeForYear,
@@ -632,9 +639,51 @@ function testNarrowRestrictionsAcrossCareerBusinessAndAdoption() {
     26,
   );
   assert(
-    suppressedBiz.netPayoutToPlayer === 0 && suppressedBiz.business?.treasury === 20000,
-    'Business payout suppressed during incarceration',
+    suppressedBiz.netPayoutToPlayer === 0 &&
+      suppressedBiz.business?.treasury === 20000 &&
+      suppressedBiz.business?.valuation === 100000 &&
+      suppressedBiz.business?.yearsInOperation === 2 &&
+      suppressedBiz.business?.lastFiscalReport === undefined,
+    'Legacy business payouts, fiscal reports, and operations suppressed during incarceration',
   );
+
+  // Business incorporation eligibility, founding, and executive actions are all blocked in prison
+  const incarceratedBizTester: CharacterProfile = {
+    ...felonyBase,
+    cash: 200000,
+    bankBalance: 50000,
+    netWorth: 250000,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makeOneYearPrison({ yearsRemaining: 2, yearsTotal: 2 }),
+    },
+  };
+  const sampleTemplate = BUSINESS_TEMPLATES[0];
+  const prisonFunding = evaluateFundingEligibility(incarceratedBizTester, sampleTemplate);
+  assert(
+    !prisonFunding.canBootstrapped &&
+      !prisonFunding.canBankLoan &&
+      !prisonFunding.canPitchAngels &&
+      Boolean(prisonFunding.reason),
+    'evaluateFundingEligibility disables all funding routes while incarcerated',
+  );
+  let threwOnPrisonFound = false;
+  try {
+    foundBusiness(incarceratedBizTester, {
+      templateId: sampleTemplate.id,
+      customName: 'Cellblock Espresso',
+      icon: '☕',
+      fundingMethod: 'bootstrapped',
+    });
+  } catch {
+    threwOnPrisonFound = true;
+  }
+  assert(threwOnPrisonFound, 'foundBusiness rejects business creation while incarcerated');
+
+  const blockedExec = executeBusinessAction(suppressedBiz.business!, incarceratedBizTester, 'hire_workers', {
+    count: 1,
+  });
+  assert(!blockedExec.success, 'executeBusinessAction rejects executive operations while incarcerated');
 }
 
 function makeOneYearPrison(overrides: Partial<PrisonState> = {}): PrisonState {
@@ -975,10 +1024,155 @@ function testPostReleaseOccupationRestoration() {
   );
 }
 
+function testMultiYearCrimeLockoutPermanentClosureAndReleaseEvents() {
+  // Real court imprisonment liquidates active business immediately, terminates job,
+  // blocks street crimes across every prison year, suppresses free-world events on the
+  // release-year Age Up turn, and resumes free-world events on the following Age Up.
+  const entrepreneur = createBaseCharacter({
+    age: 28,
+    cash: 2500,
+    occupation: 'Founder & CEO (Pulse Cafe)',
+    education: { ...createInitialEducation(), currentStage: 'graduated' },
+    business: {
+      id: 'biz-lock-1',
+      templateId: 'coffee_shop',
+      name: 'Pulse Cafe',
+      sector: 'food_hospitality',
+      icon: '☕',
+      foundedAge: 24,
+      foundedYear: 2024,
+      treasury: 12000,
+      valuation: 40000,
+      equityPct: 100,
+      pricing: 'standard',
+      marketing: 'organic',
+      payroll: 'standard',
+      rnd: 'balanced',
+      ownerSalary: 25000,
+      dividendRatePct: 20,
+      morale: 80,
+      brandReputation: 70,
+      qualityScore: 75,
+      employeeCount: 3,
+      locationsCount: 1,
+      equipmentTier: 0,
+      hasAuditCompleted: false,
+      actionCooldowns: {},
+      outstandingLoan: 0,
+      annualLoanPayment: 0,
+      yearsInOperation: 4,
+      lifetimeRevenue: 100000,
+      lifetimeProfit: 20000,
+      isPubliclyTraded: false,
+    },
+  });
+
+  const sentenced = sentenceToPrisonViaCourt(entrepreneur);
+  const twoYearPrisoner: CharacterProfile = {
+    ...sentenced,
+    crime: {
+      ...sentenced.crime!,
+      prison: {
+        ...sentenced.crime!.prison!,
+        yearsTotal: 2,
+        yearsServed: 0,
+        yearsRemaining: 2,
+      },
+    },
+  };
+
+  assert(
+    twoYearPrisoner.business === null && twoYearPrisoner.occupation === 'Incarcerated',
+    'Sentencing immediately liquidated business and set Incarcerated occupation',
+  );
+  assert(
+    !attemptCrime(twoYearPrisoner, 'shoplifting').ok,
+    'Street crimes blocked at start of 2-year prison sentence',
+  );
+  assert(
+    getEligibleEvents(twoYearPrisoner).length === 0 &&
+      rollEventForCharacter(twoYearPrisoner, 1) === null,
+    'Ordinary free-world events suppressed while incarcerated',
+  );
+
+  // Age Up Year 1: still in prison (yearsRemaining = 1) -> street crimes & events still locked
+  const afterYear1 = ageUpCharacter(twoYearPrisoner);
+  assert(
+    isCurrentlyIncarcerated(afterYear1) && afterYear1.crime?.prison?.yearsRemaining === 1,
+    'Year 1 completed with 1 year still remaining',
+  );
+  assert(
+    !attemptCrime(afterYear1, 'shoplifting').ok && getEligibleEvents(afterYear1).length === 0,
+    'Street crimes and free-world events stay blocked during second prison year',
+  );
+
+  // Age Up Year 2 (final prison year): prisoner is released during this Age Up,
+  // yet free-world events stay suppressed for this release Age Up when passed incarceratedThisYear: true!
+  const incarceratedThisYear = isCurrentlyIncarcerated(afterYear1);
+  const afterReleaseYear = ageUpCharacter(afterYear1);
+  assert(!isCurrentlyIncarcerated(afterReleaseYear), 'Prisoner released after Year 2');
+  assert(
+    afterReleaseYear.business === null &&
+      afterReleaseYear.career.currentJob === null &&
+      afterReleaseYear.occupation === 'Unemployed',
+    'Closed business and terminated employment do not return after release',
+  );
+  assert(
+    getEligibleEvents(afterReleaseYear, undefined, { incarceratedThisYear }).length === 0 &&
+      rollEventForCharacter(afterReleaseYear, 1, { incarceratedThisYear }) === null,
+    'Ordinary free-world random events stay suppressed during the release-year Age Up',
+  );
+
+  // Even if given an employment context right at release end-of-turn, incarceratedThisYear still suppresses free-world events.
+  const hypotheticalEmployedAtRelease: CharacterProfile = {
+    ...afterReleaseYear,
+    career: {
+      ...afterReleaseYear.career,
+      currentJob: {
+        jobId: 'ft_cashier',
+        title: 'Cashier',
+        companyName: 'Corner Mart',
+        field: 'hospitality_retail',
+        type: 'full_time',
+        salary: 28000,
+        yearsInJob: 1,
+        performance: 70,
+        hiredAge: afterReleaseYear.age,
+        icon: '🧾',
+      },
+    },
+  };
+  assert(
+    getEligibleEvents(hypotheticalEmployedAtRelease, undefined, { incarceratedThisYear }).length === 0,
+    'Release-year Age Up suppresses workplace events while incarceratedThisYear is true',
+  );
+
+  // Next Age Up (starting free): crime eligibility returns and post-release events run normally
+  const yearAfterRelease = ageUpCharacter(afterReleaseYear);
+  assert(
+    attemptCrime(yearAfterRelease, 'shoplifting').ok,
+    'Crime eligibility returns cleanly on the year following release',
+  );
+  const reEmployedAfterRelease: CharacterProfile = {
+    ...yearAfterRelease,
+    career: {
+      ...yearAfterRelease.career,
+      currentJob: hypotheticalEmployedAtRelease.career.currentJob,
+    },
+  };
+  assert(
+    getEligibleEvents(reEmployedAfterRelease, undefined, {
+      incarceratedThisYear: isCurrentlyIncarcerated(afterReleaseYear),
+    }).length > 0,
+    'Free-world events return cleanly on the Age Up following release',
+  );
+}
+
 testProbationProgressionAndJuvenilePreservationAt18();
 testJuvenileSealingBoundariesAndAdultExclusion();
 testFineGarnishmentCapsAndZeroEdgeCases();
 testAgeUpIntegrationDuringIncarcerationAndRelease();
 testNarrowRestrictionsAcrossCareerBusinessAndAdoption();
 testPostReleaseOccupationRestoration();
+testMultiYearCrimeLockoutPermanentClosureAndReleaseEvents();
 console.log('crimeYear.test.ts passed all assertions');

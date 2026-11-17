@@ -183,6 +183,56 @@ export interface CrimeAttemptResult {
   message: string;
 }
 
+export interface PrisonSocialPenaltyGroup {
+  category:
+    | 'parents'
+    | 'siblings'
+    | 'children_older'
+    | 'children_young'
+    | 'colleagues'
+    | 'best_friends'
+    | 'friends'
+    | 'other_contacts';
+  label: string;
+  affectedCount: number;
+  intendedDelta: number;
+}
+
+export interface PrisonPartnerConsequenceSummary {
+  hadPartner: boolean;
+  partnerName?: string;
+  previousStage?: import('../../types/game').RomanticStage;
+  action: 'none' | 'damaged' | 'broke_up' | 'divorced';
+  relationshipDelta: number;
+  romanceDelta: number;
+  resultingRelationship?: number;
+  resultingRomanceMeter?: number;
+}
+
+export interface PrisonConsequencesSummary {
+  facilityName: string;
+  securityLevel: PrisonSecurityLevel;
+  sentenceYears: number;
+  paroleEligibleAtServed: number;
+  paroleEligibleAge: number;
+  releaseAge: number;
+  forfeitedProceeds: number;
+  fineImposed: number;
+  finePaid: number;
+  unpaidFineAdded: number;
+  attorneyFeePaid: number;
+  terminatedJobTitle: string | null;
+  closedBusinessName: string | null;
+  businessLiquidationProceeds: number;
+  partnerConsequence: PrisonPartnerConsequenceSummary;
+  socialConsequences: {
+    totalImpacted: number;
+    groups: PrisonSocialPenaltyGroup[];
+  };
+  happinessDelta: number;
+  restrictions: string[];
+}
+
 export interface CourtResolutionResult {
   ok: boolean;
   character: import('../../types/game').CharacterProfile;
@@ -197,6 +247,7 @@ export interface CourtResolutionResult {
   sentenceYears: number;
   probationYears: number;
   employmentTerminated: boolean;
+  prisonConsequences?: PrisonConsequencesSummary;
   message: string;
 }
 

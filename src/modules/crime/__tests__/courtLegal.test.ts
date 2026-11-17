@@ -1,8 +1,11 @@
 import type { CharacterProfile, PersonProfile } from '../../../types/game';
 import { calculatePlayerNetWorth } from '../../assets/services/assetService';
+import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService';
+import type { ActiveBusinessProfile } from '../../business/types';
 import { createInitialCareerState, progressCareerForYear } from '../../career/services/careerService';
 import { createInitialEducation } from '../../education/services/educationService';
 import {
+  applyCourtOutcome,
   determineCourtOutcome,
   expungeAdultRecord,
   mergeProbationState,
@@ -434,10 +437,10 @@ function testCounselCashGuardProceedsAndEmploymentSeparately() {
     'No civilian salary is awarded during incarceration',
   );
 
-  // Verify relationship updates on imprisonment and zero collateral mutation
+  // Verify new structured relationship consequences on felony imprisonment
   assert(
-    prisonRes.character.parents.father.relationship === 58,
-    'Living father dropped by -12 on imprisonment',
+    prisonRes.character.parents.father.relationship === 48,
+    'Living father dropped by -22 on imprisonment',
   );
   assert(
     prisonRes.character.parents.mother.relationship === 90,
@@ -445,25 +448,34 @@ function testCounselCashGuardProceedsAndEmploymentSeparately() {
   );
   const syncedPartner = prisonRes.character.relationships.find((r) => r.id === 'partner-legal');
   assert(
-    prisonRes.character.partner?.relationship === 60 && syncedPartner?.relationship === 60,
-    'Living partner & relationships[] copy both dropped -20 in sync',
+    prisonRes.character.partner === null &&
+      prisonRes.character.exPartners?.some(
+        (ex) =>
+          ex.id === 'partner-legal' &&
+          ex.relationship === 35 &&
+          ex.romanticStage === 'ex' &&
+          ex.romanceMeter === 0,
+      ) &&
+      syncedPartner?.relationship === 35 &&
+      syncedPartner?.romanticStage === 'ex',
+    'Felony imprisonment dissolves partner relationship (-45, romanceMeter 0) across partner, exPartners, and relationships[]',
   );
   assert(
-    prisonRes.character.siblings?.find((s) => s.id === 'sib-alive')?.relationship === 67,
-    'Living sibling dropped -8 on imprisonment',
+    prisonRes.character.siblings?.find((s) => s.id === 'sib-alive')?.relationship === 59,
+    'Living sibling dropped -16 on imprisonment',
   );
   assert(
     prisonRes.character.siblings?.find((s) => s.id === 'sib-dead')?.relationship === 85,
     'Deceased sibling untouched',
   );
   assert(
-    prisonRes.character.relationships.find((r) => r.id === 'rival-legal')?.relationship === 15,
-    'Unrelated rival NPC entry untouched',
+    prisonRes.character.relationships.find((r) => r.id === 'rival-legal')?.relationship === 0,
+    'Living other contact dropped -24 and clamped at 0',
   );
   assert(
-    prisonRes.character.exPartners?.[0].relationship === 40 &&
-      prisonRes.character.children?.[0].relationship === 92,
-    'Ex-partners and children untouched',
+    prisonRes.character.exPartners?.find((e) => e.id === 'ex-1')?.relationship === 40 &&
+      prisonRes.character.children?.[0].relationship === 84,
+    'Historical ex-partners untouched and young child (<5) dropped -8',
   );
 }
 
@@ -669,9 +681,375 @@ function testMalformedAndMissingCourtStateResilience() {
   assert(!payUnpaidFines(corruptedChar).ok, 'Zero/negative unpaidFines fails safely');
 }
 
+function testPrisonLiquidationDivorceSocialPriorityAndIdempotency() {
+  // 1. Business liquidation BEFORE fine settlement, attemptedPayout vs forfeitedProceeds,
+  //    automatic marriage divorce (-45, skip divorce fee/asset split, sync worldState), and idempotency.
+  const activeBusiness: ActiveBusinessProfile = {
+    id: 'biz-prison-1',
+    templateId: 'coffee_shop',
+    name: 'Metro Bean Roasters',
+    sector: 'food_hospitality',
+    icon: '☕',
+    foundedYear: 2022,
+    foundedAge: 22,
+    equityPct: 100,
+    treasury: 10000,
+    valuation: 50000, // salvage = 10000 + 50000*0.2 - 0 = $20,000
+    pricing: 'standard',
+    marketing: 'organic',
+    payroll: 'standard',
+    rnd: 'balanced',
+    ownerSalary: 24000,
+    dividendRatePct: 20,
+    morale: 80,
+    brandReputation: 70,
+    qualityScore: 75,
+    employeeCount: 4,
+    locationsCount: 1,
+    equipmentTier: 0,
+    hasAuditCompleted: false,
+    actionCooldowns: {},
+    outstandingLoan: 0,
+    annualLoanPayment: 0,
+    yearsInOperation: 2,
+    lifetimeRevenue: 120000,
+    lifetimeProfit: 20000,
+    isPubliclyTraded: false,
+  };
+
+  const spouse: PersonProfile = {
+    id: 'spouse-1',
+    firstName: 'Jordan',
+    lastName: 'Hayes',
+    gender: 'female',
+    age: 24,
+    role: 'Spouse',
+    relationshipType: 'spouse',
+    romanticStage: 'married',
+    relationship: 90,
+    romanceMeter: 85,
+    originStory: 'Wedding',
+    stageMet: 'adulthood',
+  };
+
+  const colleague: PersonProfile = {
+    id: 'colleague-1',
+    firstName: 'Sam',
+    lastName: 'Lin',
+    gender: 'male',
+    age: 28,
+    role: 'Colleague',
+    relationshipType: 'coworker',
+    cohortType: 'coworker',
+    relationship: 70,
+    originStory: 'Work',
+    stageMet: 'adulthood',
+  };
+  const duplicateFatherInSocial: PersonProfile = {
+    id: 'father-legal',
+    firstName: 'George',
+    lastName: 'Stone',
+    gender: 'male',
+    age: 56,
+    role: 'Friend',
+    relationshipType: 'friend',
+    relationship: 70,
+    originStory: 'Duplicate ref',
+    stageMet: 'childhood',
+  };
+  const bestFriend: PersonProfile = {
+    id: 'bf-1',
+    firstName: 'Riley',
+    lastName: 'Chen',
+    gender: 'female',
+    age: 24,
+    role: 'Best Friend',
+    relationshipType: 'best_friend',
+    cohortType: 'best_friend',
+    relationship: 82,
+    originStory: 'School',
+    stageMet: 'high_school',
+  };
+  const colleagueAlsoFriend: PersonProfile = {
+    id: 'colleague-1',
+    firstName: 'Sam',
+    lastName: 'Lin',
+    gender: 'male',
+    age: 28,
+    role: 'Friend',
+    relationshipType: 'friend',
+    cohortType: 'friend',
+    relationship: 70,
+    originStory: 'Duplicate friend copy of colleague',
+    stageMet: 'adulthood',
+  };
+  const ordinaryFriend: PersonProfile = {
+    id: 'friend-1',
+    firstName: 'Morgan',
+    lastName: 'Diaz',
+    gender: 'male',
+    age: 25,
+    role: 'Friend',
+    relationshipType: 'friend',
+    cohortType: 'friend',
+    relationship: 60,
+    originStory: 'Neighborhood',
+    stageMet: 'adulthood',
+  };
+
+  const heistCase = makePendingCase({
+    id: 'bank-heist-case-1',
+    crimeId: 'bank_heist',
+    title: 'Bank Heist',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    executionSucceeded: true,
+    attemptedPayout: 40000,
+    baseFine: 8000, // 0.6 * 8000 = $4800 prison fine
+    baseSentenceYears: 2,
+  });
+
+  const baseEntrepreneur = migrateToCanonicalWorldState(
+    createLegalTestCharacter({
+      cash: 100, // insufficient before business liquidation, plenty AFTER $20,000 liquidation!
+      bankBalance: 5000,
+      occupation: 'Founder & CEO (Metro Bean Roasters)',
+      business: activeBusiness,
+      partner: spouse,
+      exPartners: [],
+      children: [
+        {
+          id: 'child-older',
+          firstName: 'Aria',
+          lastName: 'Stone',
+          age: 7,
+          gender: 'female',
+          relationship: 90,
+          smarts: 80,
+          looks: 80,
+          happiness: 85,
+          health: 90,
+          isAdopted: false,
+          occupation: 'Elementary Student',
+          isAlive: true,
+        },
+        {
+          id: 'child-young',
+          firstName: 'Theo',
+          lastName: 'Stone',
+          age: 2,
+          gender: 'male',
+          relationship: 90,
+          smarts: 70,
+          looks: 75,
+          happiness: 85,
+          health: 90,
+          isAdopted: false,
+          occupation: 'Toddler',
+          isAlive: true,
+        },
+      ],
+      relationships: [
+        spouse,
+        duplicateFatherInSocial,
+        colleague,
+        colleagueAlsoFriend,
+        bestFriend,
+        ordinaryFriend,
+      ],
+      crime: {
+        ...createEmptyCrimeState(),
+        pendingCase: heistCase,
+      },
+    }),
+  );
+
+  const prisonRes = applyCourtOutcome(baseEntrepreneur, heistCase, 'public_defender', 'imprisoned');
+  assert(prisonRes.ok && prisonRes.prisonConsequences, 'Returns PrisonConsequencesSummary');
+  const pc = prisonRes.prisonConsequences;
+  assert(
+    pc.closedBusinessName === 'Metro Bean Roasters' && pc.businessLiquidationProceeds === 20000,
+    'Captures actual closed business name and $20,000 liquidation salvage proceeds',
+  );
+  assert(prisonRes.character.business === null, 'Active business cleared upon imprisonment');
+  assert(
+    prisonRes.character.occupation === 'Incarcerated',
+    'Forced liquidation keeps Incarcerated occupation rather than Unemployed',
+  );
+  // $100 starting cash + $20,000 liquidation - $4,800 fine = $15,300 (fine fully paid using liquidation proceeds!)
+  assert(
+    prisonRes.fineImposed === 4800 &&
+      prisonRes.finePaid === 4800 &&
+      prisonRes.unpaidFineAdded === 0 &&
+      prisonRes.character.cash === 15300,
+    `Liquidation proceeds paid full fine once cleanly (cash=${prisonRes.character.cash}, unpaid=${prisonRes.unpaidFineAdded})`,
+  );
+  assert(
+    pc.forfeitedProceeds === 40000 &&
+      prisonRes.character.netWorth === calculatePlayerNetWorth(prisonRes.character),
+    'Captures forfeited proceeds and stamps exact net worth once',
+  );
+
+  // Partner automatic divorce without double happiness/fee charges
+  assert(
+    prisonRes.character.partner === null &&
+      prisonRes.character.exPartners?.length === 1 &&
+      prisonRes.character.exPartners[0].role === 'Ex-Spouse' &&
+      prisonRes.character.exPartners[0].romanticStage === 'ex' &&
+      prisonRes.character.exPartners[0].relationship === 45 &&
+      prisonRes.character.exPartners[0].romanceMeter === 0 &&
+      prisonRes.character.relationships.find((r) => r.id === 'spouse-1')?.romanticStage === 'ex',
+    '2+ year felony divorce clears partner, applies -45 rel and 0 romanceMeter, skips asset split, syncs exPartners/relationships[]',
+  );
+  assert(
+    prisonRes.character.stats.happiness === 75 - 18,
+    'Applies only court happiness -18 without double-subtracting divorce -30 happiness',
+  );
+
+  // WorldState synchronization
+  const worldSpouseEdge = Object.values(prisonRes.character.worldState!.relationshipsById).find(
+    (e) => e.participantAId === 'spouse-1' || e.participantBId === 'spouse-1',
+  );
+  assert(
+    worldSpouseEdge?.category === 'ex' && worldSpouseEdge.status === 'former',
+    'worldState edge immediately synchronized to ex/former after divorce',
+  );
+
+  // Deduplication priority verification (father stays Parents -22 = 48, colleague stays Colleagues -30 = 40 across copies)
+  assert(
+    prisonRes.character.parents.father.relationship === 48 &&
+      prisonRes.character.relationships.find((r) => r.id === 'father-legal')?.relationship === 48,
+    'Father penalized ONCE (-22) as Parent and mirrored identically to relationships[]',
+  );
+  assert(
+    prisonRes.character.children?.find((c) => c.id === 'child-older')?.relationship === 78 &&
+      prisonRes.character.children?.find((c) => c.id === 'child-young')?.relationship === 82,
+    'Children penalized by age tier (>=5: -12, <5: -8)',
+  );
+  assert(
+    prisonRes.character.relationships
+      .filter((r) => r.id === 'colleague-1')
+      .every((r) => r.relationship === 40) &&
+      prisonRes.character.relationships.find((r) => r.id === 'bf-1')?.relationship === 64 &&
+      prisonRes.character.relationships.find((r) => r.id === 'friend-1')?.relationship === 38,
+    'Colleagues -30 mirrored across duplicate IDs, Best Friend -18, Friend -22',
+  );
+  const parentGroup = pc.socialConsequences.groups.find((g) => g.category === 'parents');
+  const friendGroup = pc.socialConsequences.groups.find((g) => g.category === 'friends');
+  assert(
+    parentGroup?.affectedCount === 1 && friendGroup?.affectedCount === 1,
+    'Counts each unique living NPC strictly once under winning priority group',
+  );
+
+  // Idempotency: re-applying finalized case returns ok: false with no mutations
+  const duplicateCall = applyCourtOutcome(prisonRes.character, heistCase, 'public_defender', 'imprisoned');
+  assert(
+    !duplicateCall.ok && duplicateCall.character === prisonRes.character,
+    'Idempotency guard rejects duplicate finalization on already-recorded case',
+  );
+
+  // 2. Failed-execution arrest must report $0 forfeited proceeds
+  const failedArrestCase = makePendingCase({
+    id: 'failed-heist-case',
+    crimeId: 'bank_heist',
+    title: 'Bank Heist',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    executionSucceeded: false,
+    attemptedPayout: 35000,
+    baseSentenceYears: 2,
+  });
+  const failedHeistRes = applyCourtOutcome(
+    createLegalTestCharacter({ cash: 1000, business: null, partner: null }),
+    failedArrestCase,
+    'public_defender',
+    'imprisoned',
+  );
+  assert(
+    failedHeistRes.prisonConsequences?.forfeitedProceeds === 0,
+    'Failed execution reports $0 forfeited criminal proceeds even when attemptedPayout > 0',
+  );
+
+  // 3. 1-year misdemeanor partner rules: survives at >= 35 (-50/-50), divorces without extra -45 if < 35
+  const misdCase = makePendingCase({
+    id: 'misd-1yr-case',
+    crimeId: 'shoplifting',
+    title: 'Shoplifting',
+    tier: 'petty',
+    offenseClass: 'misdemeanor',
+    baseFine: 100,
+    baseSentenceYears: 1,
+  });
+  const highBondSpouse = { ...spouse, relationship: 90, romanceMeter: 80 };
+  const survivedChar = createLegalTestCharacter({
+    partner: highBondSpouse,
+    relationships: [highBondSpouse],
+    exPartners: [],
+    business: null,
+  });
+  const survivedRes = applyCourtOutcome(survivedChar, misdCase, 'public_defender', 'imprisoned');
+  assert(
+    survivedRes.character.partner?.relationship === 40 &&
+      survivedRes.character.partner?.romanceMeter === 30 &&
+      survivedRes.character.partner?.romanticStage === 'married' &&
+      survivedRes.prisonConsequences?.partnerConsequence.action === 'damaged' &&
+      !survivedRes.prisonConsequences?.socialConsequences.groups.some(
+        (g) => g.category === 'other_contacts' && g.affectedCount > 0,
+      ),
+    '1-yr misdemeanor: 90 - 50 = 40 (>= 35) retains marriage with -50 rel/-50 romance and excludes partner from social sweep',
+  );
+
+  const lowBondSpouse = { ...spouse, relationship: 70, romanceMeter: 60 }; // 70 - 50 = 20 < 35
+  const lowBondChar = createLegalTestCharacter({
+    partner: lowBondSpouse,
+    relationships: [lowBondSpouse],
+    exPartners: [],
+    business: null,
+  });
+  const misdDivorceRes = applyCourtOutcome(lowBondChar, misdCase, 'public_defender', 'imprisoned');
+  assert(
+    misdDivorceRes.character.partner === null &&
+      misdDivorceRes.character.exPartners?.[0].relationship === 20 &&
+      misdDivorceRes.character.exPartners?.[0].romanceMeter === 0 &&
+      misdDivorceRes.prisonConsequences?.partnerConsequence.action === 'divorced',
+    '1-yr misdemeanor: 70 - 50 = 20 (< 35) dissolves marriage with exact -50 penalty and zero extra -45 hit',
+  );
+
+  // Unmarried dating partner on 1-yr misdemeanor (< 35 breaks up without extra -45)
+  const lowBondDating: PersonProfile = {
+    ...spouse,
+    id: 'dating-1',
+    role: 'Partner',
+    relationshipType: 'dating',
+    romanticStage: 'dating',
+    relationship: 65, // 65 - 50 = 15 < 35
+    romanceMeter: 70,
+  };
+  const datingMisdRes = applyCourtOutcome(
+    createLegalTestCharacter({
+      partner: lowBondDating,
+      relationships: [lowBondDating],
+      exPartners: [],
+      business: null,
+    }),
+    misdCase,
+    'public_defender',
+    'imprisoned',
+  );
+  assert(
+    datingMisdRes.character.partner === null &&
+      datingMisdRes.character.exPartners?.[0].relationship === 15 &&
+      datingMisdRes.character.exPartners?.[0].romanticStage === 'ex' &&
+      datingMisdRes.character.exPartners?.[0].romanceMeter === 0 &&
+      datingMisdRes.prisonConsequences?.partnerConsequence.action === 'broke_up',
+    '1-yr misdemeanor: unmarried dating partner below 35 breaks up cleanly with exact -50 penalty and 0 romanceMeter',
+  );
+}
+
 testJuvenileCourtOutcomesAndBoundaries();
 testCounselCashGuardProceedsAndEmploymentSeparately();
 testProbationMergeAndJuvenileJurisdictionPreservation();
 testAdultExpungementWaitingPeriodsAndEligibility();
 testMalformedAndMissingCourtStateResilience();
+testPrisonLiquidationDivorceSocialPriorityAndIdempotency();
 console.log('courtLegal.test.ts passed all assertions');

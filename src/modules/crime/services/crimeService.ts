@@ -4,9 +4,12 @@ import type {
   PersonProfile,
   StatEffects,
 } from '../../../types/game';
-import { deterministicUUID, hashSeed, SeededPRNG } from '../../autonomy/services/seededPrngService';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
+import { liquidateBusinessForImprisonment } from '../../business/services/businessService';
 import type { CareerHistoryEntry } from '../../career/types';
 import { applyEffects } from '../../character/services/statService';
+import { divorceService } from '../../romance/services/divorceService';
+import { romanceService } from '../../romance/services/romanceService';
 import { getCrimeTemplate, isValidCrimeId } from '../data/crimeCatalog';
 import {
   getAttorneyFeeForCase,
@@ -25,10 +28,14 @@ import type {
   FinePaymentResult,
   LegalJurisdiction,
   PendingCourtCase,
+  PrisonConsequencesSummary,
+  PrisonPartnerConsequenceSummary,
+  PrisonSocialPenaltyGroup,
   PrisonState,
   ProbationState,
 } from '../types';
 import { CRIME_SIM_VERSION, evaluateCrimeAttempt } from './crimeRiskService';
+import { deterministicUUID, hashSeed, SeededPRNG } from '../../autonomy/services/seededPrngService';
 import {
   getActiveAdultConvictions,
   getExpungementEligibleRecords,
@@ -115,6 +122,643 @@ function applyCrimeRelationshipConsequences(
       siblings: updatedSiblings,
     },
     statEffects: parentEffects,
+  };
+}
+
+function getNpcDedupKey(
+  person: { id?: string | null; firstName?: string; lastName?: string },
+  fallbackPrefix: string,
+): string {
+  const id = typeof person.id === 'string' ? person.id.trim() : '';
+  if (id.length > 0) return id;
+  const first = (person.firstName || '').trim().toLowerCase();
+  const last = (person.lastName || '').trim().toLowerCase();
+  return `${fallbackPrefix}:${first}:${last}`;
+}
+
+function syncPartnerIntoRelationships(
+  relationships: PersonProfile[] | undefined,
+  partnerId: string,
+  partnerKey: string,
+  updatedRecord: PersonProfile,
+): PersonProfile[] {
+  if (!Array.isArray(relationships)) return [];
+  return relationships.map((person) => {
+    const personKey = getNpcDedupKey(person, 'rel');
+    return person.id === partnerId || personKey === partnerKey ? updatedRecord : person;
+  });
+}
+
+function applyImprisonmentPartnerConsequence(
+  character: CharacterProfile,
+  sentenceYears: number,
+  isFelony: boolean,
+): {
+  character: CharacterProfile;
+  excludedPartnerId: string | null;
+  excludedPartnerKey: string | null;
+  summary: PrisonPartnerConsequenceSummary;
+} {
+  const partner = character.partner;
+  if (!partner || partner.romanticStage === 'widowed') {
+    return {
+      character,
+      excludedPartnerId: null,
+      excludedPartnerKey: null,
+      summary: {
+        hadPartner: false,
+        action: 'none',
+        relationshipDelta: 0,
+        romanceDelta: 0,
+      },
+    };
+  }
+
+  const partnerId = partner.id;
+  const partnerKey = getNpcDedupKey(partner, 'partner');
+  const partnerName = `${partner.firstName} ${partner.lastName}`.trim();
+  const previousStage = partner.romanticStage;
+  const isMarried = partner.romanticStage === 'married' || partner.relationshipType === 'spouse';
+  const beforeRel = partner.relationship;
+  const beforeRomance = partner.romanceMeter ?? 50;
+  const isOneYearMisdemeanor = sentenceYears === 1 && !isFelony;
+
+  if (isOneYearMisdemeanor) {
+    const nextRel = clamp0to100(beforeRel - 50);
+    const nextRomance = clamp0to100(beforeRomance - 50);
+
+    if (nextRel < 35) {
+      const penalizedPartner: PersonProfile = {
+        ...partner,
+        relationship: nextRel,
+        romanceMeter: nextRomance,
+      };
+
+      if (isMarried) {
+        const divorced = divorceService.executeDivorce(character, penalizedPartner, 'standard', {
+          skipFeesAndAssetSplit: true,
+          happinessDelta: 0,
+          relationshipDelta: 0,
+          timelineTitle: 'Marriage Ended Upon Imprisonment',
+          timelineMessage: `Your prison sentence strained your marriage past the breaking point, and ${partnerName} filed for divorce.`,
+        });
+        const syncedRelationships = syncPartnerIntoRelationships(
+          divorced.updatedCharacter.relationships,
+          partnerId,
+          partnerKey,
+          divorced.updatedSpouse,
+        );
+        return {
+          character: {
+            ...divorced.updatedCharacter,
+            relationships: syncedRelationships,
+          },
+          excludedPartnerId: partnerId,
+          excludedPartnerKey: partnerKey,
+          summary: {
+            hadPartner: true,
+            partnerName,
+            previousStage,
+            action: 'divorced',
+            relationshipDelta: nextRel - beforeRel,
+            romanceDelta: -beforeRomance,
+            resultingRelationship: divorced.updatedSpouse.relationship,
+            resultingRomanceMeter: 0,
+          },
+        };
+      }
+
+      const breakup = romanceService.executeBreakup(character, penalizedPartner, {
+        relationshipDelta: 0,
+        happinessDelta: 0,
+        message: `${partnerName} ended your relationship after you were sentenced to prison.`,
+      });
+      const existingEx = character.exPartners || [];
+      const existingIdx = existingEx.findIndex(
+        (ex) => ex.id === breakup.updatedTarget.id || getNpcDedupKey(ex, 'ex') === partnerKey,
+      );
+      const nextExPartners =
+        existingIdx >= 0
+          ? existingEx.map((ex, idx) => (idx === existingIdx ? breakup.updatedTarget : ex))
+          : [...existingEx, breakup.updatedTarget];
+      const nextRelationships = syncPartnerIntoRelationships(
+        character.relationships,
+        partnerId,
+        partnerKey,
+        breakup.updatedTarget,
+      );
+      const breakupEvent: LifeEvent = {
+        id: `${character.id}-prison-breakup-${character.age}-${partnerId}`,
+        age: character.age,
+        year: character.birthYear + character.age,
+        title: 'Relationship Ended Upon Imprisonment',
+        message: breakup.result.message,
+        category: 'relationship',
+        icon: '💔',
+      };
+      return {
+        character: stampPlayerNetWorth({
+          ...character,
+          partner: null,
+          exPartners: nextExPartners,
+          relationships: nextRelationships,
+          timeline: [...character.timeline, breakupEvent],
+        }),
+        excludedPartnerId: partnerId,
+        excludedPartnerKey: partnerKey,
+        summary: {
+          hadPartner: true,
+          partnerName,
+          previousStage,
+          action: 'broke_up',
+          relationshipDelta: nextRel - beforeRel,
+          romanceDelta: -beforeRomance,
+          resultingRelationship: breakup.updatedTarget.relationship,
+          resultingRomanceMeter: 0,
+        },
+      };
+    }
+
+    // 1-year misdemeanor relationship survived (>= 35)
+    const damagedPartner: PersonProfile = {
+      ...partner,
+      relationship: nextRel,
+      romanceMeter: nextRomance,
+    };
+    return {
+      character: {
+        ...character,
+        partner: damagedPartner,
+        relationships: syncPartnerIntoRelationships(
+          character.relationships,
+          partnerId,
+          partnerKey,
+          damagedPartner,
+        ),
+      },
+      excludedPartnerId: partnerId,
+      excludedPartnerKey: partnerKey,
+      summary: {
+        hadPartner: true,
+        partnerName,
+        previousStage,
+        action: 'damaged',
+        relationshipDelta: nextRel - beforeRel,
+        romanceDelta: nextRomance - beforeRomance,
+        resultingRelationship: nextRel,
+        resultingRomanceMeter: nextRomance,
+      },
+    };
+  }
+
+  // 2+ years or any felony -> automatic divorce / breakup (-45 relationship penalty via DivorceService/breakup)
+  if (isMarried) {
+    const divorced = divorceService.executeDivorce(character, partner, 'standard', {
+      skipFeesAndAssetSplit: true,
+      happinessDelta: 0,
+      relationshipDelta: -45,
+      timelineTitle: 'Marriage Ended Upon Imprisonment',
+      timelineMessage: `Following your prison sentence, ${partnerName} divorced you and severed marital ties.`,
+    });
+    const syncedRelationships = syncPartnerIntoRelationships(
+      divorced.updatedCharacter.relationships,
+      partnerId,
+      partnerKey,
+      divorced.updatedSpouse,
+    );
+    return {
+      character: {
+        ...divorced.updatedCharacter,
+        relationships: syncedRelationships,
+      },
+      excludedPartnerId: partnerId,
+      excludedPartnerKey: partnerKey,
+      summary: {
+        hadPartner: true,
+        partnerName,
+        previousStage,
+        action: 'divorced',
+        relationshipDelta: divorced.updatedSpouse.relationship - beforeRel,
+        romanceDelta: -beforeRomance,
+        resultingRelationship: divorced.updatedSpouse.relationship,
+        resultingRomanceMeter: 0,
+      },
+    };
+  }
+
+  const breakup = romanceService.executeBreakup(character, partner, {
+    relationshipDelta: -45,
+    happinessDelta: 0,
+    message: `Following your prison sentence, ${partnerName} ended the relationship.`,
+  });
+  const existingEx = character.exPartners || [];
+  const existingIdx = existingEx.findIndex(
+    (ex) => ex.id === breakup.updatedTarget.id || getNpcDedupKey(ex, 'ex') === partnerKey,
+  );
+  const nextExPartners =
+    existingIdx >= 0
+      ? existingEx.map((ex, idx) => (idx === existingIdx ? breakup.updatedTarget : ex))
+      : [...existingEx, breakup.updatedTarget];
+  const nextRelationships = syncPartnerIntoRelationships(
+    character.relationships,
+    partnerId,
+    partnerKey,
+    breakup.updatedTarget,
+  );
+  const breakupEvent: LifeEvent = {
+    id: `${character.id}-prison-breakup-${character.age}-${partnerId}`,
+    age: character.age,
+    year: character.birthYear + character.age,
+    title: 'Relationship Ended Upon Imprisonment',
+    message: breakup.result.message,
+    category: 'relationship',
+    icon: '💔',
+  };
+  return {
+    character: stampPlayerNetWorth({
+      ...character,
+      partner: null,
+      exPartners: nextExPartners,
+      relationships: nextRelationships,
+      timeline: [...character.timeline, breakupEvent],
+    }),
+    excludedPartnerId: partnerId,
+    excludedPartnerKey: partnerKey,
+    summary: {
+      hadPartner: true,
+      partnerName,
+      previousStage,
+      action: 'broke_up',
+      relationshipDelta: breakup.updatedTarget.relationship - beforeRel,
+      romanceDelta: -beforeRomance,
+      resultingRelationship: breakup.updatedTarget.relationship,
+      resultingRomanceMeter: 0,
+    },
+  };
+}
+
+interface SocialWinnerEntry {
+  category: PrisonSocialPenaltyGroup['category'];
+  label: string;
+  intendedDelta: number;
+  rank: number;
+  newRelationship: number;
+}
+
+const SOCIAL_CATEGORY_ORDER: PrisonSocialPenaltyGroup['category'][] = [
+  'parents',
+  'siblings',
+  'children_older',
+  'children_young',
+  'colleagues',
+  'best_friends',
+  'friends',
+  'other_contacts',
+];
+
+function classifyGeneralRelationshipEntry(person: PersonProfile): {
+  category: PrisonSocialPenaltyGroup['category'];
+  label: string;
+  intendedDelta: number;
+  rank: number;
+} {
+  const roleLower = (person.role || '').toLowerCase();
+  if (
+    person.relationshipType === 'coworker' ||
+    person.cohortType === 'coworker' ||
+    roleLower.includes('coworker') ||
+    roleLower.includes('colleague')
+  ) {
+    return {
+      category: 'colleagues',
+      label: 'Colleagues & Coworkers',
+      intendedDelta: -30,
+      rank: 5,
+    };
+  }
+  if (
+    person.relationshipType === 'best_friend' ||
+    person.cohortType === 'best_friend' ||
+    roleLower.includes('best friend') ||
+    roleLower.includes('close friend')
+  ) {
+    return {
+      category: 'best_friends',
+      label: 'Best Friends',
+      intendedDelta: -18,
+      rank: 6,
+    };
+  }
+  if (
+    person.relationshipType === 'friend' ||
+    person.cohortType === 'friend' ||
+    roleLower === 'friend'
+  ) {
+    return {
+      category: 'friends',
+      label: 'Friends',
+      intendedDelta: -22,
+      rank: 7,
+    };
+  }
+  return {
+    category: 'other_contacts',
+    label: 'Acquaintances & Other Contacts',
+    intendedDelta: -24,
+    rank: 8,
+  };
+}
+
+function applyImprisonmentSocialConsequences(
+  character: CharacterProfile,
+  excludedPartnerId: string | null,
+  excludedPartnerKey: string | null,
+): {
+  character: CharacterProfile;
+  totalImpacted: number;
+  groups: PrisonSocialPenaltyGroup[];
+} {
+  const winnerByKey = new Map<string, SocialWinnerEntry>();
+
+  const isExcludedPartner = (key: string, id?: string): boolean =>
+    (excludedPartnerId !== null && id === excludedPartnerId) ||
+    (excludedPartnerKey !== null && key === excludedPartnerKey);
+
+  // Priority 1: Parents (-22)
+  const fatherKey = getNpcDedupKey(character.parents.father, 'father');
+  if (character.parents.father.isAlive && !isExcludedPartner(fatherKey, character.parents.father.id)) {
+    winnerByKey.set(fatherKey, {
+      category: 'parents',
+      label: 'Parents',
+      intendedDelta: -22,
+      rank: 1,
+      newRelationship: clamp0to100(character.parents.father.relationship - 22),
+    });
+  }
+
+  const motherKey = getNpcDedupKey(character.parents.mother, 'mother');
+  if (
+    character.parents.mother.isAlive &&
+    !winnerByKey.has(motherKey) &&
+    !isExcludedPartner(motherKey, character.parents.mother.id)
+  ) {
+    winnerByKey.set(motherKey, {
+      category: 'parents',
+      label: 'Parents',
+      intendedDelta: -22,
+      rank: 1,
+      newRelationship: clamp0to100(character.parents.mother.relationship - 22),
+    });
+  }
+
+  // Priority 2: Siblings (-16)
+  for (const sib of character.siblings || []) {
+    if (!sib.isAlive) continue;
+    const key = getNpcDedupKey(sib, 'sibling');
+    if (isExcludedPartner(key, sib.id) || winnerByKey.has(key)) continue;
+    winnerByKey.set(key, {
+      category: 'siblings',
+      label: 'Siblings',
+      intendedDelta: -16,
+      rank: 2,
+      newRelationship: clamp0to100(sib.relationship - 16),
+    });
+  }
+
+  // Priority 3: Children (age >= 5 -> -12, age < 5 -> -8)
+  for (const child of character.children || []) {
+    if (!child.isAlive) continue;
+    const key = getNpcDedupKey(child, 'child');
+    if (isExcludedPartner(key, child.id) || winnerByKey.has(key)) continue;
+    const isOlder = child.age >= 5;
+    const delta = isOlder ? -12 : -8;
+    winnerByKey.set(key, {
+      category: isOlder ? 'children_older' : 'children_young',
+      label: isOlder ? 'Children (Age 5+)' : 'Young Children (<5)',
+      intendedDelta: delta,
+      rank: 3,
+      newRelationship: clamp0to100(child.relationship + delta),
+    });
+  }
+
+  const worldNpcRegistry = character.worldState?.npcRegistry;
+  const isGeneralContactDeceased = (person: PersonProfile): boolean => {
+    const inlineAlive = (person as PersonProfile & { isAlive?: boolean }).isAlive;
+    if (inlineAlive === false) return true;
+    if (person.id && worldNpcRegistry?.[person.id]?.isAlive === false) return true;
+    return false;
+  };
+
+  // Priorities 5-8: relationships[] (Colleagues -> Best Friends -> Friends -> Other Contacts)
+  for (const person of character.relationships || []) {
+    if (!person || isGeneralContactDeceased(person)) continue;
+    if (
+      person.romanticStage === 'widowed' ||
+      person.relationshipType === 'ex' ||
+      person.romanticStage === 'ex'
+    ) {
+      continue;
+    }
+    const key = getNpcDedupKey(person, 'rel');
+    if (isExcludedPartner(key, person.id)) continue;
+
+    const spec = classifyGeneralRelationshipEntry(person);
+    const existing = winnerByKey.get(key);
+    if (existing) {
+      // Ranks 1-3 strictly win; between 5-8, smaller rank number wins.
+      if (existing.rank <= 4 || spec.rank >= existing.rank) {
+        continue;
+      }
+    }
+
+    winnerByKey.set(key, {
+      ...spec,
+      newRelationship: clamp0to100(person.relationship + spec.intendedDelta),
+    });
+  }
+
+  // Pass 2: Synchronize final clamped relationship values across all mirrored records
+  const updatedFather =
+    character.parents.father.isAlive && winnerByKey.has(fatherKey)
+      ? {
+          ...character.parents.father,
+          relationship: winnerByKey.get(fatherKey)!.newRelationship,
+        }
+      : character.parents.father;
+
+  const updatedMother =
+    character.parents.mother.isAlive && winnerByKey.has(motherKey)
+      ? {
+          ...character.parents.mother,
+          relationship: winnerByKey.get(motherKey)!.newRelationship,
+        }
+      : character.parents.mother;
+
+  const updatedSiblings = Array.isArray(character.siblings)
+    ? character.siblings.map((sib) => {
+        if (!sib.isAlive) return sib;
+        const win = winnerByKey.get(getNpcDedupKey(sib, 'sibling'));
+        return win ? { ...sib, relationship: win.newRelationship } : sib;
+      })
+    : character.siblings;
+
+  const updatedChildren = Array.isArray(character.children)
+    ? character.children.map((child) => {
+        if (!child.isAlive) return child;
+        const win = winnerByKey.get(getNpcDedupKey(child, 'child'));
+        return win ? { ...child, relationship: win.newRelationship } : child;
+      })
+    : character.children;
+
+  const updatedRelationships = Array.isArray(character.relationships)
+    ? character.relationships.map((person) => {
+        if (!person || isGeneralContactDeceased(person)) return person;
+        if (
+          person.romanticStage === 'widowed' ||
+          person.relationshipType === 'ex' ||
+          person.romanticStage === 'ex'
+        ) {
+          return person;
+        }
+        const key = getNpcDedupKey(person, 'rel');
+        if (isExcludedPartner(key, person.id)) return person;
+        const win = winnerByKey.get(key);
+        return win ? { ...person, relationship: win.newRelationship } : person;
+      })
+    : character.relationships;
+
+  const grouped = new Map<PrisonSocialPenaltyGroup['category'], PrisonSocialPenaltyGroup>();
+  for (const winner of winnerByKey.values()) {
+    const existing = grouped.get(winner.category);
+    if (existing) {
+      existing.affectedCount += 1;
+    } else {
+      grouped.set(winner.category, {
+        category: winner.category,
+        label: winner.label,
+        affectedCount: 1,
+        intendedDelta: winner.intendedDelta,
+      });
+    }
+  }
+
+  const orderedGroups = SOCIAL_CATEGORY_ORDER.map((cat) => grouped.get(cat)).filter(
+    (entry): entry is PrisonSocialPenaltyGroup => Boolean(entry),
+  );
+
+  return {
+    character: {
+      ...character,
+      parents: {
+        ...character.parents,
+        father: updatedFather,
+        mother: updatedMother,
+      },
+      siblings: updatedSiblings,
+      children: updatedChildren,
+      relationships: updatedRelationships,
+    },
+    totalImpacted: winnerByKey.size,
+    groups: orderedGroups,
+  };
+}
+
+function syncImprisonmentToWorldState(character: CharacterProfile): CharacterProfile {
+  const world = character.worldState;
+  if (!world || world.schemaVersion !== 2) return character;
+
+  const relationshipsById = { ...world.relationshipsById };
+  const npcRegistry = { ...world.npcRegistry };
+
+  const exPartnerById = new Map<string, PersonProfile>();
+  for (const ex of character.exPartners || []) {
+    if (ex.id) exPartnerById.set(ex.id, ex);
+  }
+
+  const activePartner = character.partner && character.partner.id ? character.partner : null;
+  const relById = new Map<string, number>();
+
+  if (character.parents.father.id) {
+    relById.set(character.parents.father.id, character.parents.father.relationship);
+  }
+  if (character.parents.mother.id) {
+    relById.set(character.parents.mother.id, character.parents.mother.relationship);
+  }
+  for (const sib of character.siblings || []) {
+    if (sib.id) relById.set(sib.id, sib.relationship);
+  }
+  for (const child of character.children || []) {
+    if (child.id) relById.set(child.id, child.relationship);
+  }
+  for (const person of character.relationships || []) {
+    if (person?.id) relById.set(person.id, person.relationship);
+  }
+
+  for (const [edgeId, edge] of Object.entries(relationshipsById)) {
+    if (edge.participantAId !== character.id && edge.participantBId !== character.id) continue;
+    const otherId = edge.participantAId === character.id ? edge.participantBId : edge.participantAId;
+
+    const exMatch = exPartnerById.get(otherId);
+    if (
+      exMatch &&
+      edge.category !== 'parent_child' &&
+      edge.category !== 'sibling'
+    ) {
+      const clampedRel = clamp0to100(exMatch.relationship);
+      relationshipsById[edgeId] = {
+        ...edge,
+        category: 'ex',
+        roleForA: 'ex',
+        roleForB: 'ex',
+        status: 'former',
+        trust: clampedRel,
+        affection: clampedRel,
+        respect: clampedRel,
+        romance: 0,
+      };
+      if (npcRegistry[otherId]) {
+        npcRegistry[otherId] = {
+          ...npcRegistry[otherId],
+          romanticStage: 'ex',
+          legacyRoleLabel: exMatch.role,
+          legacyRelationshipType: 'ex',
+        };
+      }
+      continue;
+    }
+
+    if (activePartner && activePartner.id === otherId) {
+      const clampedRel = clamp0to100(activePartner.relationship);
+      const clampedRomance = clamp0to100(activePartner.romanceMeter ?? edge.romance);
+      relationshipsById[edgeId] = {
+        ...edge,
+        trust: clampedRel,
+        affection: clampedRel,
+        respect: clampedRel,
+        romance: clampedRomance,
+      };
+      continue;
+    }
+
+    const updatedRel = relById.get(otherId);
+    if (updatedRel !== undefined) {
+      const clampedRel = clamp0to100(updatedRel);
+      relationshipsById[edgeId] = {
+        ...edge,
+        trust: clampedRel,
+        affection: clampedRel,
+        respect: clampedRel,
+      };
+    }
+  }
+
+  return {
+    ...character,
+    worldState: {
+      ...world,
+      npcRegistry,
+      relationshipsById,
+    },
   };
 }
 
@@ -580,6 +1224,23 @@ export function applyCourtOutcome(
   const attorneyFee = getAttorneyFeeForCase(strategyId, pendingCase.tier);
   const isJuvenile = pendingCase.jurisdiction === 'juvenile';
 
+  if (sanitized.records.some((r) => r.id === pendingCase.id)) {
+    return {
+      ok: false,
+      character,
+      reason: 'Court case has already been finalized.',
+      releasedPayout: 0,
+      fineImposed: 0,
+      finePaid: 0,
+      unpaidFineAdded: 0,
+      attorneyFeePaid: 0,
+      sentenceYears: 0,
+      probationYears: 0,
+      employmentTerminated: false,
+      message: 'Court case has already been finalized.',
+    };
+  }
+
   // Enforce strict jurisdiction boundary on outcome status.
   let outcome = rawOutcome;
   if (isJuvenile && outcome === 'imprisoned') {
@@ -606,6 +1267,10 @@ export function applyCourtOutcome(
   let sentenceYears = 0;
   let probationYears = 0;
   let employmentTerminated = false;
+  let terminatedJobTitle: string | null = null;
+  let closedBusinessName: string | null = null;
+  let businessLiquidationProceeds = 0;
+  let forfeitedProceeds = 0;
   let nextPrison: PrisonState | null = sanitized.prison;
   let nextProbation: ProbationState | null = sanitized.probation;
   let relSpec: RelationshipDeltaSpec = { parents: 0, partner: 0, siblings: 0 };
@@ -708,13 +1373,9 @@ export function applyCourtOutcome(
         1,
         Math.round(Math.max(1, pendingCase.baseSentenceYears) * strategy.sentenceMultiplier),
       );
-      const prisonFineRaw = Math.round(baseRawFine * 0.6);
-      fineImposed = prisonFineRaw;
-      finePaid = Math.min(availableCash, fineImposed);
-      unpaidFineAdded = fineImposed - finePaid;
-      if (finePaid > 0) {
-        extraStatEffects.cash = -finePaid;
-      }
+      forfeitedProceeds = pendingCase.executionSucceeded
+        ? Math.max(0, pendingCase.attemptedPayout)
+        : 0;
 
       const priorAdultPrisonCount = sanitized.records.filter(
         (r) => r.jurisdiction === 'adult' && r.outcome === 'imprisoned',
@@ -749,12 +1410,32 @@ export function applyCourtOutcome(
         priorRetirementOccupation,
       };
 
+      // 1. Terminate active civilian job
       const careerResult = terminateCivilianCareerForPrison(workingChar);
       workingChar = careerResult.character;
       employmentTerminated = careerResult.terminated;
+      terminatedJobTitle = careerResult.terminatedJobTitle ?? null;
+
+      // 2-3. Liquidate active business & credit salvage proceeds before fine settlement
+      const liquidationResult = liquidateBusinessForImprisonment(workingChar);
+      workingChar = {
+        ...liquidationResult.character,
+        occupation: 'Incarcerated',
+      };
+      closedBusinessName = liquidationResult.closedBusinessName;
+      businessLiquidationProceeds = liquidationResult.payoutAmount;
+
+      // 4-5. Settle court fine using post-liquidation cash
+      const postLiquidationCash = Math.max(0, workingChar.cash);
+      const prisonFineRaw = Math.round(baseRawFine * 0.6);
+      fineImposed = prisonFineRaw;
+      finePaid = Math.min(postLiquidationCash, fineImposed);
+      unpaidFineAdded = fineImposed - finePaid;
+      if (finePaid > 0) {
+        extraStatEffects.cash = -finePaid;
+      }
 
       extraStatEffects.happiness = -18;
-      relSpec = { parents: -12, partner: -20, siblings: -8 };
       heatDelta = -12;
       break;
     }
@@ -819,9 +1500,12 @@ export function applyCourtOutcome(
     }`;
   } else {
     eventIcon = '⛓️';
+    const closedBizText = closedBusinessName
+      ? ` ${closedBusinessName} was liquidated ($${businessLiquidationProceeds.toLocaleString()} recovered).`
+      : '';
     message = `Sentenced to ${sentenceYears} year(s) at ${nextPrison?.facilityName || 'state prison'} for ${pendingCase.title}.${
       employmentTerminated ? ' Your civilian job was terminated.' : ''
-    }`;
+    }${closedBizText}`;
   }
 
   const courtEvent: LifeEvent = {
@@ -834,14 +1518,60 @@ export function applyCourtOutcome(
     icon: eventIcon,
   };
 
-  const { character: relChar, statEffects: parentEffects } = applyCrimeRelationshipConsequences(
-    workingChar,
-    relSpec,
-  );
+  let relChar: CharacterProfile;
+  let parentEffects: Partial<StatEffects> = {};
+  let prisonConsequences: PrisonConsequencesSummary | undefined;
 
-  const { character: finalChar } = applyEffects(
+  if (outcome === 'imprisoned' && nextPrison) {
+    const partnerResult = applyImprisonmentPartnerConsequence(
+      workingChar,
+      sentenceYears,
+      isFelony,
+    );
+    const socialResult = applyImprisonmentSocialConsequences(
+      partnerResult.character,
+      partnerResult.excludedPartnerId,
+      partnerResult.excludedPartnerKey,
+    );
+    relChar = socialResult.character;
+
+    prisonConsequences = {
+      facilityName: nextPrison.facilityName,
+      securityLevel: nextPrison.securityLevel,
+      sentenceYears,
+      paroleEligibleAtServed: nextPrison.paroleEligibleAtServed,
+      paroleEligibleAge: workingChar.age + nextPrison.paroleEligibleAtServed,
+      releaseAge: workingChar.age + sentenceYears,
+      forfeitedProceeds,
+      fineImposed,
+      finePaid,
+      unpaidFineAdded,
+      attorneyFeePaid: attorneyFee,
+      terminatedJobTitle,
+      closedBusinessName,
+      businessLiquidationProceeds,
+      partnerConsequence: partnerResult.summary,
+      socialConsequences: {
+        totalImpacted: socialResult.totalImpacted,
+        groups: socialResult.groups,
+      },
+      happinessDelta: extraStatEffects.happiness ?? -18,
+      restrictions: [
+        'Street crimes locked until release',
+        'Civilian employment & business ownership blocked',
+        'Ordinary outside-world events suspended',
+      ],
+    };
+  } else {
+    const relOutcome = applyCrimeRelationshipConsequences(workingChar, relSpec);
+    relChar = relOutcome.character;
+    parentEffects = relOutcome.statEffects;
+  }
+
+  const { character: effectedChar } = applyEffects(
     {
       ...relChar,
+      occupation: outcome === 'imprisoned' ? 'Incarcerated' : relChar.occupation,
       crime: {
         ...sanitized,
         policeHeat: clamp0to100(sanitized.policeHeat + heatDelta),
@@ -856,6 +1586,11 @@ export function applyCourtOutcome(
     { ...extraStatEffects, ...parentEffects },
   );
 
+  let finalChar = stampPlayerNetWorth(effectedChar);
+  if (character.worldState?.schemaVersion === 2) {
+    finalChar = syncImprisonmentToWorldState(finalChar);
+  }
+
   return {
     ok: true,
     character: finalChar,
@@ -869,6 +1604,7 @@ export function applyCourtOutcome(
     sentenceYears,
     probationYears,
     employmentTerminated,
+    prisonConsequences,
     message,
   };
 }

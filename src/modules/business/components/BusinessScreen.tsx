@@ -36,6 +36,7 @@ import {
   rebrandBusiness,
   updateBusinessLevers,
 } from '../services/businessService';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import { BusinessIncorporationModal } from './BusinessIncorporationModal';
 
 interface BusinessScreenProps {
@@ -176,6 +177,27 @@ export const BusinessScreen: React.FC<BusinessScreenProps> = ({
     onUpdateCharacter(result.character);
     setStatusMessage(result.message);
   };
+
+  if (isCurrentlyIncarcerated(character)) {
+    const prison = character.crime?.prison;
+    return (
+      <div className="p-4 flex flex-col gap-3.5 bg-white min-h-[480px]">
+        <div className="rounded-3xl border-[2.5px] border-slate-900 bg-rose-50 p-5 shadow-[3px_4px_0_#0f172a] space-y-2.5 text-center">
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-rose-200 border-2 border-slate-900 flex items-center justify-center text-2xl">
+            ⛓️
+          </div>
+          <h3 className="text-base font-black text-slate-950">
+            Business Operations Locked
+          </h3>
+          <p className="text-xs font-bold text-slate-700 leading-relaxed">
+            You cannot found, own, or operate a company while serving a prison sentence
+            {prison ? ` at ${prison.facilityName} (${prison.yearsRemaining} yr(s) left)` : ''}.
+            Wait until your release to incorporate a new venture.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // ==========================================================================
   // VIEW 1: ACTIVE BUSINESS EXECUTIVE BOARDROOM DASHBOARD

@@ -1,13 +1,29 @@
 import type { CharacterProfile } from '../../../types/game';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import type { EventContext } from './eventContext';
 import type { EventExclusions, EventRequirements, LifeEventTemplate } from '../types';
+
+export interface EventEligibilityOptions {
+  /** Overrides live prison status when a character just completed their final prison year during this Age Up. */
+  incarceratedThisYear?: boolean;
+}
 
 /** Today's structural gates. Contextual rules are applied separately. */
 function isStructurallyEligible(
   event: LifeEventTemplate,
-  character: CharacterProfile
+  character: CharacterProfile,
+  options?: EventEligibilityOptions
 ): boolean {
   if (!character.isAlive) return false;
+  const inPrisonContext = Boolean(
+    options?.incarceratedThisYear ?? isCurrentlyIncarcerated(character)
+  );
+  if (inPrisonContext) {
+    if (!event.prisonCompatible && !event.requiresIncarcerated) return false;
+  } else if (event.requiresIncarcerated) {
+    return false;
+  }
+
   const currentStage = character.education?.currentStage;
   const currentJob = character.career?.currentJob;
   const isEmployedOrBusiness = Boolean(currentJob || character.business);
@@ -228,10 +244,11 @@ function exclusionsMatch(excludes: EventExclusions | undefined, context: EventCo
 export function isEventEligible(
   event: LifeEventTemplate,
   character: CharacterProfile,
-  context: EventContext
+  context: EventContext,
+  options?: EventEligibilityOptions
 ): boolean {
   return (
-    isStructurallyEligible(event, character) &&
+    isStructurallyEligible(event, character, options) &&
     requirementsPass(event.requires, context) &&
     !exclusionsMatch(event.excludes, context)
   );

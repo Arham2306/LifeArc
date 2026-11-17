@@ -55,6 +55,25 @@ export function evaluateFundingEligibility(
   character: CharacterProfile,
   template: BusinessTemplate
 ): FundingEligibility {
+  const bankLoanDownPayment = Math.round(template.minSeedCapital * 0.25);
+  const bankLoanAmount = template.minSeedCapital - bankLoanDownPayment;
+  // Standard 10-year amortized annual payment (~14.5% of principal per year)
+  const annualLoanPayment = Math.round(bankLoanAmount * 0.145);
+
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      canBootstrapped: false,
+      canBankLoan: false,
+      bankLoanDownPayment,
+      bankLoanAmount,
+      annualLoanPayment,
+      canPitchAngels: false,
+      angelValuation: 0,
+      angelOfferedEquityPct: 0,
+      reason: 'Cannot incorporate or fund a business while incarcerated.',
+    };
+  }
+
   const cash = character.cash || 0;
   const netWorth = cash + (character.bankBalance || 0);
   const karma = character.stats.karma;
@@ -64,10 +83,6 @@ export function evaluateFundingEligibility(
   const canBootstrapped = cash >= template.minSeedCapital;
 
   // 2. Commercial Bank Loan (25% down, 10-year term at 7.5% annual interest)
-  const bankLoanDownPayment = Math.round(template.minSeedCapital * 0.25);
-  const bankLoanAmount = template.minSeedCapital - bankLoanDownPayment;
-  // Standard 10-year amortized annual payment (~14.5% of principal per year)
-  const annualLoanPayment = Math.round(bankLoanAmount * 0.145);
   const hasCreditWorthiness = karma >= 40 && netWorth >= bankLoanDownPayment * 1.5;
   const canBankLoan = cash >= bankLoanDownPayment && hasCreditWorthiness;
 
@@ -121,6 +136,9 @@ export function foundBusiness(
   character: CharacterProfile,
   params: FoundBusinessParams
 ): { character: CharacterProfile; business: ActiveBusinessProfile } {
+  if (isCurrentlyIncarcerated(character)) {
+    throw new Error('Cannot found a business while incarcerated.');
+  }
   const template = getBusinessTemplateById(params.templateId);
   if (!template) {
     throw new Error(`Business template ${params.templateId} not found.`);
@@ -298,7 +316,7 @@ export function progressBusinessForYear(
       business: {
         ...business,
         actionCooldowns: {},
-        lastFiscalReport: suspendedReport,
+        lastFiscalReport: undefined,
       },
       netPayoutToPlayer: 0,
       events: [
@@ -712,18 +730,48 @@ export function exitBusiness(
   }
 
   // 3. Liquidation / Closure
-  const salvageValue = Math.max(0, Math.round(business.treasury + business.valuation * 0.2 - business.outstandingLoan));
-  payoutAmount = Math.round(salvageValue * (business.equityPct / 100));
-  message = `You liquidated ${business.name}, paying off outstanding creditors and retrieving $${payoutAmount.toLocaleString()} in remaining net assets.`;
+  const liquidation = finalizeBusinessLiquidation(business, character, {
+    forcedByImprisonment: false,
+  });
+  return {
+    payoutAmount: liquidation.payoutAmount,
+    message: liquidation.message,
+    character: liquidation.character,
+  };
+}
+
+/**
+ * Shared salvage formula used by both voluntary liquidation and forced imprisonment closure.
+ */
+export function calculateBusinessLiquidationProceeds(business: ActiveBusinessProfile): number {
+  const salvageValue = Math.max(
+    0,
+    Math.round(business.treasury + business.valuation * 0.2 - business.outstandingLoan)
+  );
+  return Math.round(salvageValue * (business.equityPct / 100));
+}
+
+function finalizeBusinessLiquidation(
+  business: ActiveBusinessProfile,
+  character: CharacterProfile,
+  options: { forcedByImprisonment: boolean }
+): { character: CharacterProfile; payoutAmount: number; message: string } {
+  const { age, birthYear } = character;
+  const payoutAmount = calculateBusinessLiquidationProceeds(business);
+  const message = options.forcedByImprisonment
+    ? `${business.name} was forced into liquidation upon your imprisonment, settling creditors and recovering $${payoutAmount.toLocaleString()} in salvage proceeds.`
+    : `You liquidated ${business.name}, paying off outstanding creditors and retrieving $${payoutAmount.toLocaleString()} in remaining net assets.`;
 
   const liquidationEvent: LifeEvent = {
     id: createId(),
     age,
     year: birthYear + age,
-    title: `Liquidated ${business.name}`,
+    title: options.forcedByImprisonment
+      ? `Business Closed: ${business.name}`
+      : `Liquidated ${business.name}`,
     message,
     category: 'business',
-    icon: '📦',
+    icon: options.forcedByImprisonment ? '⛓️' : '📦',
   };
 
   return {
@@ -731,11 +779,42 @@ export function exitBusiness(
     message,
     character: stampPlayerNetWorth({
       ...character,
-      cash: character.cash + payoutAmount,
-      occupation: 'Unemployed',
+      cash: (character.cash || 0) + payoutAmount,
+      occupation: options.forcedByImprisonment ? 'Incarcerated' : 'Unemployed',
       business: null,
       timeline: [...character.timeline, liquidationEvent],
     }),
+  };
+}
+
+/**
+ * Immediately closes and liquidates the character's active business upon imprisonment.
+ * Returns the actual business name and salvage proceeds credited to personal cash.
+ */
+export function liquidateBusinessForImprisonment(character: CharacterProfile): {
+  character: CharacterProfile;
+  closed: boolean;
+  closedBusinessName: string | null;
+  payoutAmount: number;
+} {
+  const activeBusiness = character.business ?? null;
+  if (!activeBusiness) {
+    return {
+      character,
+      closed: false,
+      closedBusinessName: null,
+      payoutAmount: 0,
+    };
+  }
+
+  const liquidation = finalizeBusinessLiquidation(activeBusiness, character, {
+    forcedByImprisonment: true,
+  });
+  return {
+    character: liquidation.character,
+    closed: true,
+    closedBusinessName: activeBusiness.name,
+    payoutAmount: liquidation.payoutAmount,
   };
 }
 
@@ -762,6 +841,14 @@ export function executeBusinessAction(
   actionType: ExecutiveActionType,
   params: BusinessActionParams = {}
 ): BusinessActionResult {
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      business,
+      character,
+      success: false,
+      message: 'Executive business actions are unavailable while incarcerated.',
+    };
+  }
   const currentYear = character.birthYear + character.age;
   const cooldowns = business.actionCooldowns || {};
 

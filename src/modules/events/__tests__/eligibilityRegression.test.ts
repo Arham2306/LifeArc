@@ -328,4 +328,60 @@ assert(
   'A seen repeatable template stays eligible'
 );
 
+// Incarceration gating: suppresses ordinary civilian/workplace/business templates while
+// explicitly preserving prisonCompatible and requiresIncarcerated templates.
+const imprisonedChar: CharacterProfile = {
+  ...withJob(baseCharacter(26, 'none'), 'technology', 'full_time', 'ft_software_engineer', 3),
+  crime: {
+    policeHeat: 25,
+    notoriety: 30,
+    unpaidFines: 0,
+    attemptsThisYear: 0,
+    attemptCountLifetime: 1,
+    lastAttemptAge: 26,
+    lastProgressedAge: null,
+    pendingCase: null,
+    prison: {
+      facilityName: 'Oakridge State Prison',
+      securityLevel: 'medium',
+      chargeTitle: 'Bank Heist',
+      yearsTotal: 2,
+      yearsServed: 0,
+      yearsRemaining: 2,
+      behaviorScore: 55,
+      paroleEligibleAtServed: 1,
+      actionsTakenThisYear: 0,
+      lastActionAge: null,
+      lastProgressedAge: null,
+      priorRetirementOccupation: null,
+    },
+    probation: null,
+    records: [],
+  },
+};
+assert(
+  getEligibleEvents(imprisonedChar).length === 0,
+  'Ordinary free-world, workplace, and business events are suppressed while incarcerated'
+);
+const prisonCompatibleTemplate: LifeEventTemplate = {
+  ...repeatable,
+  id: 'synthetic_prison_compatible',
+  prisonCompatible: true,
+};
+const prisonOnlyTemplate: LifeEventTemplate = {
+  ...repeatable,
+  id: 'synthetic_prison_only',
+  requiresIncarcerated: true,
+};
+const imprisonedCtx = buildEventContext(imprisonedChar, createEventContextRegistry([]));
+assert(
+  isEventEligible(prisonCompatibleTemplate, imprisonedChar, imprisonedCtx) &&
+    isEventEligible(prisonOnlyTemplate, imprisonedChar, imprisonedCtx) &&
+    isEventEligible(prisonOnlyTemplate, seenRepeatable, repeatableContext, {
+      incarceratedThisYear: true,
+    }) &&
+    !isEventEligible(prisonOnlyTemplate, seenRepeatable, repeatableContext),
+  'Prison-compatible and prison-only events remain eligible during incarceration contexts only'
+);
+
 console.log(`✅ Structural eligibility matched across ${EVENT_POOL.length} templates and ${fixtures.length} fixtures`);

@@ -85,6 +85,203 @@ export const CourtDefenseModal: React.FC<CourtDefenseModalProps> = ({
   // Phase 2: Verdict presentation after court resolution
   if (verdictState) {
     const { verdict, chargeTitle } = verdictState;
+    const prisonSummary = verdict.prisonConsequences;
+
+    if (verdict.outcome === 'imprisoned' && prisonSummary) {
+      const partnerImpact = prisonSummary.partnerConsequence;
+      const partnerBannerText =
+        partnerImpact.action === 'divorced'
+          ? `${partnerImpact.partnerName || 'Your spouse'} divorced you (${partnerImpact.relationshipDelta} Relationship, Romance reset to 0%).`
+          : partnerImpact.action === 'broke_up'
+            ? `${partnerImpact.partnerName || 'Your partner'} ended your relationship (${partnerImpact.relationshipDelta} Relationship, Romance reset to 0%).`
+            : partnerImpact.action === 'damaged'
+              ? `${partnerImpact.partnerName || 'Your partner'}'s bond plummeted (${partnerImpact.relationshipDelta} Relationship, ${partnerImpact.romanceDelta} Romance; now ${partnerImpact.resultingRelationship}%).`
+              : null;
+
+      return (
+        <Modal
+          isOpen={true}
+          title="Sentenced to Prison"
+          icon={<ShieldAlert className="w-5 h-5 text-rose-700" />}
+          maxWidth="md"
+          actions={
+            <CartoonButton
+              variant="rose"
+              size="md"
+              fullWidth
+              onClick={handleContinueAfterVerdict}
+            >
+              Acknowledge &amp; Enter Prison
+            </CartoonButton>
+          }
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <Badge variant="rose" size="sm">
+              Incarcerated • {prisonSummary.sentenceYears} yr(s)
+            </Badge>
+            <Badge variant="slate" size="xs">
+              {prisonSummary.securityLevel.toUpperCase()} Security
+            </Badge>
+          </div>
+
+          {/* Intake Facility Banner */}
+          <div className="rounded-2xl border-2 border-slate-900 bg-slate-900 text-white p-3.5 shadow-[2px_2px_0_#0f172a] space-y-1.5">
+            <p className="text-[10px] font-black uppercase tracking-wider text-rose-300">
+              Prison Intake Order • {chargeTitle}
+            </p>
+            <h4 className="text-sm font-black text-white leading-tight">
+              {prisonSummary.facilityName}
+            </h4>
+            <p className="text-xs font-bold leading-relaxed text-slate-200">
+              {verdict.message}
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1 text-[10px] font-black">
+              <span className="rounded-full bg-slate-800 border border-slate-700 px-2 py-0.5 text-amber-200">
+                Parole Eligible: Age {prisonSummary.paroleEligibleAge} ({prisonSummary.paroleEligibleAtServed} yr served)
+              </span>
+              <span className="rounded-full bg-slate-800 border border-slate-700 px-2 py-0.5 text-slate-200">
+                Max Release: Age {prisonSummary.releaseAge}
+              </span>
+            </div>
+          </div>
+
+          {/* Penalties & Consequences Breakdown */}
+          <div className="space-y-2 max-h-[42vh] overflow-y-auto pr-0.5">
+            <p className="text-[10px] font-black uppercase tracking-wider text-slate-600">
+              Applied Penalties &amp; Consequences
+            </p>
+
+            {/* Financial Settlement */}
+            <div className="rounded-xl border-2 border-slate-900 bg-amber-50 p-2.5 text-xs space-y-1">
+              <div className="font-black text-[11px] uppercase tracking-wide text-amber-900">
+                Financial Penalties
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-bold text-slate-800">
+                <span>Court Fine Imposed:</span>
+                <span className="text-right font-black text-slate-950">
+                  {formatCrimeMoney(prisonSummary.fineImposed)}
+                </span>
+                <span>Fine Paid Now:</span>
+                <span className="text-right font-black text-rose-700">
+                  -{formatCrimeMoney(prisonSummary.finePaid)}
+                </span>
+                {prisonSummary.unpaidFineAdded > 0 && (
+                  <>
+                    <span>Unpaid Fine Debt:</span>
+                    <span className="text-right font-black text-rose-700">
+                      +{formatCrimeMoney(prisonSummary.unpaidFineAdded)}
+                    </span>
+                  </>
+                )}
+                {prisonSummary.forfeitedProceeds > 0 && (
+                  <>
+                    <span>Proceeds Forfeited:</span>
+                    <span className="text-right font-black text-rose-700">
+                      {formatCrimeMoney(prisonSummary.forfeitedProceeds)}
+                    </span>
+                  </>
+                )}
+                {prisonSummary.attorneyFeePaid > 0 && (
+                  <>
+                    <span>Defense Attorney Fee:</span>
+                    <span className="text-right font-black text-slate-900">
+                      -{formatCrimeMoney(prisonSummary.attorneyFeePaid)}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Employment & Business Closure */}
+            {(prisonSummary.terminatedJobTitle || prisonSummary.closedBusinessName) && (
+              <div className="rounded-xl border-2 border-rose-800/40 bg-rose-50 p-2.5 text-[11px] space-y-1 text-rose-950">
+                <div className="font-black uppercase tracking-wide text-rose-900">
+                  Career &amp; Business Impact
+                </div>
+                {prisonSummary.terminatedJobTitle && (
+                  <p className="font-bold">
+                    • Job Terminated: <span className="font-black">{prisonSummary.terminatedJobTitle}</span>
+                  </p>
+                )}
+                {prisonSummary.closedBusinessName && (
+                  <p className="font-bold">
+                    • Business Liquidated:{' '}
+                    <span className="font-black">{prisonSummary.closedBusinessName}</span> (
+                    <span className="text-emerald-800 font-black">
+                      +{formatCrimeMoney(prisonSummary.businessLiquidationProceeds)}
+                    </span>{' '}
+                    salvage proceeds credited)
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Marriage & Partner Impact */}
+            {partnerBannerText && (
+              <div className="rounded-xl border-2 border-rose-800/40 bg-rose-50 p-2.5 text-[11px] space-y-1 text-rose-950">
+                <div className="font-black uppercase tracking-wide text-rose-900">
+                  {partnerImpact.action === 'divorced'
+                    ? 'Marriage Dissolved'
+                    : partnerImpact.action === 'broke_up'
+                      ? 'Relationship Ended'
+                      : 'Partner Relationship Damaged'}
+                </div>
+                <p className="font-bold">{partnerBannerText}</p>
+              </div>
+            )}
+
+            {/* Social & Mood Consequences */}
+            {(prisonSummary.socialConsequences.groups.length > 0 ||
+              prisonSummary.happinessDelta !== 0) && (
+              <div className="rounded-xl border-2 border-slate-900 bg-slate-50 p-2.5 text-[11px] space-y-1.5 text-slate-900">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-black uppercase tracking-wide text-slate-700">
+                    Family, Friends &amp; Mood
+                  </span>
+                  <Badge variant="rose" size="xs">
+                    Happiness {prisonSummary.happinessDelta}
+                  </Badge>
+                </div>
+                {prisonSummary.socialConsequences.groups.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {prisonSummary.socialConsequences.groups.map((grp) => (
+                      <div
+                        key={grp.category}
+                        className="flex items-center justify-between font-bold text-slate-700"
+                      >
+                        <span>
+                          {grp.label} ({grp.affectedCount})
+                        </span>
+                        <span className="font-black text-rose-700">
+                          {grp.intendedDelta} Rel
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="font-bold text-slate-600">
+                    No living family or outside social contacts affected.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Custody Restrictions */}
+            <div className="rounded-xl border-2 border-slate-300 bg-slate-100 p-2.5 text-[11px] text-slate-800 space-y-1">
+              <div className="font-black uppercase tracking-wide text-slate-700">
+                Active Custody Restrictions
+              </div>
+              {prisonSummary.restrictions.map((item) => (
+                <p key={item} className="font-bold">
+                  • {item}
+                </p>
+              ))}
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
     return (
       <Modal
         isOpen={true}
