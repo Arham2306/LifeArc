@@ -1,7 +1,11 @@
 import {
+  applyCareerCrimeConsequence,
   evaluateJobEligibility,
   getSortedJobListings,
   applyForJob,
+  performWorkHarder,
+  performAskForRaise,
+  progressCareerForYear,
   resignFromJob,
   createInitialCareerState,
 } from '../services/careerService';
@@ -9,6 +13,12 @@ import { getJobTemplateById } from '../data/jobCatalog';
 import { ageUpCharacter } from '../../aging/services/agingService';
 import { createInitialEducation } from '../../education/services/educationService';
 import type { CharacterProfile } from '../../../types/game';
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(`Assertion failed: ${message}`);
+  }
+}
 
 function createMockCharacter(overrides: Partial<CharacterProfile> = {}): CharacterProfile {
   return {
@@ -195,5 +205,152 @@ console.assert(
   'Occupation should reset to Unemployed'
 );
 console.log('✅ Resignation: Successfully resigned and archived into history');
+
+// 7. Phase 2: Pre-trial Suspension (50% Paid vs. Unpaid), Paused Progression, Acquittal, & Fraud Termination
+{
+  const accountantChar = createMockCharacter({
+    id: 'acct-crime-1',
+    age: 26,
+    occupation: 'Accountant',
+    career: {
+      ...createInitialCareerState(),
+      currentJob: {
+        jobId: 'acct_1',
+        title: 'Accountant',
+        companyName: 'Ledger Co',
+        field: 'business_finance',
+        type: 'full_time',
+        salary: 80000,
+        yearsInJob: 3,
+        performance: 10, // Low performance should NOT auto-fire while suspended pending trial
+        hiredAge: 23,
+        icon: '📊',
+      },
+    },
+  });
+
+  const fraudPending = {
+    id: 'case-career-fraud-1',
+    crimeId: 'fraud_scam' as const,
+    title: 'Financial Scam',
+    offenseClass: 'felony' as const,
+    jurisdiction: 'adult' as const,
+  };
+
+  // Pre-trial arrest puts full-time Accountant on 50% paid administrative leave
+  const suspendedRes = applyCareerCrimeConsequence(
+    accountantChar,
+    fraudPending,
+    'arrest',
+    'witness_known',
+  );
+  assert(
+    suspendedRes.applied &&
+      suspendedRes.suspended &&
+      suspendedRes.character.career.currentJob?.suspendedPendingTrial?.payMultiplier === 0.5,
+    'Sensitive full-time Accountant receives 50% paid administrative leave pending trial',
+  );
+
+  // Duplicate arrest call for same case is idempotent
+  const duplicateArrest = applyCareerCrimeConsequence(
+    suspendedRes.character,
+    fraudPending,
+    'arrest',
+    'witness_known',
+  );
+  assert(!duplicateArrest.applied, 'Duplicate arrest suspension is a clean idempotent no-op');
+
+  // Workplace actions are blocked while suspended pending trial
+  const workBlocked = performWorkHarder(suspendedRes.character);
+  const raiseBlocked = performAskForRaise(suspendedRes.character);
+  assert(!workBlocked.isSuccess && !raiseBlocked.isSuccess, 'Workplace actions blocked while suspended');
+
+  // Aging while suspended pays 50% salary ONCE ($80k * 0.5 = $40k gross; 22% tax -> $31,200 net),
+  // pauses tenure (`yearsInJob` stays 3), and skips <15% performance auto-firing
+  const suspendedYear = progressCareerForYear(suspendedRes.character, 27);
+  assert(
+    suspendedYear.netPayEarned === Math.round(40000 * (1 - 0.22)) &&
+      suspendedYear.career.currentJob !== null &&
+      suspendedYear.career.currentJob.yearsInJob === 3,
+    'Suspended year pays 50% net salary once and pauses tenure & auto-firing',
+  );
+
+  // Acquittal reinstates held job cleanly
+  const acquittedRes = applyCareerCrimeConsequence(
+    suspendedRes.character,
+    fraudPending,
+    'acquitted',
+    'witness_known',
+  );
+  assert(
+    acquittedRes.reinstated &&
+      acquittedRes.character.career.currentJob?.suspendedPendingTrial === null &&
+      acquittedRes.character.career.currentJob?.salary === 80000,
+    'Acquittal clears suspension and restores full active job cleanly',
+  );
+
+  // Violent felony arrest receives 0% unpaid leave
+  const violentPreTrial = applyCareerCrimeConsequence(
+    accountantChar,
+    { id: 'case-rob-leave', crimeId: 'robbery', title: 'Robbery', offenseClass: 'felony', jurisdiction: 'adult' },
+    'arrest',
+    'publicly_reported',
+  );
+  assert(
+    violentPreTrial.character.career.currentJob?.suspendedPendingTrial?.payMultiplier === 0 &&
+      progressCareerForYear(violentPreTrial.character, 27).netPayEarned === 0,
+    'Violent felony pre-trial suspension pays $0 unpaid leave',
+  );
+
+  // Unrelated non-custodial Burglary 'fined' preserves Accountant employment
+  const burglaryFined = applyCareerCrimeConsequence(
+    { ...accountantChar, career: { ...accountantChar.career, currentJob: { ...accountantChar.career.currentJob!, performance: 80 } } },
+    { id: 'case-burg-1', crimeId: 'burglary', title: 'Burglary', offenseClass: 'felony', jurisdiction: 'adult' },
+    'fined',
+    'private',
+  );
+  assert(
+    !burglaryFined.terminated && burglaryFined.character.career.currentJob !== null,
+    'Unrelated non-custodial Burglary fine preserves Accountant employment',
+  );
+
+  // Out-of-order 'arrest' dispatch for already-settled case must NOT re-suspend the job
+  const outOfOrderArrest = applyCareerCrimeConsequence(
+    burglaryFined.character,
+    { id: 'case-burg-1', crimeId: 'burglary', title: 'Burglary', offenseClass: 'felony', jurisdiction: 'adult' },
+    'arrest',
+    'publicly_reported',
+  );
+  assert(
+    !outOfOrderArrest.applied &&
+      !outOfOrderArrest.suspended &&
+      outOfOrderArrest.character.career.currentJob?.suspendedPendingTrial == null,
+    'Out-of-order arrest dispatch for an already settled case does not re-suspend active job',
+  );
+
+  // Relevant fraud_scam 'fined' terminates Accountant employment and is idempotent if re-applied
+  const fraudFined = applyCareerCrimeConsequence(
+    suspendedRes.character,
+    fraudPending,
+    'fined',
+    'witness_known',
+  );
+  assert(
+    fraudFined.terminated &&
+      fraudFined.character.career.currentJob === null &&
+      fraudFined.character.career.history.some((h) => h.id === 'case-career-fraud-1-career-fired' && h.reasonForLeaving === 'fired'),
+    'Financial fraud fine immediately terminates business_finance Accountant and records fired history',
+  );
+  const dupFraudVerdict = applyCareerCrimeConsequence(
+    fraudFined.character,
+    fraudPending,
+    'fined',
+    'witness_known',
+  );
+  assert(
+    !dupFraudVerdict.applied && dupFraudVerdict.character.career.history.length === fraudFined.character.career.history.length,
+    'Duplicate verdict application never adds duplicate career history entries',
+  );
+}
 
 console.log('--- ALL CAREER MODULE TESTS PASSED PERFECTLY! ---');

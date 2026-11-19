@@ -459,7 +459,11 @@ export const IdentityHeritageScreen: React.FC<IdentityHeritageScreenProps> = ({
                             variant={entry.status === 'graduated' ? 'emerald' : 'rose'}
                             size="xs"
                           >
-                            {entry.status === 'graduated' ? 'Completed' : 'Dropped Out'}
+                            {entry.status === 'graduated'
+                              ? 'Completed'
+                              : entry.status === 'expelled'
+                                ? 'Expelled'
+                                : 'Dropped Out'}
                           </Badge>
                         </li>
                       ))}

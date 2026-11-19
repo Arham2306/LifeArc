@@ -418,6 +418,11 @@ export const SchoolScreen: React.FC<SchoolScreenProps> = ({
                 {diploma}
               </Badge>
             ))}
+            {education.history.some((h) => h.status === 'expelled') && (
+              <Badge variant="rose" size="xs" icon={<XCircle className="w-3 h-3" />}>
+                Expelled From Higher Ed
+              </Badge>
+            )}
             {education.studentDebt > 0 && (
               <Badge variant="amber" size="xs">
                 💳 Student Loan: ${education.studentDebt.toLocaleString()}

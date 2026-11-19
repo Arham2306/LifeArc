@@ -4,6 +4,7 @@ import {
   generateSuggestedBusinessName,
 } from '../data/businessCatalog';
 import {
+  applyBusinessCrimeConsequence,
   evaluateFundingEligibility,
   foundBusiness,
   updateBusinessLevers,
@@ -14,6 +15,7 @@ import {
   payOffLoanEarly,
   rebrandBusiness,
 } from '../services/businessService';
+import { createEmptyCrimeState } from '../../crime/services/crimeSelectors';
 import type { CharacterProfile } from '../../../types/game';
 import { createInitialEducation } from '../../education/services/educationService';
 import { createInitialCareerState } from '../../career/services/careerService';
@@ -565,6 +567,263 @@ console.log('--- STARTING MODULE 5: BUSINESS & ENTREPRENEURSHIP SIMULATION TESTS
   );
 
   console.log(`✅ Business Events: Filtered properly, choice resolved, and business stats updated!`);
+}
+
+// 17. Phase 2: Explicit Management Capability, Legacy Loan Continuity, 7.5% Interest/Principal Separation & Guards
+{
+  // A. Legacy business with omitted managementCapability enters paused_incarceration for multi-year prison term
+  //    and services $20,000 loan from $1,000 corporate treasury ONLY ($500 interest capitalized once -> $20,500).
+  const imprisonedOwner = createMockCharacter({
+    cash: 50000,
+    age: 32,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: {
+        facilityName: 'Oak Ridge',
+        securityLevel: 'medium',
+        chargeTitle: 'Bank Heist',
+        yearsTotal: 5,
+        yearsServed: 0,
+        yearsRemaining: 5,
+        behaviorScore: 55,
+        paroleEligibleAtServed: 3,
+        actionsTakenThisYear: 0,
+        lastActionAge: null,
+        lastProgressedAge: null,
+      },
+    },
+  });
+
+  const legacyWithLoan = {
+    ...foundBusiness(createMockCharacter({ cash: 200000, age: 30 }), {
+      templateId: 'biz_coffee_shop',
+      customName: 'Legacy Loan Roasters',
+      icon: '☕',
+      fundingMethod: 'bank_loan',
+    }).business,
+    managementCapability: undefined,
+    operationalStatus: undefined,
+    loanGuaranteeType: undefined,
+    hasAuditCompleted: true,
+    isPubliclyTraded: true,
+    equityPct: 70,
+    treasury: 1000,
+    valuation: 120000,
+    outstandingLoan: 20000,
+    annualLoanPayment: 2900,
+  };
+
+  const legacySentence = applyBusinessCrimeConsequence(
+    { ...imprisonedOwner, business: legacyWithLoan },
+    { id: 'case-legacy-5yr', crimeId: 'bank_heist', offenseClass: 'felony', title: 'Bank Heist' },
+    'imprisoned',
+    'publicly_reported',
+  );
+  assert(
+    legacySentence.applied &&
+      !legacySentence.closed &&
+      legacySentence.character.business?.operationalStatus === 'paused_incarceration' &&
+      legacySentence.character.business?.managementCapability === 'legacy_unassigned',
+    'Legacy business with omitted managementCapability stays paused instead of liquidating across 5-year prison term',
+  );
+
+  // Paused year 1: $1,000 paid from treasury only (personal cash untouched), $500 interest capitalized once -> $20,500
+  const pausedYear1 = progressBusinessForYear(
+    legacySentence.character.business!,
+    legacySentence.character,
+    33,
+  );
+  assert(
+    pausedYear1.business !== null &&
+      pausedYear1.netPayoutToPlayer === 0 &&
+      pausedYear1.business.treasury === 0 &&
+      pausedYear1.business.outstandingLoan === 20500 &&
+      pausedYear1.business.annualLoanPayment === 2900 &&
+      pausedYear1.annualReport.loanInterestExpense === 1500 &&
+      pausedYear1.annualReport.loanPrincipalPaid === 0 &&
+      pausedYear1.annualReport.loanUnpaidInterestCapitalized === 500 &&
+      pausedYear1.annualReport.netProfit === -1500,
+    'Paused loan services $1,000 from treasury only and capitalizes $500 unpaid 7.5% interest once without personal debit',
+  );
+
+  // Double-entry balance-sheet identity check: dTreasury (-$1,000) === dLiabilities (+$500) + netProfit (-$1,500)
+  assert(
+    pausedYear1.annualReport.netTreasuryAddition === -1000 &&
+      pausedYear1.annualReport.endingTreasury === 0,
+    'Paused accounting identity holds: netTreasuryAddition = netProfit (-1500) + unpaidInterest (500) = -1000',
+  );
+
+  // Year 2 after release (`active`): reschedules onto $20,500 principal at explicit 7.5% rate without double-billing
+  const releasedChar = {
+    ...legacySentence.character,
+    crime: createEmptyCrimeState(),
+    cash: 50000,
+  };
+  const postReleaseYear = progressBusinessForYear(
+    { ...pausedYear1.business!, operationalStatus: 'active', ownerSalary: 0, dividendRatePct: 0 },
+    releasedChar,
+    34,
+  );
+  assert(
+    postReleaseYear.business !== null &&
+      postReleaseYear.annualReport.loanInterestExpense === Math.round(20500 * 0.075) &&
+      postReleaseYear.annualReport.loanPrincipalPaid === 2900 - Math.round(20500 * 0.075) &&
+      postReleaseYear.business.outstandingLoan ===
+        20500 - (2900 - Math.round(20500 * 0.075)) &&
+      postReleaseYear.annualReport.preTaxProfit ===
+        postReleaseYear.annualReport.grossRevenue -
+          postReleaseYear.annualReport.operatingExpenses -
+          postReleaseYear.annualReport.loanInterestExpense!,
+    'Active year separates 7.5% interest expense from principal repayment and keeps balance-sheet treasury reconciliation exact',
+  );
+  assert(
+    postReleaseYear.annualReport.netTreasuryAddition ===
+      postReleaseYear.annualReport.netProfit -
+        postReleaseYear.annualReport.loanPrincipalPaid! -
+        postReleaseYear.annualReport.ownerSalaryPaid -
+        (postReleaseYear.annualReport.ownerDividendPaid +
+          (postReleaseYear.annualReport.externalShareholderDividendPaid ?? 0)),
+    'Active year netTreasuryAddition deducts principal repayment and owner/shareholder distributions exactly once',
+  );
+
+  // B. appoint_manager establishes explicit delegated_management; operates in prison with 5% fee,
+  //    $0 owner salary, reserve-verified dividends, and externalShareholderDividendPaid tracking
+  const angelChar = createMockCharacter({ cash: 100000, age: 30 });
+  const { character: foundedAngel, business: angelBiz } = foundBusiness(angelChar, {
+    templateId: 'biz_saas_platform',
+    customName: 'Managed Angel Cloud',
+    icon: '☁️',
+    fundingMethod: 'angel_investors',
+    angelEquityDilutionPct: 70,
+  });
+  assert(
+    angelBiz.managementCapability === 'owner_operated',
+    'Newly founded business initializes explicit managementCapability: owner_operated',
+  );
+  const appointed = executeBusinessAction(
+    { ...angelBiz, ownerSalary: 45000, dividendRatePct: 20, employeeCount: 8 },
+    foundedAngel,
+    'appoint_manager',
+  );
+  assert(
+    appointed.success && appointed.business.managementCapability === 'delegated_management',
+    'appoint_manager explicitly sets delegated_management',
+  );
+
+  const inPrisonManaged = {
+    ...appointed.character,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: {
+        facilityName: 'Federal Camp',
+        securityLevel: 'minimum' as const,
+        chargeTitle: 'Burglary',
+        yearsTotal: 3,
+        yearsServed: 0,
+        yearsRemaining: 3,
+        behaviorScore: 60,
+        paroleEligibleAtServed: 2,
+        actionsTakenThisYear: 0,
+        lastActionAge: null,
+        lastProgressedAge: null,
+      },
+    },
+  };
+  const managedPrisonYear = progressBusinessForYear(
+    { ...appointed.business, treasury: 250000 },
+    inPrisonManaged,
+    31,
+  );
+  assert(
+    managedPrisonYear.business !== null &&
+      managedPrisonYear.annualReport.ownerSalaryPaid === 0 &&
+      (managedPrisonYear.annualReport.managementExpense ?? 0) ===
+        Math.round(managedPrisonYear.annualReport.grossRevenue * 0.05) &&
+      managedPrisonYear.annualReport.ownerDividendPaid +
+        (managedPrisonYear.annualReport.externalShareholderDividendPaid ?? 0) ===
+        Math.round(managedPrisonYear.annualReport.netProfit * 0.2) &&
+      managedPrisonYear.business.lastFiscalReport === undefined,
+    'Delegated business operates in prison with 5% proportional management fee, $0 salary, and complete shareholder dividend reconciliation',
+  );
+
+  // C. payOffLoanEarly incarceration & negative-treasury guards + metadata preservation
+  const loanHolder = foundBusiness(createMockCharacter({ cash: 200000, age: 29 }), {
+    templateId: 'biz_coffee_shop',
+    customName: 'Guarded Coffee',
+    icon: '☕',
+    fundingMethod: 'bank_loan',
+  });
+  const lowTreasuryBiz = { ...loanHolder.business, treasury: 500 };
+  assert(
+    !payOffLoanEarly(lowTreasuryBiz, loanHolder.character, 1000, 'treasury').success,
+    'payOffLoanEarly rejects treasury repayment when treasury cannot cover payment',
+  );
+  assert(
+    !payOffLoanEarly(loanHolder.business, { ...inPrisonManaged, business: loanHolder.business }, 1000, 'personal').success,
+    'payOffLoanEarly rejects early loan repayment while incarcerated',
+  );
+  const partialGuaranteeCheck = payOffLoanEarly(
+    loanHolder.business,
+    loanHolder.character,
+    1000,
+    'personal',
+  );
+  assert(
+    partialGuaranteeCheck.success &&
+      partialGuaranteeCheck.business.loanGuaranteeType === 'personally_guaranteed' &&
+      partialGuaranteeCheck.business.outstandingLoan === loanHolder.business.outstandingLoan - 1000,
+    'payOffLoanEarly preserves personally_guaranteed metadata and reduces principal once',
+  );
+
+  // D. Fraud conviction blocks bank loan & angel financing in evaluateFundingEligibility regardless of karma
+  const saasTemplate = getBusinessTemplateById('biz_saas_platform')!;
+  const richFraudster = createMockCharacter({
+    cash: 250000,
+    bankBalance: 100000,
+    stats: { health: 90, happiness: 85, smarts: 90, looks: 75, karma: 95 },
+    crime: {
+      ...createEmptyCrimeState(),
+      records: [
+        {
+          id: 'biz-elig-fraud',
+          crimeId: 'fraud_scam',
+          title: 'Financial Scam',
+          tier: 'mid',
+          offenseClass: 'felony',
+          jurisdiction: 'adult',
+          age: 27,
+          year: 2025,
+          executionSucceeded: true,
+          detected: true,
+          injured: false,
+          outcome: 'fined',
+          attemptedPayout: 5000,
+          payout: 0,
+          fineImposed: 3000,
+          finePaid: 3000,
+          attorneyFeePaid: 0,
+          sentenceYears: 0,
+          sealed: false,
+          expunged: false,
+        },
+      ],
+    },
+  });
+  const fraudFunding = evaluateFundingEligibility(richFraudster, saasTemplate);
+  assert(
+    fraudFunding.canBootstrapped && !fraudFunding.canBankLoan && !fraudFunding.canPitchAngels,
+    'Active financial fraud conviction blocks bank loans and angel pitches even with high karma',
+  );
+
+  const cleanLowKarmaFounder = createMockCharacter({
+    cash: 250000,
+    bankBalance: 50000,
+    stats: { health: 90, happiness: 85, smarts: 85, looks: 75, karma: 10 },
+  });
+  assert(
+    evaluateFundingEligibility(cleanLowKarmaFounder, saasTemplate).canBankLoan,
+    'Clean creditworthy borrower qualifies for bank loan based on real financials rather than karma proxy',
+  );
 }
 
 console.log('--- ALL MODULE 5 BUSINESS SIMULATION TESTS PASSED PERFECTLY! ---');

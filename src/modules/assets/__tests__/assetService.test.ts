@@ -12,6 +12,7 @@ import {
 import { executeSocialAction } from '../../relationships/services/relationshipService';
 import { GIFT_CATALOG } from '../../relationships/data/socialInteractions';
 import { divorceService } from '../../romance/services/divorceService';
+import { createEmptyCrimeState } from '../../crime/services/crimeSelectors';
 import { getPropertyListing } from '../data/propertyCatalog';
 import {
   calculatePlayerNetWorth,
@@ -150,7 +151,22 @@ console.log('--- MODULE 8.1 RESIDENTIAL PROPERTY ---');
 }
 
 {
-  const buyer = character({ cash: 12400, bankBalance: 0 });
+  const salariedCareer = {
+    ...createInitialCareerState(),
+    currentJob: {
+      jobId: 'clerk',
+      title: 'Store Clerk',
+      companyName: 'Local Mart',
+      field: 'hospitality_retail' as const,
+      type: 'full_time' as const,
+      salary: 40000,
+      yearsInJob: 1,
+      performance: 75,
+      hiredAge: 29,
+      icon: '🛒',
+    },
+  };
+  const buyer = character({ cash: 12400, bankBalance: 0, career: salariedCareer });
   const bought = purchaseProperty(buyer, 'studio_austin_loft', 'mortgage');
   const deed = validProperties(bought.character)[0];
   assert(bought.ok && bought.character.cash === 0, 'mortgage purchase spends the 20% down payment');
@@ -572,7 +588,28 @@ console.log('--- MODULE 8.1 RESIDENTIAL PROPERTY ---');
   assert(years > 0 && years <= 30, 'the ceiling schedule finishes within 30 payments');
   assert(validProperties(holder)[0].mortgage!.principal === 0, 'thirty scheduled payments leave no residual balance');
 
-  const opened = purchaseProperty(character({ cash: 12400 }), 'studio_austin_loft', 'mortgage');
+  const opened = purchaseProperty(
+    character({
+      cash: 12400,
+      career: {
+        ...createInitialCareerState(),
+        currentJob: {
+          jobId: 'clerk',
+          title: 'Store Clerk',
+          companyName: 'Local Mart',
+          field: 'hospitality_retail',
+          type: 'full_time',
+          salary: 40000,
+          yearsInJob: 1,
+          performance: 75,
+          hiredAge: 29,
+          icon: '🛒',
+        },
+      },
+    }),
+    'studio_austin_loft',
+    'mortgage'
+  );
   assert(
     validProperties(opened.character)[0].mortgage!.annualPrincipalPayment === Math.ceil(49600 / 30),
     'a new mortgage stores the 30-year ceiling'
@@ -641,6 +678,138 @@ console.log('--- MODULE 8.1 RESIDENTIAL PROPERTY ---');
   const bought = purchaseProperty(crowded, 'studio_austin_loft', 'cash');
   assert(bought.ok, 'malformed records do not count toward the portfolio cap');
   assert(bought.character.assets!.properties[0] === broken, 'the purchase leaves the malformed record in place');
+}
+
+// Phase 2: Mortgage Underwriting Integration (Fraud, Violent Caution, Debt DTI, Cash Preserved)
+{
+  const employedCareer = {
+    ...createInitialCareerState(),
+    currentJob: {
+      jobId: 'eng-1',
+      title: 'Software Engineer',
+      companyName: 'Apex Systems',
+      field: 'technology' as const,
+      type: 'full_time' as const,
+      salary: 90000,
+      yearsInJob: 3,
+      performance: 85,
+      hiredAge: 27,
+      icon: '💻',
+    },
+  };
+
+  // Unemployed with only 20% down payment and no cash reserves is denied mortgage
+  const unemployedBuyer = character({ cash: 12400, bankBalance: 0 });
+  const deniedUnemployed = purchaseProperty(unemployedBuyer, 'studio_austin_loft', 'mortgage');
+  assert(!deniedUnemployed.ok, 'unemployed buyer without reserve backing is denied a mortgage');
+
+  // Active fraud_scam conviction blocks mortgage while allowing cash purchase
+  const fraudConvict = character({
+    cash: 100000,
+    career: employedCareer,
+    crime: {
+      ...createEmptyCrimeState(),
+      records: [
+        {
+          id: 'asset-fraud-1',
+          crimeId: 'fraud_scam',
+          title: 'Financial Scam',
+          tier: 'mid',
+          offenseClass: 'felony',
+          jurisdiction: 'adult',
+          age: 29,
+          year: 2025,
+          executionSucceeded: true,
+          detected: true,
+          injured: false,
+          outcome: 'fined',
+          attemptedPayout: 4000,
+          payout: 0,
+          fineImposed: 3000,
+          finePaid: 3000,
+          attorneyFeePaid: 0,
+          sentenceYears: 0,
+          sealed: false,
+          expunged: false,
+        },
+      ],
+    },
+  });
+  const deniedFraud = purchaseProperty(fraudConvict, 'studio_austin_loft', 'mortgage');
+  assert(!deniedFraud.ok, 'active fraud conviction blocks residential mortgage');
+  const cashPurchaseWithRecord = purchaseProperty(fraudConvict, 'studio_austin_loft', 'cash');
+  assert(cashPurchaseWithRecord.ok, 'cash purchase stays unrestricted outside prison');
+
+  // Active violent felony enforces +10% extra down payment (30% total = $18,600 on $62,000 studio)
+  const violentConvict = character({
+    cash: 15000, // enough for 20% ($12,400) but short of 30% ($18,600)
+    career: employedCareer,
+    crime: {
+      ...createEmptyCrimeState(),
+      records: [
+        {
+          id: 'asset-robbery-1',
+          crimeId: 'robbery',
+          title: 'Robbery',
+          tier: 'high_stakes',
+          offenseClass: 'felony',
+          jurisdiction: 'adult',
+          age: 28,
+          year: 2024,
+          executionSucceeded: true,
+          detected: true,
+          injured: false,
+          outcome: 'fined',
+          attemptedPayout: 2000,
+          payout: 0,
+          fineImposed: 2000,
+          finePaid: 2000,
+          attorneyFeePaid: 0,
+          sentenceYears: 0,
+          sealed: false,
+          expunged: false,
+        },
+      ],
+    },
+  });
+  const shortViolent = purchaseProperty(violentConvict, 'studio_austin_loft', 'mortgage');
+  assert(!shortViolent.ok, 'violent felony applicant with only $15,000 cannot meet 30% ($18,600) down payment');
+  const fundedViolent = purchaseProperty({ ...violentConvict, cash: 20000 }, 'studio_austin_loft', 'mortgage');
+  assert(
+    fundedViolent.ok &&
+      fundedViolent.character.cash === 20000 - 18600 &&
+      validProperties(fundedViolent.character)[0].mortgage?.originalPrincipal === 62000 - 18600,
+    'violent felony applicant putting 30% down ($18,600) obtains smaller $43,400 principal mortgage'
+  );
+
+  // Personally-guaranteed business debt counts in mortgage DTI, while corporate_only debt is excluded
+  const corpDebtBuyer = character({
+    cash: 50000,
+    career: employedCareer, // $90k salary
+    business: {
+      ...foundBusiness(character({ cash: 200000 }), {
+        templateId: 'biz_coffee_shop',
+        customName: 'Split Debt Cafe',
+        icon: '☕',
+        fundingMethod: 'bootstrapped',
+      }).business,
+      outstandingLoan: 500000,
+      annualLoanPayment: 72500,
+      loanGuaranteeType: 'corporate_only',
+    },
+  });
+  assert(
+    purchaseProperty(corpDebtBuyer, 'studio_austin_loft', 'mortgage').ok,
+    'corporate_only business loan does not block personal mortgage underwriting'
+  );
+  const personalGuaranteedBuyer = {
+    ...corpDebtBuyer,
+    business: { ...corpDebtBuyer.business!, loanGuaranteeType: 'personally_guaranteed' as const },
+  };
+  assert(
+    !purchaseProperty(personalGuaranteedBuyer, 'studio_austin_loft', 'mortgage').ok,
+    'personally_guaranteed business loan counts in personal DTI and blocks excessive mortgage leverage'
+  );
 }
 
 console.log('✅ Module 8.1 residential property tests passed');

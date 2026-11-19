@@ -192,11 +192,13 @@ export const CourtDefenseModal: React.FC<CourtDefenseModalProps> = ({
               </div>
             </div>
 
-            {/* Employment & Business Closure */}
-            {(prisonSummary.terminatedJobTitle || prisonSummary.closedBusinessName) && (
+            {/* Employment, Business & Education Closure */}
+            {(prisonSummary.terminatedJobTitle ||
+              prisonSummary.closedBusinessName ||
+              prisonSummary.expelledFromSchool) && (
               <div className="rounded-xl border-2 border-rose-800/40 bg-rose-50 p-2.5 text-[11px] space-y-1 text-rose-950">
                 <div className="font-black uppercase tracking-wide text-rose-900">
-                  Career &amp; Business Impact
+                  Career, Business &amp; Education Impact
                 </div>
                 {prisonSummary.terminatedJobTitle && (
                   <p className="font-bold">
@@ -211,6 +213,12 @@ export const CourtDefenseModal: React.FC<CourtDefenseModalProps> = ({
                       +{formatCrimeMoney(prisonSummary.businessLiquidationProceeds)}
                     </span>{' '}
                     salvage proceeds credited)
+                  </p>
+                )}
+                {prisonSummary.expelledFromSchool && (
+                  <p className="font-bold">
+                    • Expelled:{' '}
+                    <span className="font-black">{prisonSummary.expelledFromSchool}</span>
                   </p>
                 )}
               </div>
@@ -358,9 +366,45 @@ export const CourtDefenseModal: React.FC<CourtDefenseModalProps> = ({
           )}
         </div>
 
+        {verdict.appliedStatDeltas &&
+          Object.values(verdict.appliedStatDeltas).some((val) => typeof val === 'number' && val !== 0) && (
+            <div className="flex flex-wrap gap-1.5 text-[11px] font-black">
+              {verdict.appliedStatDeltas.happiness ? (
+                <Badge
+                  variant={verdict.appliedStatDeltas.happiness > 0 ? 'emerald' : 'rose'}
+                  size="xs"
+                >
+                  Happiness {verdict.appliedStatDeltas.happiness > 0 ? '+' : ''}
+                  {verdict.appliedStatDeltas.happiness}
+                </Badge>
+              ) : null}
+              {verdict.appliedStatDeltas.karma ? (
+                <Badge variant="rose" size="xs">
+                  Karma {verdict.appliedStatDeltas.karma}
+                </Badge>
+              ) : null}
+              {verdict.appliedStatDeltas.health ? (
+                <Badge variant="rose" size="xs">
+                  Health {verdict.appliedStatDeltas.health}
+                </Badge>
+              ) : null}
+              {verdict.appliedStatDeltas.looks ? (
+                <Badge variant="amber" size="xs">
+                  Looks {verdict.appliedStatDeltas.looks}
+                </Badge>
+              ) : null}
+            </div>
+          )}
+
         {verdict.employmentTerminated && (
           <div className="rounded-xl border-2 border-rose-700/40 bg-rose-50 px-3 py-2 text-[11px] font-black text-rose-900">
-            Civilian employment was terminated upon incarceration.
+            Job Terminated: {verdict.terminatedJobTitle || 'Your civilian employment was terminated following conviction.'}
+          </div>
+        )}
+
+        {verdict.expelledFromSchool && (
+          <div className="rounded-xl border-2 border-rose-700/40 bg-rose-50 px-3 py-2 text-[11px] font-black text-rose-900">
+            Expelled: Dismissed from {verdict.expelledFromSchool} due to criminal conviction.
           </div>
         )}
       </Modal>

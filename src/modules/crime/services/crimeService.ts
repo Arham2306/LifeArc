@@ -7,7 +7,9 @@ import type {
 import { stampPlayerNetWorth } from '../../assets/services/assetService';
 import { liquidateBusinessForImprisonment } from '../../business/services/businessService';
 import type { CareerHistoryEntry } from '../../career/types';
+import { resolveCharacterOccupation } from '../../character/services/occupationService';
 import { applyEffects } from '../../character/services/statService';
+import { expelFromHigherEducationForCrime } from '../../education/services/educationService';
 import { divorceService } from '../../romance/services/divorceService';
 import { romanceService } from '../../romance/services/romanceService';
 import { getCrimeTemplate, isValidCrimeId } from '../data/crimeCatalog';
@@ -405,6 +407,98 @@ interface SocialWinnerEntry {
   newRelationship: number;
 }
 
+interface SocialPenaltyDeltas {
+  parents: number;
+  siblings: number;
+  childrenOlder: number;
+  childrenYoung: number;
+  colleagues: number;
+  bestFriends: number;
+  friends: number;
+  otherContacts: number;
+}
+
+const PRISON_SOCIAL_DELTAS: SocialPenaltyDeltas = {
+  parents: -22,
+  siblings: -16,
+  childrenOlder: -12,
+  childrenYoung: -8,
+  colleagues: -30,
+  bestFriends: -18,
+  friends: -22,
+  otherContacts: -24,
+};
+
+const PROBATION_FELONY_SOCIAL_DELTAS: SocialPenaltyDeltas = {
+  parents: -16,
+  siblings: -8,
+  childrenOlder: -8,
+  childrenYoung: -4,
+  colleagues: -20,
+  bestFriends: -12,
+  friends: -14,
+  otherContacts: -12,
+};
+
+const PROBATION_MISDEMEANOR_SOCIAL_DELTAS: SocialPenaltyDeltas = {
+  parents: -10,
+  siblings: -6,
+  childrenOlder: -4,
+  childrenYoung: 0,
+  colleagues: -14,
+  bestFriends: -8,
+  friends: -10,
+  otherContacts: -8,
+};
+
+function safeHealthStressDelta(currentHealth: number, drop: number): number {
+  if (!Number.isFinite(currentHealth) || currentHealth <= 5 || drop <= 0) return 0;
+  return -Math.min(drop, Math.max(0, Math.round(currentHealth) - 5));
+}
+
+function applyProbationPartnerConsequence(
+  character: CharacterProfile,
+  isFelony: boolean,
+): {
+  character: CharacterProfile;
+  excludedPartnerId: string | null;
+  excludedPartnerKey: string | null;
+} {
+  const partner = character.partner;
+  if (!partner || partner.romanticStage === 'widowed') {
+    return {
+      character,
+      excludedPartnerId: null,
+      excludedPartnerKey: null,
+    };
+  }
+
+  const partnerId = partner.id;
+  const partnerKey = getNpcDedupKey(partner, 'partner');
+  const relDelta = isFelony ? -20 : -12;
+  const romanceDelta = isFelony ? -18 : -10;
+  const updatedPartner: PersonProfile = {
+    ...partner,
+    relationship: clamp0to100(partner.relationship + relDelta),
+    romanceMeter: clamp0to100((partner.romanceMeter ?? 50) + romanceDelta),
+  };
+
+  return {
+    character: {
+      ...character,
+      partner: updatedPartner,
+      relationships: syncPartnerIntoRelationships(
+        character.relationships,
+        partnerId,
+        partnerKey,
+        updatedPartner,
+      ),
+    },
+    excludedPartnerId: partnerId,
+    excludedPartnerKey: partnerKey,
+  };
+}
+
 const SOCIAL_CATEGORY_ORDER: PrisonSocialPenaltyGroup['category'][] = [
   'parents',
   'siblings',
@@ -416,7 +510,10 @@ const SOCIAL_CATEGORY_ORDER: PrisonSocialPenaltyGroup['category'][] = [
   'other_contacts',
 ];
 
-function classifyGeneralRelationshipEntry(person: PersonProfile): {
+function classifyGeneralRelationshipEntry(
+  person: PersonProfile,
+  deltas: SocialPenaltyDeltas = PRISON_SOCIAL_DELTAS,
+): {
   category: PrisonSocialPenaltyGroup['category'];
   label: string;
   intendedDelta: number;
@@ -432,7 +529,7 @@ function classifyGeneralRelationshipEntry(person: PersonProfile): {
     return {
       category: 'colleagues',
       label: 'Colleagues & Coworkers',
-      intendedDelta: -30,
+      intendedDelta: deltas.colleagues,
       rank: 5,
     };
   }
@@ -445,7 +542,7 @@ function classifyGeneralRelationshipEntry(person: PersonProfile): {
     return {
       category: 'best_friends',
       label: 'Best Friends',
-      intendedDelta: -18,
+      intendedDelta: deltas.bestFriends,
       rank: 6,
     };
   }
@@ -457,22 +554,23 @@ function classifyGeneralRelationshipEntry(person: PersonProfile): {
     return {
       category: 'friends',
       label: 'Friends',
-      intendedDelta: -22,
+      intendedDelta: deltas.friends,
       rank: 7,
     };
   }
   return {
     category: 'other_contacts',
     label: 'Acquaintances & Other Contacts',
-    intendedDelta: -24,
+    intendedDelta: deltas.otherContacts,
     rank: 8,
   };
 }
 
-function applyImprisonmentSocialConsequences(
+function applySocialConsequencesForSentence(
   character: CharacterProfile,
   excludedPartnerId: string | null,
   excludedPartnerKey: string | null,
+  deltas: SocialPenaltyDeltas = PRISON_SOCIAL_DELTAS,
 ): {
   character: CharacterProfile;
   totalImpacted: number;
@@ -484,20 +582,25 @@ function applyImprisonmentSocialConsequences(
     (excludedPartnerId !== null && id === excludedPartnerId) ||
     (excludedPartnerKey !== null && key === excludedPartnerKey);
 
-  // Priority 1: Parents (-22)
+  // Priority 1: Parents
   const fatherKey = getNpcDedupKey(character.parents.father, 'father');
-  if (character.parents.father.isAlive && !isExcludedPartner(fatherKey, character.parents.father.id)) {
+  if (
+    deltas.parents !== 0 &&
+    character.parents.father.isAlive &&
+    !isExcludedPartner(fatherKey, character.parents.father.id)
+  ) {
     winnerByKey.set(fatherKey, {
       category: 'parents',
       label: 'Parents',
-      intendedDelta: -22,
+      intendedDelta: deltas.parents,
       rank: 1,
-      newRelationship: clamp0to100(character.parents.father.relationship - 22),
+      newRelationship: clamp0to100(character.parents.father.relationship + deltas.parents),
     });
   }
 
   const motherKey = getNpcDedupKey(character.parents.mother, 'mother');
   if (
+    deltas.parents !== 0 &&
     character.parents.mother.isAlive &&
     !winnerByKey.has(motherKey) &&
     !isExcludedPartner(motherKey, character.parents.mother.id)
@@ -505,33 +608,36 @@ function applyImprisonmentSocialConsequences(
     winnerByKey.set(motherKey, {
       category: 'parents',
       label: 'Parents',
-      intendedDelta: -22,
+      intendedDelta: deltas.parents,
       rank: 1,
-      newRelationship: clamp0to100(character.parents.mother.relationship - 22),
+      newRelationship: clamp0to100(character.parents.mother.relationship + deltas.parents),
     });
   }
 
-  // Priority 2: Siblings (-16)
-  for (const sib of character.siblings || []) {
-    if (!sib.isAlive) continue;
-    const key = getNpcDedupKey(sib, 'sibling');
-    if (isExcludedPartner(key, sib.id) || winnerByKey.has(key)) continue;
-    winnerByKey.set(key, {
-      category: 'siblings',
-      label: 'Siblings',
-      intendedDelta: -16,
-      rank: 2,
-      newRelationship: clamp0to100(sib.relationship - 16),
-    });
+  // Priority 2: Siblings
+  if (deltas.siblings !== 0) {
+    for (const sib of character.siblings || []) {
+      if (!sib.isAlive) continue;
+      const key = getNpcDedupKey(sib, 'sibling');
+      if (isExcludedPartner(key, sib.id) || winnerByKey.has(key)) continue;
+      winnerByKey.set(key, {
+        category: 'siblings',
+        label: 'Siblings',
+        intendedDelta: deltas.siblings,
+        rank: 2,
+        newRelationship: clamp0to100(sib.relationship + deltas.siblings),
+      });
+    }
   }
 
-  // Priority 3: Children (age >= 5 -> -12, age < 5 -> -8)
+  // Priority 3: Children (age >= 5 vs age < 5)
   for (const child of character.children || []) {
     if (!child.isAlive) continue;
     const key = getNpcDedupKey(child, 'child');
     if (isExcludedPartner(key, child.id) || winnerByKey.has(key)) continue;
     const isOlder = child.age >= 5;
-    const delta = isOlder ? -12 : -8;
+    const delta = isOlder ? deltas.childrenOlder : deltas.childrenYoung;
+    if (delta === 0) continue;
     winnerByKey.set(key, {
       category: isOlder ? 'children_older' : 'children_young',
       label: isOlder ? 'Children (Age 5+)' : 'Young Children (<5)',
@@ -562,7 +668,8 @@ function applyImprisonmentSocialConsequences(
     const key = getNpcDedupKey(person, 'rel');
     if (isExcludedPartner(key, person.id)) continue;
 
-    const spec = classifyGeneralRelationshipEntry(person);
+    const spec = classifyGeneralRelationshipEntry(person, deltas);
+    if (spec.intendedDelta === 0) continue;
     const existing = winnerByKey.get(key);
     if (existing) {
       // Ranks 1-3 strictly win; between 5-8, smaller rank number wins.
@@ -762,7 +869,10 @@ function syncImprisonmentToWorldState(character: CharacterProfile): CharacterPro
   };
 }
 
-function terminateCivilianCareerForPrison(character: CharacterProfile): {
+function terminateCivilianCareerForConviction(
+  character: CharacterProfile,
+  nextOccupation?: string,
+): {
   character: CharacterProfile;
   terminated: boolean;
   terminatedJobTitle?: string;
@@ -770,10 +880,12 @@ function terminateCivilianCareerForPrison(character: CharacterProfile): {
   const currentJob = character.career?.currentJob;
   if (!currentJob) {
     return {
-      character: {
-        ...character,
-        occupation: 'Incarcerated',
-      },
+      character: nextOccupation
+        ? {
+            ...character,
+            occupation: nextOccupation,
+          }
+        : character,
       terminated: false,
     };
   }
@@ -799,7 +911,7 @@ function terminateCivilianCareerForPrison(character: CharacterProfile): {
   return {
     character: {
       ...character,
-      occupation: 'Incarcerated',
+      ...(nextOccupation ? { occupation: nextOccupation } : {}),
       career: {
         ...character.career,
         currentJob: null,
@@ -895,6 +1007,8 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
   };
   if (roll.injured && roll.injuryHealthLoss > 0) {
     statEffects.health = -roll.injuryHealthLoss;
+    statEffects.happiness = -6;
+  } else if (roll.detected) {
     statEffects.happiness = -6;
   } else if (roll.executionSucceeded && !roll.detected) {
     statEffects.happiness = 4;
@@ -1321,7 +1435,12 @@ export function applyCourtOutcome(
       if (finePaid > 0) {
         extraStatEffects.cash = -finePaid;
       }
-      extraStatEffects.happiness = -6;
+      extraStatEffects.happiness = isFelony ? -14 : -8;
+      extraStatEffects.karma = isFelony ? -16 : -8;
+      if (isFelony) {
+        const stressHealth = safeHealthStressDelta(workingChar.stats.health, 4);
+        if (stressHealth < 0) extraStatEffects.health = stressHealth;
+      }
       relSpec = {
         parents: isFelony ? -12 : -6,
         partner: isFelony ? -10 : -6,
@@ -1346,6 +1465,13 @@ export function applyCourtOutcome(
         workingChar.age,
       );
 
+      if (!isJuvenile) {
+        const careerResult = terminateCivilianCareerForConviction(workingChar);
+        workingChar = careerResult.character;
+        employmentTerminated = careerResult.terminated;
+        terminatedJobTitle = careerResult.terminatedJobTitle ?? null;
+      }
+
       const probationFineRaw = Math.round(baseRawFine * 0.5);
       if (isJuvenile) {
         fineImposed = Math.min(availableCash, probationFineRaw);
@@ -1358,7 +1484,15 @@ export function applyCourtOutcome(
       if (finePaid > 0) {
         extraStatEffects.cash = -finePaid;
       }
-      extraStatEffects.happiness = -10;
+      extraStatEffects.happiness = isFelony ? -24 : -15;
+      extraStatEffects.karma = isFelony ? -22 : -12;
+      const probStressHealth = safeHealthStressDelta(workingChar.stats.health, isFelony ? 8 : 4);
+      if (probStressHealth < 0) {
+        extraStatEffects.health = probStressHealth;
+      }
+      if (isFelony) {
+        extraStatEffects.looks = -4;
+      }
       relSpec = {
         parents: isFelony ? -14 : -8,
         partner: isFelony ? -12 : -8,
@@ -1411,7 +1545,7 @@ export function applyCourtOutcome(
       };
 
       // 1. Terminate active civilian job
-      const careerResult = terminateCivilianCareerForPrison(workingChar);
+      const careerResult = terminateCivilianCareerForConviction(workingChar, 'Incarcerated');
       workingChar = careerResult.character;
       employmentTerminated = careerResult.terminated;
       terminatedJobTitle = careerResult.terminatedJobTitle ?? null;
@@ -1436,12 +1570,46 @@ export function applyCourtOutcome(
       }
 
       extraStatEffects.happiness = -18;
+      extraStatEffects.karma = isFelony ? -25 : -15;
+      const prisonStressHealth = safeHealthStressDelta(workingChar.stats.health, 6);
+      if (prisonStressHealth < 0) {
+        extraStatEffects.health = prisonStressHealth;
+      }
       heatDelta = -12;
       break;
     }
 
     default:
       break;
+  }
+
+  let expelledFromSchool: string | null = null;
+  if (
+    outcome === 'imprisoned' ||
+    (outcome === 'probation' && !isJuvenile) ||
+    (outcome === 'fined' && !isJuvenile && isFelony)
+  ) {
+    const expulsionResult = expelFromHigherEducationForCrime(
+      workingChar,
+      pendingCase.title,
+      outcome,
+    );
+    workingChar = expulsionResult.character;
+    expelledFromSchool = expulsionResult.expelledFromSchool;
+  }
+
+  if (outcome !== 'imprisoned' && (employmentTerminated || expelledFromSchool)) {
+    workingChar = {
+      ...workingChar,
+      occupation: resolveCharacterOccupation(workingChar, {
+        age: workingChar.age,
+        currentOccupationBaseline: 'Unemployed',
+        educationStage: workingChar.education.currentStage,
+        professionalSchool: workingChar.education.professionalSchool,
+        activeJobTitle: workingChar.career.currentJob?.title,
+        business: workingChar.business,
+      }),
+    };
   }
 
   const record: CrimeRecordEntry = {
@@ -1487,25 +1655,29 @@ export function applyCourtOutcome(
       finePaid > 0 ? ` Paid $${finePaid.toLocaleString()} in restitution.` : ''
     }`;
   } else if (outcome === 'fined') {
+    const expelledText = expelledFromSchool ? ` You were expelled from ${expelledFromSchool}.` : '';
     message = `${
       isJuvenile ? 'Juvenile court' : 'Criminal court'
     } ordered a $${fineImposed.toLocaleString()} fine for ${pendingCase.title}. Paid $${finePaid.toLocaleString()}${
       unpaidFineAdded > 0 ? ` ($${unpaidFineAdded.toLocaleString()} added to unpaid fines)` : ''
-    }.`;
+    }.${expelledText}`;
   } else if (outcome === 'probation') {
+    const jobLossText = employmentTerminated ? ' Your civilian job was terminated.' : '';
+    const expelledText = expelledFromSchool ? ` You were expelled from ${expelledFromSchool}.` : '';
     message = `Sentenced to ${probationYears} year(s) of ${
       isJuvenile ? 'juvenile' : 'adult'
     } probation for ${pendingCase.title}.${
       fineImposed > 0 ? ` Fine: $${fineImposed.toLocaleString()} (paid $${finePaid.toLocaleString()}).` : ''
-    }`;
+    }${jobLossText}${expelledText}`;
   } else {
     eventIcon = '⛓️';
     const closedBizText = closedBusinessName
       ? ` ${closedBusinessName} was liquidated ($${businessLiquidationProceeds.toLocaleString()} recovered).`
       : '';
+    const expelledText = expelledFromSchool ? ` Expelled from ${expelledFromSchool}.` : '';
     message = `Sentenced to ${sentenceYears} year(s) at ${nextPrison?.facilityName || 'state prison'} for ${pendingCase.title}.${
       employmentTerminated ? ' Your civilian job was terminated.' : ''
-    }${closedBizText}`;
+    }${closedBizText}${expelledText}`;
   }
 
   const courtEvent: LifeEvent = {
@@ -1528,10 +1700,11 @@ export function applyCourtOutcome(
       sentenceYears,
       isFelony,
     );
-    const socialResult = applyImprisonmentSocialConsequences(
+    const socialResult = applySocialConsequencesForSentence(
       partnerResult.character,
       partnerResult.excludedPartnerId,
       partnerResult.excludedPartnerKey,
+      PRISON_SOCIAL_DELTAS,
     );
     relChar = socialResult.character;
 
@@ -1550,6 +1723,7 @@ export function applyCourtOutcome(
       terminatedJobTitle,
       closedBusinessName,
       businessLiquidationProceeds,
+      expelledFromSchool,
       partnerConsequence: partnerResult.summary,
       socialConsequences: {
         totalImpacted: socialResult.totalImpacted,
@@ -1562,6 +1736,15 @@ export function applyCourtOutcome(
         'Ordinary outside-world events suspended',
       ],
     };
+  } else if (outcome === 'probation' && !isJuvenile) {
+    const probPartnerResult = applyProbationPartnerConsequence(workingChar, isFelony);
+    const probSocialResult = applySocialConsequencesForSentence(
+      probPartnerResult.character,
+      probPartnerResult.excludedPartnerId,
+      probPartnerResult.excludedPartnerKey,
+      isFelony ? PROBATION_FELONY_SOCIAL_DELTAS : PROBATION_MISDEMEANOR_SOCIAL_DELTAS,
+    );
+    relChar = probSocialResult.character;
   } else {
     const relOutcome = applyCrimeRelationshipConsequences(workingChar, relSpec);
     relChar = relOutcome.character;
@@ -1587,9 +1770,15 @@ export function applyCourtOutcome(
   );
 
   let finalChar = stampPlayerNetWorth(effectedChar);
-  if (character.worldState?.schemaVersion === 2) {
+  if ((outcome === 'imprisoned' || outcome === 'probation') && character.worldState?.schemaVersion === 2) {
     finalChar = syncImprisonmentToWorldState(finalChar);
   }
+
+  const appliedStatDeltas: Partial<Record<'happiness' | 'karma' | 'health' | 'looks', number>> = {};
+  if (extraStatEffects.happiness) appliedStatDeltas.happiness = extraStatEffects.happiness;
+  if (extraStatEffects.karma) appliedStatDeltas.karma = extraStatEffects.karma;
+  if (extraStatEffects.health) appliedStatDeltas.health = extraStatEffects.health;
+  if (extraStatEffects.looks) appliedStatDeltas.looks = extraStatEffects.looks;
 
   return {
     ok: true,
@@ -1604,6 +1793,9 @@ export function applyCourtOutcome(
     sentenceYears,
     probationYears,
     employmentTerminated,
+    terminatedJobTitle,
+    expelledFromSchool,
+    appliedStatDeltas,
     prisonConsequences,
     message,
   };

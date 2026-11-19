@@ -13,8 +13,24 @@ import type {
 import { getBusinessTemplateById } from '../data/businessCatalog';
 import { createId } from '../../../utils/id';
 import { stampPlayerNetWorth } from '../../assets/services/assetService';
-import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
+import {
+  evaluateBusinessConsequence,
+  resolveBusinessManagementCapability,
+  type BusinessConsequenceDecision,
+} from '../../crime/data/crimeConsequences';
+import {
+  evaluateFinancingEligibility,
+  isCurrentlyIncarcerated,
+} from '../../crime/services/crimeSelectors';
+import type {
+  CrimeExposureLevel,
+  CrimeOutcomeStatus,
+  PendingCourtCase,
+} from '../../crime/types';
 import { randomInt } from '../../../utils/random';
+
+export const ANNUAL_LOAN_INTEREST_RATE = 0.075;
+export const APPOINT_MANAGER_TREASURY_COST = 12000;
 
 const clamp = (val: number, min = 0, max = 100) => Math.min(max, Math.max(min, Math.round(val)));
 
@@ -76,15 +92,20 @@ export function evaluateFundingEligibility(
 
   const cash = character.cash || 0;
   const netWorth = cash + (character.bankBalance || 0);
-  const karma = character.stats.karma;
   const smarts = character.stats.smarts;
 
   // 1. Bootstrapped
   const canBootstrapped = cash >= template.minSeedCapital;
 
   // 2. Commercial Bank Loan (25% down, 10-year term at 7.5% annual interest)
-  const hasCreditWorthiness = karma >= 40 && netWorth >= bankLoanDownPayment * 1.5;
-  const canBankLoan = cash >= bankLoanDownPayment && hasCreditWorthiness;
+  const loanUnderwriting = evaluateFinancingEligibility(
+    character,
+    'commercial_loan',
+    bankLoanAmount,
+  );
+  const hasDownPaymentAndNetWorth =
+    cash >= bankLoanDownPayment && netWorth >= bankLoanDownPayment * 1.5;
+  const canBankLoan = hasDownPaymentAndNetWorth && loanUnderwriting.eligible;
 
   // 3. Angel Investors Pitch
   const diplomas = character.education?.diplomas || [];
@@ -94,8 +115,9 @@ export function evaluateFundingEligibility(
   const hasBusinessDegree = diplomas.some(
     (d) => d.includes('Business') || d.includes('M.B.A.') || d.includes('Finance')
   );
-
-  const canPitchAngels = smarts >= 55 || hasMatchingDegree || hasBusinessDegree;
+  const angelUnderwriting = evaluateFinancingEligibility(character, 'angel_equity');
+  const canPitchAngels =
+    (smarts >= 55 || hasMatchingDegree || hasBusinessDegree) && angelUnderwriting.eligible;
 
   // Angel valuation bonus: better smarts & degrees = less equity given away
   let baselineInvestorTake = 30; // 30% to investors, 70% to player
@@ -109,7 +131,13 @@ export function evaluateFundingEligibility(
 
   let reason = '';
   if (!canBootstrapped && !canBankLoan && !canPitchAngels) {
-    reason = `Requires at least $${bankLoanDownPayment.toLocaleString()} cash down payment or higher Smarts to pitch investors.`;
+    if (!loanUnderwriting.eligible && loanUnderwriting.reason) {
+      reason = loanUnderwriting.reason;
+    } else if (!angelUnderwriting.eligible && angelUnderwriting.reason) {
+      reason = angelUnderwriting.reason;
+    } else {
+      reason = `Requires at least $${bankLoanDownPayment.toLocaleString()} cash down payment or higher Smarts to pitch investors.`;
+    }
   }
 
   return {
@@ -217,6 +245,13 @@ export function foundBusiness(
     // Loans
     outstandingLoan,
     annualLoanPayment,
+    loanGuaranteeType:
+      params.fundingMethod === 'bank_loan' ? 'personally_guaranteed' : 'corporate_only',
+
+    // Explicit Management & Continuity Metadata
+    managementCapability: 'owner_operated',
+    operationalStatus: 'active',
+    absenteeLossYears: 0,
 
     // Telemetry
     yearsInOperation: 0,
@@ -289,32 +324,98 @@ export function progressBusinessForYear(
   const nextYear = character.birthYear + nextAge;
   const events: LifeEvent[] = [];
 
-  if (isCurrentlyIncarcerated(character)) {
-    const suspendedReport: BusinessFiscalReport = {
+  const incarcerated = isCurrentlyIncarcerated(character);
+  const capability = resolveBusinessManagementCapability(business);
+  const isDelegatedIncarcerated = incarcerated && capability === 'delegated_management';
+  const isPausedIncarcerated =
+    incarcerated &&
+    (capability !== 'delegated_management' || business.operationalStatus === 'paused_incarceration');
+
+  if (isPausedIncarcerationMode(isPausedIncarcerated, isDelegatedIncarcerated)) {
+    const openingPrincipal = Math.max(0, business.outstandingLoan);
+    const interestDue =
+      openingPrincipal > 0 ? Math.round(openingPrincipal * ANNUAL_LOAN_INTEREST_RATE) : 0;
+    const scheduledInstallment =
+      openingPrincipal > 0
+        ? Math.min(openingPrincipal + interestDue, business.annualLoanPayment)
+        : 0;
+    const availableTreasury = Math.max(0, business.treasury);
+    const debtCashPaid = Math.min(availableTreasury, scheduledInstallment);
+    const interestPaid = Math.min(interestDue, debtCashPaid);
+    const unpaidInterest = interestDue - interestPaid;
+    const principalRepaid = Math.min(openingPrincipal, debtCashPaid - interestPaid);
+    const closingPrincipal = openingPrincipal - principalRepaid + unpaidInterest;
+    const nextAnnualLoanPayment = closingPrincipal === 0 ? 0 : business.annualLoanPayment;
+
+    const preTaxProfit = -interestDue;
+    const taxesPaid = 0;
+    const netProfit = preTaxProfit - taxesPaid;
+    const netTreasuryAddition = netProfit + unpaidInterest - principalRepaid;
+    const endingTreasury = business.treasury + netTreasuryAddition;
+
+    const pausedReport: BusinessFiscalReport = {
       grossRevenue: 0,
       cogs: 0,
       payrollExpense: 0,
       marketingExpense: 0,
       rndExpense: 0,
       facilityExpense: 0,
-      loanPayment: 0,
+      managementExpense: 0,
+      loanPayment: debtCashPaid,
+      loanInterestExpense: interestDue,
+      loanPrincipalPaid: principalRepaid,
+      loanUnpaidInterestCapitalized: unpaidInterest,
       operatingExpenses: 0,
-      preTaxProfit: 0,
-      taxesPaid: 0,
-      netProfit: 0,
+      preTaxProfit,
+      taxesPaid,
+      netProfit,
       ownerDividendPaid: 0,
+      externalShareholderDividendPaid: 0,
       ownerSalaryPaid: 0,
       totalPayoutToPlayer: 0,
-      netTreasuryAddition: 0,
-      endingTreasury: business.treasury,
+      netTreasuryAddition,
+      endingTreasury,
       endingValuation: business.valuation,
       climate: 'stable',
       climateMultiplier: 1.0,
     };
 
+    const collapsed =
+      endingTreasury < -business.valuation * 0.5 ||
+      (closingPrincipal > 0 && closingPrincipal > business.valuation * 1.5);
+
+    if (collapsed) {
+      const salvagePayout = calculateBusinessLiquidationProceeds({
+        ...business,
+        treasury: endingTreasury,
+        outstandingLoan: closingPrincipal,
+      });
+      return {
+        business: null,
+        netPayoutToPlayer: salvagePayout,
+        events: [
+          {
+            id: createId(),
+            age: nextAge,
+            year: nextYear,
+            title: `${business.name} Forced Liquidation`,
+            message: `${business.name} collapsed into forced liquidation under unserviced debt while operations were paused during your incarceration.`,
+            category: 'misfortune',
+            icon: '🚨',
+          },
+        ],
+        annualReport: pausedReport,
+      };
+    }
+
     return {
       business: {
         ...business,
+        treasury: endingTreasury,
+        outstandingLoan: closingPrincipal,
+        annualLoanPayment: nextAnnualLoanPayment,
+        managementCapability: capability,
+        operationalStatus: 'paused_incarceration',
         actionCooldowns: {},
         lastFiscalReport: undefined,
       },
@@ -324,13 +425,16 @@ export function progressBusinessForYear(
           id: createId(),
           age: nextAge,
           year: nextYear,
-          title: 'Business Operations Suspended',
-          message: `Personal income and owner payouts from ${business.name} were suspended while you remained incarcerated.`,
+          title: 'Business Operations Paused',
+          message:
+            openingPrincipal > 0
+              ? `Operations and owner payouts at ${business.name} remained paused while you were incarcerated. Corporate treasury paid $${debtCashPaid.toLocaleString()} toward loan obligations ($${closingPrincipal.toLocaleString()} balance remaining).`
+              : `Personal income and owner payouts from ${business.name} were suspended while you remained incarcerated.`,
           category: 'business',
           icon: '🏢',
         },
       ],
-      annualReport: suspendedReport,
+      annualReport: pausedReport,
     };
   }
 
@@ -401,10 +505,11 @@ export function progressBusinessForYear(
     qualityDelta = 8;
   }
 
-  // Next Vitality Gauges
-  const nextMorale = clamp(business.morale + moraleDelta + randomInt(-2, 3));
+  // Absentee founder drift when running under delegated management during prison
+  const absenteeGaugeDrag = isDelegatedIncarcerated ? -5 : 0;
+  const nextMorale = clamp(business.morale + moraleDelta + absenteeGaugeDrag + randomInt(-2, 3));
   const nextBrand = clamp(business.brandReputation + brandDelta + randomInt(-2, 3));
-  const nextQuality = clamp(business.qualityScore + qualityDelta + randomInt(-2, 3));
+  const nextQuality = clamp(business.qualityScore + qualityDelta + absenteeGaugeDrag + randomInt(-2, 3));
 
   // Morale & Quality feedback into customer volume
   const qualityFactor = 0.75 + (nextQuality / 100) * 0.40;
@@ -433,13 +538,15 @@ export function progressBusinessForYear(
     ? Math.round(template.baseAnnualRevenue * (1 + business.yearsInOperation * 0.08) * locationsMultiplier)
     : 150000;
 
+  const absenteeDemandMult = isDelegatedIncarcerated ? 0.85 : 1.0;
   const totalDemandMultiplier =
     climateMultiplier *
     pricingVolumeMult *
     marketingDemandMult *
     qualityFactor *
     moraleFactor *
-    founderAcumenMultiplier;
+    founderAcumenMultiplier *
+    absenteeDemandMult;
 
   const grossRevenue = Math.max(
     10000,
@@ -456,7 +563,7 @@ export function progressBusinessForYear(
   );
   const cogs = Math.round(grossRevenue * effectiveCogsRate);
 
-  // Operating Expenses
+  // Operating Expenses (excluding loan principal repayment)
   const facilityRate =
     business.sector === 'software_tech' || business.sector === 'media_creative'
       ? 0.025
@@ -467,43 +574,64 @@ export function progressBusinessForYear(
   const marketingExpense = Math.round(grossRevenue * marketingSpendPct);
   const rndExpense = Math.round(grossRevenue * rndSpendPct);
   const payrollExpense = Math.round(grossRevenue * targetPayrollPct * payrollCostMult);
+  const managementExpense = isDelegatedIncarcerated ? Math.round(grossRevenue * 0.05) : 0;
 
-  // Loan Debt Service
-  let loanPayment = 0;
-  let nextLoanBalance = business.outstandingLoan;
-  if (business.outstandingLoan > 0) {
-    loanPayment = Math.min(business.outstandingLoan, business.annualLoanPayment);
-    const principalPaid = Math.round(loanPayment * 0.7);
-    nextLoanBalance = Math.max(0, business.outstandingLoan - principalPaid);
-  }
+  // Unified 7.5% Loan Accounting: Interest Expense vs. Principal Repayment
+  const openingPrincipal = Math.max(0, business.outstandingLoan);
+  const interestDue =
+    openingPrincipal > 0 ? Math.round(openingPrincipal * ANNUAL_LOAN_INTEREST_RATE) : 0;
+  const scheduledInstallment =
+    openingPrincipal > 0
+      ? Math.min(openingPrincipal + interestDue, business.annualLoanPayment)
+      : 0;
+  const loanPayment = scheduledInstallment;
+  const interestPaid = Math.min(interestDue, loanPayment);
+  const unpaidInterest = interestDue - interestPaid;
+  const principalRepaid = Math.min(openingPrincipal, loanPayment - interestPaid);
+  const nextLoanBalance = openingPrincipal - principalRepaid + unpaidInterest;
+  const nextAnnualLoanPayment = nextLoanBalance === 0 ? 0 : business.annualLoanPayment;
 
   const operatingExpenses =
-    cogs + payrollExpense + facilityExpense + marketingExpense + rndExpense + loanPayment;
+    cogs + payrollExpense + facilityExpense + marketingExpense + rndExpense + managementExpense;
 
-  const preTaxProfit = grossRevenue - operatingExpenses;
+  const preTaxProfit = grossRevenue - operatingExpenses - interestDue;
   const taxesPaid = preTaxProfit > 0 ? Math.round(preTaxProfit * 0.21) : 0;
   const netProfit = preTaxProfit - taxesPaid;
 
-  // 4. Owner Payouts (Salary + Dividend)
+  // 4. Owner Payouts (Salary + Shareholder Dividends)
+  const postPrincipalAvailableCash =
+    business.treasury + netProfit + unpaidInterest - principalRepaid;
+
   let ownerSalaryPaid = 0;
-  if (business.ownerSalary > 0) {
+  if (!isDelegatedIncarcerated && business.ownerSalary > 0) {
     ownerSalaryPaid = Math.min(
       business.ownerSalary,
-      Math.max(0, business.treasury + Math.max(0, netProfit))
+      Math.max(
+        0,
+        business.treasury + Math.max(0, netProfit + unpaidInterest - principalRepaid),
+      )
     );
   }
 
-  let ownerDividendPaid = 0;
-  if (netProfit > 0 && business.dividendRatePct > 0) {
-    const totalDividendPool = Math.round(netProfit * (business.dividendRatePct / 100));
-    ownerDividendPaid = Math.round(totalDividendPool * (business.equityPct / 100));
-  }
+  const candidateDividendPool =
+    netProfit > 0 && business.dividendRatePct > 0
+      ? Math.round(netProfit * (business.dividendRatePct / 100))
+      : 0;
+  const incarcerationReserveFloor = Math.max(5000, Math.round(business.valuation * 0.10));
+  const totalDividendPool = isDelegatedIncarcerated
+    ? candidateDividendPool > 0 &&
+      postPrincipalAvailableCash - candidateDividendPool >= incarcerationReserveFloor
+      ? candidateDividendPool
+      : 0
+    : candidateDividendPool;
 
+  const ownerDividendPaid = Math.round(totalDividendPool * (business.equityPct / 100));
+  const externalShareholderDividendPaid = totalDividendPool - ownerDividendPaid;
   const totalPayoutToPlayer = ownerSalaryPaid + ownerDividendPaid;
 
-  // 5. Corporate Treasury Balance
+  // 5. Corporate Treasury Balance (universal double-entry reconciliation)
   const netTreasuryAddition =
-    netProfit - (ownerSalaryPaid + (netProfit > 0 ? Math.round(netProfit * (business.dividendRatePct / 100)) : 0));
+    netProfit + unpaidInterest - principalRepaid - ownerSalaryPaid - totalDividendPool;
   const endingTreasury = business.treasury + netTreasuryAddition;
 
   // 6. Valuation Model
@@ -515,50 +643,12 @@ export function progressBusinessForYear(
     Math.round(enterpriseValue + Math.max(0, endingTreasury) - nextLoanBalance)
   );
 
-  // 7. Events & Milestones
-  if (climate === 'boom') {
-    events.push({
-      id: createId(),
-      age: nextAge,
-      year: nextYear,
-      title: 'Economic Market Boom!',
-      message: `Consumer confidence surged across the nation! Surging footfall boosted ${business.name}'s annual sales by +32%.`,
-      category: 'business',
-      icon: '🚀',
-    });
-  } else if (climate === 'recession') {
-    events.push({
-      id: createId(),
-      age: nextAge,
-      year: nextYear,
-      title: 'Economic Downturn',
-      message: `A nationwide recession tightened consumer wallets, dragging ${business.name}'s revenue down by -28%.`,
-      category: 'business',
-      icon: '📉',
-    });
-  }
-
-  if (endingTreasury < 0) {
-    events.push({
-      id: createId(),
-      age: nextAge,
-      year: nextYear,
-      title: 'Insolvency Warning!',
-      message: `${business.name} operated at a cash deficit, leaving the corporate treasury at -$${Math.abs(endingTreasury).toLocaleString()}. You must inject personal cash or adjust pricing to avoid bankruptcy.`,
-      category: 'misfortune',
-      icon: '🚨',
-    });
-  } else if (totalPayoutToPlayer >= 50000) {
-    events.push({
-      id: createId(),
-      age: nextAge,
-      year: nextYear,
-      title: 'Corporate Dividend & Salary Payout',
-      message: `You withdrew $${totalPayoutToPlayer.toLocaleString()} from ${business.name} ($${ownerSalaryPaid.toLocaleString()} CEO Salary + $${ownerDividendPaid.toLocaleString()} Shareholder Dividend).`,
-      category: 'money',
-      icon: '💵',
-    });
-  }
+  // Absentee loss counter & delegated collapse check
+  const nextAbsenteeLossYears = isDelegatedIncarcerated
+    ? netProfit < 0 || endingTreasury < 0
+      ? (business.absenteeLossYears ?? 0) + 1
+      : 0
+    : 0;
 
   const fiscalReport: BusinessFiscalReport = {
     grossRevenue,
@@ -567,12 +657,17 @@ export function progressBusinessForYear(
     marketingExpense,
     rndExpense,
     facilityExpense,
+    managementExpense,
     loanPayment,
+    loanInterestExpense: interestDue,
+    loanPrincipalPaid: principalRepaid,
+    loanUnpaidInterestCapitalized: unpaidInterest,
     operatingExpenses,
     preTaxProfit,
     taxesPaid,
     netProfit,
     ownerDividendPaid,
+    externalShareholderDividendPaid,
     ownerSalaryPaid,
     totalPayoutToPlayer,
     netTreasuryAddition,
@@ -581,6 +676,94 @@ export function progressBusinessForYear(
     climate,
     climateMultiplier,
   };
+
+  if (isDelegatedIncarcerated) {
+    const collapsed =
+      endingTreasury < -endingValuation * 0.5 ||
+      (nextAbsenteeLossYears >= 2 && endingTreasury <= 0) ||
+      nextMorale < 15 ||
+      (nextLoanBalance > 0 && nextLoanBalance > endingValuation * 1.5);
+
+    if (collapsed) {
+      const salvagePayout = calculateBusinessLiquidationProceeds({
+        ...business,
+        treasury: endingTreasury,
+        valuation: endingValuation,
+        outstandingLoan: nextLoanBalance,
+      });
+      return {
+        business: null,
+        netPayoutToPlayer: salvagePayout,
+        events: [
+          {
+            id: createId(),
+            age: nextAge,
+            year: nextYear,
+            title: `${business.name} Collapsed During Incarceration`,
+            message: `${business.name} suffered operational collapse under absentee management and was liquidated.`,
+            category: 'misfortune',
+            icon: '🚨',
+          },
+        ],
+        annualReport: fiscalReport,
+      };
+    }
+
+    events.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: `${business.name} Delegated Operations`,
+      message: `${business.name} operated under delegated management while you were incarcerated (Net Profit: $${netProfit.toLocaleString()}, Passive Dividend: $${ownerDividendPaid.toLocaleString()}).`,
+      category: 'business',
+      icon: '🏢',
+    });
+  } else {
+    // 7. Events & Milestones (free-world operation)
+    if (climate === 'boom') {
+      events.push({
+        id: createId(),
+        age: nextAge,
+        year: nextYear,
+        title: 'Economic Market Boom!',
+        message: `Consumer confidence surged across the nation! Surging footfall boosted ${business.name}'s annual sales by +32%.`,
+        category: 'business',
+        icon: '🚀',
+      });
+    } else if (climate === 'recession') {
+      events.push({
+        id: createId(),
+        age: nextAge,
+        year: nextYear,
+        title: 'Economic Downturn',
+        message: `A nationwide recession tightened consumer wallets, dragging ${business.name}'s revenue down by -28%.`,
+        category: 'business',
+        icon: '📉',
+      });
+    }
+
+    if (endingTreasury < 0) {
+      events.push({
+        id: createId(),
+        age: nextAge,
+        year: nextYear,
+        title: 'Insolvency Warning!',
+        message: `${business.name} operated at a cash deficit, leaving the corporate treasury at -$${Math.abs(endingTreasury).toLocaleString()}. You must inject personal cash or adjust pricing to avoid bankruptcy.`,
+        category: 'misfortune',
+        icon: '🚨',
+      });
+    } else if (totalPayoutToPlayer >= 50000) {
+      events.push({
+        id: createId(),
+        age: nextAge,
+        year: nextYear,
+        title: 'Corporate Dividend & Salary Payout',
+        message: `You withdrew $${totalPayoutToPlayer.toLocaleString()} from ${business.name} ($${ownerSalaryPaid.toLocaleString()} CEO Salary + $${ownerDividendPaid.toLocaleString()} Shareholder Dividend).`,
+        category: 'money',
+        icon: '💵',
+      });
+    }
+  }
 
   const updatedBusiness: ActiveBusinessProfile = {
     ...business,
@@ -591,9 +774,12 @@ export function progressBusinessForYear(
     brandReputation: nextBrand,
     qualityScore: nextQuality,
     outstandingLoan: nextLoanBalance,
+    annualLoanPayment: nextAnnualLoanPayment,
+    operationalStatus: 'active',
+    absenteeLossYears: nextAbsenteeLossYears,
     lifetimeRevenue: business.lifetimeRevenue + grossRevenue,
     lifetimeProfit: business.lifetimeProfit + netProfit,
-    lastFiscalReport: fiscalReport,
+    lastFiscalReport: isDelegatedIncarcerated ? undefined : fiscalReport,
     locationsCount: business.locationsCount || 1,
     equipmentTier: business.equipmentTier || 0,
     hasAuditCompleted: business.hasAuditCompleted || false,
@@ -608,12 +794,22 @@ export function progressBusinessForYear(
   };
 }
 
+function isPausedIncarcerationMode(
+  isPausedIncarcerated: boolean,
+  isDelegatedIncarcerated: boolean,
+): boolean {
+  return isPausedIncarcerated && !isDelegatedIncarcerated;
+}
+
 /** Injects cash from the player's personal wallet into the business treasury. */
 export function injectCapitalIntoBusiness(
   business: ActiveBusinessProfile,
   character: CharacterProfile,
   amount: number
 ): { business: ActiveBusinessProfile; character: CharacterProfile } {
+  if (isCurrentlyIncarcerated(character)) {
+    return { business, character };
+  }
   const actualAmount = Math.min(character.cash, Math.max(1000, Math.round(amount)));
   if (actualAmount <= 0) return { business, character };
 
@@ -1186,6 +1382,48 @@ export function executeBusinessAction(
     };
   }
 
+  // 11. Appoint Operations Manager (Explicit Delegated Management Capability)
+  if (actionType === 'appoint_manager') {
+    if (resolveBusinessManagementCapability(business) === 'delegated_management') {
+      return {
+        business,
+        character,
+        success: false,
+        message: 'You have already appointed delegated executive management for this company!',
+      };
+    }
+    if (business.employeeCount < 2) {
+      return {
+        business,
+        character,
+        success: false,
+        message: 'Requires at least 2 employees before appointing a dedicated operations manager.',
+      };
+    }
+    if (business.treasury < APPOINT_MANAGER_TREASURY_COST) {
+      return {
+        business,
+        character,
+        success: false,
+        message: `Requires $${APPOINT_MANAGER_TREASURY_COST.toLocaleString()} in corporate treasury to onboard an operations manager.`,
+      };
+    }
+    const updatedBiz: ActiveBusinessProfile = {
+      ...business,
+      treasury: business.treasury - APPOINT_MANAGER_TREASURY_COST,
+      managementCapability: 'delegated_management',
+      operationalStatus: 'active',
+      morale: clamp(business.morale + 5),
+      qualityScore: clamp(business.qualityScore + 4),
+    };
+    return {
+      business: updatedBiz,
+      character: { ...character, business: updatedBiz },
+      success: true,
+      message: `Appointed a dedicated Operations Manager! ${business.name} now has explicit delegated management continuity.`,
+    };
+  }
+
   return { business, character, success: false, message: 'Unknown action.' };
 }
 
@@ -1196,11 +1434,22 @@ export function payOffLoanEarly(
   amount: number,
   source: 'treasury' | 'personal'
 ): BusinessActionResult {
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      business,
+      character,
+      success: false,
+      message: 'Early loan repayments are unavailable while incarcerated.',
+    };
+  }
   if (business.outstandingLoan <= 0) {
     return { business, character, success: false, message: 'Company is already debt-free!' };
   }
 
   const payoff = Math.min(business.outstandingLoan, Math.max(1000, Math.round(amount)));
+  if (payoff <= 0) {
+    return { business, character, success: false, message: 'Invalid repayment amount.' };
+  }
   if (source === 'treasury') {
     if (business.treasury < payoff) {
       return {
@@ -1254,6 +1503,14 @@ export function rebrandBusiness(
   newIcon?: string,
   newSlogan?: string
 ): BusinessActionResult {
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      business,
+      character,
+      success: false,
+      message: 'Executive rebranding is unavailable while incarcerated.',
+    };
+  }
   const trimmed = newName.trim();
   if (!trimmed) {
     return { business, character, success: false, message: 'Please enter a valid business name.' };
@@ -1287,5 +1544,139 @@ export function rebrandBusiness(
     character: updatedChar,
     success: true,
     message: `Successfully rebranded company to ${trimmed}!`,
+  };
+}
+
+export interface BusinessCrimeConsequenceResult {
+  character: CharacterProfile;
+  decision: BusinessConsequenceDecision;
+  applied: boolean;
+  closed: boolean;
+  closedBusinessName: string | null;
+  payoutAmount: number;
+}
+
+/**
+ * Integrates Phase 1 `evaluateBusinessConsequence()` into active business state with strict
+ * per-case idempotency: handles forced liquidation, caretaker pause (`legacy_unassigned`),
+ * delegated management continuity (`delegated_management`), and non-custodial reputational scandal.
+ */
+export function applyBusinessCrimeConsequence(
+  character: CharacterProfile,
+  pendingCase: Pick<PendingCourtCase, 'id' | 'crimeId' | 'offenseClass' | 'title'>,
+  outcome: CrimeOutcomeStatus,
+  exposure: CrimeExposureLevel,
+): BusinessCrimeConsequenceResult {
+  const activeBusiness = character.business;
+  const decision = evaluateBusinessConsequence(activeBusiness, pendingCase, outcome, exposure);
+
+  if (!activeBusiness) {
+    return {
+      character,
+      decision,
+      applied: false,
+      closed: false,
+      closedBusinessName: null,
+      payoutAmount: 0,
+    };
+  }
+
+  if (activeBusiness.lastCrimeConsequenceCaseId === pendingCase.id) {
+    return {
+      character,
+      decision,
+      applied: false,
+      closed: false,
+      closedBusinessName: null,
+      payoutAmount: 0,
+    };
+  }
+
+  if (decision.action === 'none') {
+    return {
+      character: {
+        ...character,
+        business: {
+          ...activeBusiness,
+          lastCrimeConsequenceCaseId: pendingCase.id,
+        },
+      },
+      decision,
+      applied: false,
+      closed: false,
+      closedBusinessName: null,
+      payoutAmount: 0,
+    };
+  }
+
+  if (decision.action === 'liquidate') {
+    const liquidated = liquidateBusinessForImprisonment(character);
+    return {
+      character: liquidated.character,
+      decision,
+      applied: liquidated.closed,
+      closed: liquidated.closed,
+      closedBusinessName: liquidated.closedBusinessName,
+      payoutAmount: liquidated.payoutAmount,
+    };
+  }
+
+  const nextBrand = clamp(activeBusiness.brandReputation + decision.brandDelta);
+  const nextMorale = clamp(activeBusiness.morale + decision.moraleDelta);
+  const currentCapability = resolveBusinessManagementCapability(activeBusiness);
+  const managerResigned =
+    currentCapability === 'delegated_management' && nextMorale < 15;
+  const nextCapability = managerResigned ? 'management_unavailable' : currentCapability;
+  const nextOperationalStatus =
+    decision.action === 'pause_incarceration'
+      ? 'paused_incarceration'
+      : 'active';
+
+  const eventId = `${pendingCase.id}-biz-consequence`;
+  const eventTitle =
+    decision.action === 'pause_incarceration'
+      ? `${activeBusiness.name} Operations Paused`
+      : decision.action === 'continue_delegated'
+        ? `${activeBusiness.name} Delegated Management`
+        : `${activeBusiness.name} Reputational Scandal`;
+  const eventMessage =
+    decision.reason ||
+    `Criminal proceedings for ${pendingCase.title} impacted ${activeBusiness.name}.`;
+
+  const updatedBusiness: ActiveBusinessProfile = {
+    ...activeBusiness,
+    brandReputation: nextBrand,
+    morale: nextMorale,
+    managementCapability: nextCapability,
+    operationalStatus: nextOperationalStatus,
+    lastCrimeConsequenceCaseId: pendingCase.id,
+  };
+
+  const nextTimeline = character.timeline.some((e) => e.id === eventId)
+    ? character.timeline
+    : [
+        ...character.timeline,
+        {
+          id: eventId,
+          age: character.age,
+          year: character.birthYear + character.age,
+          title: eventTitle,
+          message: eventMessage,
+          category: 'business' as const,
+          icon: decision.action === 'scandal' ? '📉' : '🏢',
+        },
+      ];
+
+  return {
+    character: {
+      ...character,
+      business: updatedBusiness,
+      timeline: nextTimeline,
+    },
+    decision,
+    applied: true,
+    closed: false,
+    closedBusinessName: null,
+    payoutAmount: 0,
   };
 }

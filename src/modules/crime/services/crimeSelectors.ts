@@ -1,17 +1,25 @@
 import type { CharacterProfile } from '../../../types/game';
+import type { ActiveBusinessProfile } from '../../business/types';
 import type { CareerField } from '../../career/types';
 import { isValidCrimeId } from '../data/crimeCatalog';
 import type {
   CrimeEligibilityResult,
+  CrimeExposureLevel,
+  CrimeLegalStatus,
   CrimeOutcomeStatus,
   CrimeRecordEntry,
+  CrimeRecordSentenceStatus,
   CrimeTemplate,
+  FinancingChannel,
+  FinancingEligibilityResult,
   LegalJurisdiction,
   PendingCourtCase,
   PlayerCrimeState,
   PrisonSecurityLevel,
   PrisonState,
+  ProbationConditionId,
   ProbationState,
+  ProbationTermEntry,
 } from '../types';
 
 export const MAX_CRIME_ATTEMPTS_PER_YEAR = 2;
@@ -52,6 +60,15 @@ const VALID_TIERS: ReadonlySet<string> = new Set(['petty', 'mid', 'high_stakes']
 const VALID_OFFENSE_CLASSES: ReadonlySet<string> = new Set(['misdemeanor', 'felony']);
 const VALID_JURISDICTIONS: ReadonlySet<string> = new Set(['juvenile', 'adult']);
 const VALID_SECURITY_LEVELS: ReadonlySet<string> = new Set(['minimum', 'medium', 'maximum']);
+const VALID_EXPOSURES: ReadonlySet<string> = new Set(['private', 'witness_known', 'publicly_reported']);
+const VALID_SENTENCE_STATUSES: ReadonlySet<string> = new Set(['not_applicable', 'active', 'completed']);
+const VALID_PROBATION_CONDITIONS: ReadonlySet<string> = new Set([
+  'supervision_checkins',
+  'community_service',
+  'restitution_payments',
+  'activity_restriction',
+  'no_new_offenses',
+]);
 
 function toFiniteNonNegative(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
@@ -190,11 +207,140 @@ export function isValidProbationState(value: unknown): value is ProbationState {
   );
 }
 
+function isValidProbationTermEntry(value: unknown): value is ProbationTermEntry {
+  if (!value || typeof value !== 'object') return false;
+  const t = value as Partial<ProbationTermEntry>;
+  return (
+    typeof t.recordId === 'string' &&
+    t.recordId.length > 0 &&
+    typeof t.chargeTitle === 'string' &&
+    typeof t.jurisdiction === 'string' &&
+    VALID_JURISDICTIONS.has(t.jurisdiction) &&
+    typeof t.yearsRemaining === 'number' &&
+    Number.isFinite(t.yearsRemaining) &&
+    t.yearsRemaining >= 0 &&
+    typeof t.startedAtAge === 'number' &&
+    Number.isFinite(t.startedAtAge) &&
+    t.startedAtAge >= 0 &&
+    typeof t.communityServiceHoursRemaining === 'number' &&
+    Number.isFinite(t.communityServiceHoursRemaining) &&
+    t.communityServiceHoursRemaining >= 0
+  );
+}
+
+function sanitizeCrimeRecord(entry: CrimeRecordEntry): CrimeRecordEntry {
+  const exposure =
+    typeof entry.exposure === 'string' && VALID_EXPOSURES.has(entry.exposure)
+      ? (entry.exposure as CrimeExposureLevel)
+      : undefined;
+  const sentenceStatus =
+    typeof entry.sentenceStatus === 'string' && VALID_SENTENCE_STATUSES.has(entry.sentenceStatus)
+      ? (entry.sentenceStatus as CrimeRecordSentenceStatus)
+      : undefined;
+
+  return {
+    id: entry.id,
+    crimeId: entry.crimeId,
+    title: entry.title,
+    tier: entry.tier,
+    offenseClass: entry.offenseClass,
+    jurisdiction: entry.jurisdiction,
+    age: entry.age,
+    year: entry.year,
+    executionSucceeded: entry.executionSucceeded,
+    detected: entry.detected,
+    injured: entry.injured,
+    outcome: entry.outcome,
+    attemptedPayout: entry.attemptedPayout,
+    payout: entry.payout,
+    fineImposed: entry.fineImposed,
+    finePaid: entry.finePaid,
+    attorneyFeePaid: entry.attorneyFeePaid,
+    sentenceYears: entry.sentenceYears,
+    sealed: entry.sealed,
+    expunged: entry.expunged,
+    ...(exposure !== undefined ? { exposure } : {}),
+    ...(sentenceStatus !== undefined ? { sentenceStatus } : {}),
+    ...(typeof entry.stateForfeitedProceeds === 'number' &&
+    Number.isFinite(entry.stateForfeitedProceeds) &&
+    entry.stateForfeitedProceeds >= 0
+      ? { stateForfeitedProceeds: Math.round(entry.stateForfeitedProceeds) }
+      : {}),
+    ...(typeof entry.recoveredPropertyReturnedToVictim === 'number' &&
+    Number.isFinite(entry.recoveredPropertyReturnedToVictim) &&
+    entry.recoveredPropertyReturnedToVictim >= 0
+      ? { recoveredPropertyReturnedToVictim: Math.round(entry.recoveredPropertyReturnedToVictim) }
+      : {}),
+    ...(typeof entry.remainingVictimLoss === 'number' &&
+    Number.isFinite(entry.remainingVictimLoss) &&
+    entry.remainingVictimLoss >= 0
+      ? { remainingVictimLoss: Math.round(entry.remainingVictimLoss) }
+      : {}),
+    ...(typeof entry.restitutionImposed === 'number' &&
+    Number.isFinite(entry.restitutionImposed) &&
+    entry.restitutionImposed >= 0
+      ? { restitutionImposed: Math.round(entry.restitutionImposed) }
+      : {}),
+    ...(typeof entry.restitutionPaid === 'number' &&
+    Number.isFinite(entry.restitutionPaid) &&
+    entry.restitutionPaid >= 0
+      ? { restitutionPaid: Math.round(entry.restitutionPaid) }
+      : {}),
+  };
+}
+
+function sanitizePendingCase(pending: PendingCourtCase): PendingCourtCase {
+  const exposure =
+    typeof pending.exposure === 'string' && VALID_EXPOSURES.has(pending.exposure)
+      ? (pending.exposure as CrimeExposureLevel)
+      : undefined;
+  const legalStatus =
+    pending.legalStatus === 'arrested' || pending.legalStatus === 'pending_trial'
+      ? pending.legalStatus
+      : undefined;
+
+  return {
+    id: pending.id,
+    crimeId: pending.crimeId,
+    title: pending.title,
+    tier: pending.tier,
+    offenseClass: pending.offenseClass,
+    jurisdiction: pending.jurisdiction,
+    arrestedAtAge: pending.arrestedAtAge,
+    arrestedAtYear: pending.arrestedAtYear,
+    executionSucceeded: pending.executionSucceeded,
+    injured: pending.injured,
+    attemptedPayout: pending.attemptedPayout,
+    baseFine: pending.baseFine,
+    baseSentenceYears: pending.baseSentenceYears,
+    ...(exposure !== undefined ? { exposure } : {}),
+    ...(legalStatus !== undefined ? { legalStatus } : {}),
+    ...(typeof pending.offendedOnProbation === 'boolean'
+      ? { offendedOnProbation: pending.offendedOnProbation }
+      : {}),
+    ...(typeof pending.arrestHappinessApplied === 'number' &&
+    Number.isFinite(pending.arrestHappinessApplied)
+      ? { arrestHappinessApplied: Math.round(pending.arrestHappinessApplied) }
+      : {}),
+    ...(typeof pending.arrestHealthApplied === 'number' &&
+    Number.isFinite(pending.arrestHealthApplied)
+      ? { arrestHealthApplied: Math.round(pending.arrestHealthApplied) }
+      : {}),
+    ...(typeof pending.explicitWitnessSignal === 'boolean'
+      ? { explicitWitnessSignal: pending.explicitWitnessSignal }
+      : {}),
+    ...(typeof pending.institutionalReportFiled === 'boolean'
+      ? { institutionalReportFiled: pending.institutionalReportFiled }
+      : {}),
+  };
+}
+
 export function createEmptyCrimeState(): PlayerCrimeState {
   return {
     policeHeat: 0,
     notoriety: 0,
     unpaidFines: 0,
+    unpaidRestitution: 0,
     attemptsThisYear: 0,
     attemptCountLifetime: 0,
     lastAttemptAge: null,
@@ -215,7 +361,7 @@ export function getSanitizedCrimeState(
   }
 
   const rawRecords = Array.isArray(raw.records) ? raw.records : [];
-  const records = rawRecords.filter(isValidCrimeRecord);
+  const records = rawRecords.filter(isValidCrimeRecord).map(sanitizeCrimeRecord);
 
   const rawPrison = raw.prison as Partial<PrisonState> | null;
   const priorRetirementOccupation =
@@ -224,33 +370,101 @@ export function getSanitizedCrimeState(
     rawPrison?.priorRetirementOccupation === null
       ? rawPrison.priorRetirementOccupation
       : undefined;
+  const originCaseId =
+    typeof rawPrison?.originCaseId === 'string' && rawPrison.originCaseId.trim().length > 0
+      ? rawPrison.originCaseId.trim()
+      : undefined;
 
-  const prison = isValidPrisonState(raw.prison)
+  const prison: PrisonState | null = isValidPrisonState(raw.prison)
     ? {
-        ...raw.prison,
+        facilityName: raw.prison.facilityName,
+        securityLevel: raw.prison.securityLevel,
+        chargeTitle: raw.prison.chargeTitle,
+        yearsTotal: raw.prison.yearsTotal,
+        yearsServed: raw.prison.yearsServed,
+        yearsRemaining: raw.prison.yearsRemaining,
         behaviorScore: clamp0to100(raw.prison.behaviorScore, 50),
+        paroleEligibleAtServed: raw.prison.paroleEligibleAtServed,
+        actionsTakenThisYear: raw.prison.actionsTakenThisYear,
         lastActionAge: toNullableAge(raw.prison.lastActionAge),
         lastProgressedAge: toNullableAge(raw.prison.lastProgressedAge),
+        ...(originCaseId !== undefined ? { originCaseId } : {}),
         ...(priorRetirementOccupation !== undefined ? { priorRetirementOccupation } : {}),
       }
     : null;
 
-  const probation = isValidProbationState(raw.probation)
-    ? {
-        ...raw.probation,
-        lastProgressedAge: toNullableAge(raw.probation.lastProgressedAge),
-      }
+  const probation: ProbationState | null = isValidProbationState(raw.probation)
+    ? (() => {
+        const rawProb = raw.probation;
+        const activeTerms = Array.isArray(rawProb.activeTerms)
+          ? rawProb.activeTerms.filter(isValidProbationTermEntry).map((term) => ({
+              recordId: term.recordId,
+              chargeTitle: term.chargeTitle,
+              jurisdiction: term.jurisdiction,
+              yearsRemaining: Math.floor(toFiniteNonNegative(term.yearsRemaining, 0)),
+              startedAtAge: term.startedAtAge,
+              communityServiceHoursRemaining: Math.round(
+                toFiniteNonNegative(term.communityServiceHoursRemaining, 0),
+              ),
+              technicalWarnings: Math.floor(toFiniteNonNegative(term.technicalWarnings, 0)),
+              violationCount: Math.floor(toFiniteNonNegative(term.violationCount, 0)),
+            }))
+          : undefined;
+        const conditions = Array.isArray(rawProb.conditions)
+          ? (rawProb.conditions.filter(
+              (c): c is ProbationConditionId =>
+                typeof c === 'string' && VALID_PROBATION_CONDITIONS.has(c),
+            ) as ProbationConditionId[])
+          : undefined;
+
+        return {
+          chargeTitle: rawProb.chargeTitle,
+          jurisdiction: rawProb.jurisdiction,
+          yearsRemaining: rawProb.yearsRemaining,
+          startedAtAge: rawProb.startedAtAge,
+          lastProgressedAge: toNullableAge(rawProb.lastProgressedAge),
+          ...(activeTerms !== undefined ? { activeTerms } : {}),
+          ...(conditions !== undefined ? { conditions } : {}),
+          ...(rawProb.lastCheckInAge !== undefined
+            ? { lastCheckInAge: toNullableAge(rawProb.lastCheckInAge) }
+            : {}),
+          ...(rawProb.lastServiceActionAge !== undefined
+            ? { lastServiceActionAge: toNullableAge(rawProb.lastServiceActionAge) }
+            : {}),
+          ...(typeof rawProb.serviceActionsThisYear === 'number' &&
+          Number.isFinite(rawProb.serviceActionsThisYear) &&
+          rawProb.serviceActionsThisYear >= 0
+            ? { serviceActionsThisYear: Math.floor(rawProb.serviceActionsThisYear) }
+            : {}),
+          ...(typeof rawProb.restitutionPaidThisYear === 'number' &&
+          Number.isFinite(rawProb.restitutionPaidThisYear) &&
+          rawProb.restitutionPaidThisYear >= 0
+            ? { restitutionPaidThisYear: Math.round(rawProb.restitutionPaidThisYear) }
+            : {}),
+          ...(typeof rawProb.technicalWarnings === 'number' &&
+          Number.isFinite(rawProb.technicalWarnings) &&
+          rawProb.technicalWarnings >= 0
+            ? { technicalWarnings: Math.floor(rawProb.technicalWarnings) }
+            : {}),
+          ...(typeof rawProb.violationCount === 'number' &&
+          Number.isFinite(rawProb.violationCount) &&
+          rawProb.violationCount >= 0
+            ? { violationCount: Math.floor(rawProb.violationCount) }
+            : {}),
+        };
+      })()
     : null;
 
   return {
     policeHeat: clamp0to100(raw.policeHeat, 0),
     notoriety: clamp0to100(raw.notoriety, 0),
     unpaidFines: Math.round(toFiniteNonNegative(raw.unpaidFines, 0)),
+    unpaidRestitution: Math.round(toFiniteNonNegative(raw.unpaidRestitution, 0)),
     attemptsThisYear: Math.floor(toFiniteNonNegative(raw.attemptsThisYear, 0)),
     attemptCountLifetime: Math.floor(toFiniteNonNegative(raw.attemptCountLifetime, 0)),
     lastAttemptAge: toNullableAge(raw.lastAttemptAge),
     lastProgressedAge: toNullableAge(raw.lastProgressedAge),
-    pendingCase: isValidPendingCase(raw.pendingCase) ? raw.pendingCase : null,
+    pendingCase: isValidPendingCase(raw.pendingCase) ? sanitizePendingCase(raw.pendingCase) : null,
     prison,
     probation,
     records,
@@ -455,4 +669,424 @@ export function isCrimeEligibleForCharacter(
   }
   return { eligible: true };
 }
+
+/**
+ * Distinguishes formal criminal-justice records from private attempt telemetry
+ * (`undetected` and `aborted` attempts never count as criminal records or arrests).
+ */
+export function isCriminalRecordEntry(entry: Pick<CrimeRecordEntry, 'outcome'>): boolean {
+  return entry.outcome !== 'undetected' && entry.outcome !== 'aborted';
+}
+
+/**
+ * Derives an individual record's legal status strictly per record (linked via `sentenceStatus`,
+ * `prison.originCaseId`, and `probation.activeTerms`) so newer concurrent cases cannot overwrite
+ * historical completed convictions.
+ */
+export function getCrimeLegalStatus(
+  entry: CrimeRecordEntry,
+  character?: Pick<CharacterProfile, 'age' | 'crime'>,
+): CrimeLegalStatus {
+  if (!isCriminalRecordEntry(entry)) {
+    return 'attempted';
+  }
+  if (entry.outcome === 'dismissed' || entry.outcome === 'acquitted') {
+    return 'acquitted';
+  }
+  if (entry.sealed) {
+    return 'sealed';
+  }
+  if (entry.expunged) {
+    return 'expunged';
+  }
+  if (entry.outcome === 'warned') {
+    return 'detected';
+  }
+  if (entry.sentenceStatus === 'active') {
+    return 'convicted';
+  }
+  if (entry.sentenceStatus === 'completed' || entry.sentenceStatus === 'not_applicable') {
+    return 'sentence_completed';
+  }
+
+  // Legacy records lacking sentenceStatus: check explicit case linkage first, then record age.
+  if (character) {
+    const crime = getSanitizedCrimeState(character);
+    if (
+      crime.prison &&
+      crime.prison.yearsRemaining > 0 &&
+      crime.prison.originCaseId === entry.id
+    ) {
+      return 'convicted';
+    }
+    if (
+      crime.probation?.activeTerms?.some(
+        (term) =>
+          term.recordId === entry.id &&
+          (term.yearsRemaining > 0 || term.communityServiceHoursRemaining > 0),
+      )
+    ) {
+      return 'convicted';
+    }
+    if (entry.outcome === 'fined') {
+      return 'sentence_completed';
+    }
+    if (entry.age + Math.max(1, entry.sentenceYears) <= character.age) {
+      return 'sentence_completed';
+    }
+  }
+
+  return entry.outcome === 'fined' ? 'sentence_completed' : 'convicted';
+}
+
+export function getUnpaidRestitution(character: Pick<CharacterProfile, 'crime'>): number {
+  return getSanitizedCrimeState(character).unpaidRestitution ?? 0;
+}
+
+export function getTotalLegalDebt(character: Pick<CharacterProfile, 'crime'>): number {
+  const sanitized = getSanitizedCrimeState(character);
+  return sanitized.unpaidFines + (sanitized.unpaidRestitution ?? 0);
+}
+
+/** True when the character has an active, unexpunged adult financial dishonesty conviction (`fraud_scam`). */
+export function hasFinancialFraudConviction(character: Pick<CharacterProfile, 'crime'>): boolean {
+  return getActiveAdultConvictions(character).some((entry) => entry.crimeId === 'fraud_scam');
+}
+
+/** True when the character has an active, unexpunged adult violent felony conviction (`robbery` / `bank_heist`). */
+export function hasViolentFelonyConviction(character: Pick<CharacterProfile, 'crime'>): boolean {
+  return getActiveAdultConvictions(character).some(
+    (entry) => entry.crimeId === 'robbery' || entry.crimeId === 'bank_heist',
+  );
+}
+
+export type BusinessLoanGuaranteeType = 'corporate_only' | 'personally_guaranteed';
+
+type BusinessWithLoanGuaranteeMeta = ActiveBusinessProfile & {
+  loanGuaranteeType?: BusinessLoanGuaranteeType;
+};
+
+/**
+ * Resolves personal vs. corporate liability for a business loan.
+ * Preserves explicit `loanGuaranteeType`; for legacy saves with `outstandingLoan > 0` and
+ * omitted metadata, preserves `'personally_guaranteed'` regardless of audit, public listing,
+ * or equity dilution so personal liability is never silently erased.
+ */
+export function resolveBusinessLoanGuaranteeType(
+  business: BusinessWithLoanGuaranteeMeta | null | undefined,
+): BusinessLoanGuaranteeType {
+  if (!business || !Number.isFinite(business.outstandingLoan) || business.outstandingLoan <= 0) {
+    return 'corporate_only';
+  }
+  if (business.loanGuaranteeType === 'corporate_only') {
+    return 'corporate_only';
+  }
+  if (business.loanGuaranteeType === 'personally_guaranteed') {
+    return 'personally_guaranteed';
+  }
+  return 'personally_guaranteed';
+}
+
+/**
+ * Reads and validates active residential mortgage principal directly from `character.assets`
+ * without creating a runtime import dependency on `assetService.ts`.
+ */
+function sumValidPropertyMortgagePrincipal(
+  character: Pick<CharacterProfile, 'assets'>,
+): number {
+  const properties = character.assets?.properties;
+  if (!Array.isArray(properties)) return 0;
+
+  let total = 0;
+  for (const item of properties) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const prop = item as {
+      id?: unknown;
+      catalogId?: unknown;
+      mortgage?: { principal?: unknown } | null;
+    };
+    if (typeof prop.id !== 'string' || prop.id.trim() === '') continue;
+    if (typeof prop.catalogId !== 'string' || prop.catalogId.trim() === '') continue;
+    const mortgage = prop.mortgage;
+    if (!mortgage || typeof mortgage !== 'object' || Array.isArray(mortgage)) continue;
+    if (
+      typeof mortgage.principal === 'number' &&
+      Number.isFinite(mortgage.principal) &&
+      mortgage.principal > 0
+    ) {
+      total += mortgage.principal;
+    }
+  }
+  return total;
+}
+
+/**
+ * Calculates personal liabilities for personal underwriting (e.g. residential mortgages):
+ * includes student debt, unpaid legal debts, personal mortgages, and business loans ONLY
+ * when personally guaranteed (`corporate_only` business debt is excluded from personal DTI).
+ */
+export function calculatePersonalLiabilitiesForUnderwriting(
+  character: Pick<CharacterProfile, 'education' | 'crime' | 'assets' | 'business'>,
+): number {
+  const studentDebt = Math.max(0, character.education?.studentDebt ?? 0);
+  const legalDebt = getTotalLegalDebt(character);
+  const mortgageDebt = sumValidPropertyMortgagePrincipal(character);
+  const biz = character.business as BusinessWithLoanGuaranteeMeta | null | undefined;
+  const guaranteedBusinessDebt =
+    biz &&
+    biz.outstandingLoan > 0 &&
+    resolveBusinessLoanGuaranteeType(biz) === 'personally_guaranteed'
+      ? Math.max(0, biz.outstandingLoan)
+      : 0;
+
+  return Math.round(studentDebt + legalDebt + mortgageDebt + guaranteedBusinessDebt);
+}
+
+/**
+ * Estimates annual personal income for credit underwriting from civilian employment
+ * (respecting any pre-trial administrative leave multiplier) and active business earnings.
+ */
+export function estimateAnnualUnderwritingIncome(
+  character: Pick<CharacterProfile, 'career' | 'business'>,
+): number {
+  const job = character.career?.currentJob as
+    | (NonNullable<CharacterProfile['career']['currentJob']> & {
+        suspendedPendingTrial?: { payMultiplier?: number } | null;
+      })
+    | null
+    | undefined;
+  const payMult =
+    job?.suspendedPendingTrial && typeof job.suspendedPendingTrial.payMultiplier === 'number'
+      ? Math.max(0, Math.min(1, job.suspendedPendingTrial.payMultiplier))
+      : 1;
+  const jobIncome = job ? Math.round(Math.max(0, job.salary) * payMult) : 0;
+
+  const biz = character.business;
+  const bizIncome = biz
+    ? Math.max(
+        0,
+        Math.round(
+          (biz.ownerSalary ?? 0) +
+            Math.max(0, biz.lastFiscalReport?.ownerDividendPaid ?? 0),
+        ),
+      )
+    : 0;
+
+  return jobIncome + bizIncome;
+}
+
+/**
+ * Explainable financial underwriting evaluator across commercial loans, angel equity, and
+ * residential mortgages. Uses real income, personal vs. corporate liabilities, liquid reserves,
+ * business health, and specific conviction relevance rather than using `karma` as a credit score.
+ */
+export function evaluateFinancingEligibility(
+  character: CharacterProfile,
+  channel: FinancingChannel,
+  requestedAmount = 0,
+): FinancingEligibilityResult {
+  const personalLiabilities = calculatePersonalLiabilitiesForUnderwriting(character);
+  const annualIncome = estimateAnnualUnderwritingIncome(character);
+  const normalizedRequest = Math.max(0, Math.round(requestedAmount));
+  const projectedPersonalDebt =
+    channel === 'mortgage' ? personalLiabilities + normalizedRequest : personalLiabilities;
+  const debtToIncomeRatio =
+    annualIncome > 0 ? Number((projectedPersonalDebt / annualIncome).toFixed(2)) : null;
+
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      eligible: false,
+      channel,
+      reason: 'Financing is unavailable while incarcerated.',
+      extraDownPaymentRate: 0,
+      personalLiabilities,
+      annualIncome,
+      debtToIncomeRatio,
+      criminalRecordRisk: 'incarcerated',
+    };
+  }
+
+  if (hasFinancialFraudConviction(character)) {
+    return {
+      eligible: false,
+      channel,
+      reason:
+        'Denied due to an active financial fraud conviction on record. Clear or expunge the conviction to restore credit access.',
+      extraDownPaymentRate: 0,
+      personalLiabilities,
+      annualIncome,
+      debtToIncomeRatio,
+      criminalRecordRisk: 'fraud_blocked',
+    };
+  }
+
+  const hasViolentRecord = hasViolentFelonyConviction(character);
+  if (channel === 'angel_equity' && hasViolentRecord) {
+    return {
+      eligible: false,
+      channel,
+      reason:
+        'Angel investors declined due to reputational risk from an active violent felony record.',
+      extraDownPaymentRate: 0,
+      personalLiabilities,
+      annualIncome,
+      debtToIncomeRatio,
+      criminalRecordRisk: 'violent_caution',
+    };
+  }
+
+  const totalLegalDebt = getTotalLegalDebt(character);
+  const liquidAssets = Math.max(0, character.cash || 0) + Math.max(0, character.bankBalance || 0);
+  const extraDownPaymentRate = hasViolentRecord && channel !== 'angel_equity' ? 0.1 : 0;
+  const criminalRecordRisk = hasViolentRecord ? 'violent_caution' : 'none';
+
+  if (channel === 'mortgage') {
+    if (normalizedRequest <= 0) {
+      return {
+        eligible: false,
+        channel,
+        reason: 'Mortgage underwriting requires a positive requested loan amount.',
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    if (totalLegalDebt > 0 && totalLegalDebt > Math.max(5000, annualIncome * 0.5)) {
+      return {
+        eligible: false,
+        channel,
+        reason: 'Mortgage denied due to high delinquent legal debt relative to income.',
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    const maxDebtToIncomeMultiple = hasViolentRecord ? 3.5 : 5.0;
+    // Proportional liquid-reserve qualification for zero-income/retired borrowers:
+    // net liquid reserves after existing personal obligations cover >= 60% of requested principal.
+    const netLiquidReserves = liquidAssets - personalLiabilities;
+    const hasStrongCashBacking = netLiquidReserves >= normalizedRequest * 0.6;
+    if (annualIncome <= 0 && !hasStrongCashBacking) {
+      return {
+        eligible: false,
+        channel,
+        reason: 'Mortgage underwriting requires verifiable income or net liquid reserves covering at least 60% of the loan.',
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    if (
+      debtToIncomeRatio !== null &&
+      debtToIncomeRatio > maxDebtToIncomeMultiple &&
+      !hasStrongCashBacking
+    ) {
+      return {
+        eligible: false,
+        channel,
+        reason: `Personal debt-to-income ratio (${debtToIncomeRatio}x) exceeds mortgage underwriting limit (${maxDebtToIncomeMultiple}x).`,
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    return {
+      eligible: true,
+      channel,
+      extraDownPaymentRate,
+      personalLiabilities,
+      annualIncome,
+      debtToIncomeRatio,
+      criminalRecordRisk,
+    };
+  }
+
+  if (channel === 'commercial_loan') {
+    if (totalLegalDebt > 0 && totalLegalDebt > Math.max(5000, annualIncome * 0.5)) {
+      return {
+        eligible: false,
+        channel,
+        reason: 'Commercial bank loan denied due to substantial unpaid court debt.',
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    // Corporate solvency check when an existing company carries heavy corporate leverage.
+    const existingBiz = character.business;
+    if (
+      existingBiz &&
+      existingBiz.outstandingLoan > 0 &&
+      existingBiz.outstandingLoan > existingBiz.valuation * 0.9
+    ) {
+      return {
+        eligible: false,
+        channel,
+        reason: 'Commercial credit denied because existing corporate debt leverage is too high.',
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    // Commercial underwriting matches existing 25% equity/down-payment backing or manageable DTI.
+    const netLiquidReserves = liquidAssets - personalLiabilities;
+    const requiredReserve = normalizedRequest > 0 ? Math.round(normalizedRequest * 0.25) : 0;
+    const hasReserveBacking =
+      normalizedRequest > 0 ? netLiquidReserves >= requiredReserve : netLiquidReserves > 0;
+    const hasIncomeBacking =
+      annualIncome > 0 && (debtToIncomeRatio === null || debtToIncomeRatio <= 4.0);
+    if (!hasIncomeBacking && !hasReserveBacking) {
+      return {
+        eligible: false,
+        channel,
+        reason: 'Commercial loan requires manageable income-to-debt standing or net liquid reserves covering at least 25% of the loan.',
+        extraDownPaymentRate,
+        personalLiabilities,
+        annualIncome,
+        debtToIncomeRatio,
+        criminalRecordRisk,
+      };
+    }
+
+    return {
+      eligible: true,
+      channel,
+      extraDownPaymentRate,
+      personalLiabilities,
+      annualIncome,
+      debtToIncomeRatio,
+      criminalRecordRisk,
+    };
+  }
+
+  // 'angel_equity': governed by founder credentials / non-fraud / non-violent standing (not karma).
+  return {
+    eligible: true,
+    channel,
+    extraDownPaymentRate: 0,
+    personalLiabilities,
+    annualIncome,
+    debtToIncomeRatio,
+    criminalRecordRisk,
+  };
+}
+
 

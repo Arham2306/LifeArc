@@ -98,6 +98,9 @@ export interface CourtVerdictView {
   probationYears: number;
   sentenceYears: number;
   employmentTerminated: boolean;
+  terminatedJobTitle?: string | null;
+  expelledFromSchool?: string | null;
+  appliedStatDeltas?: Partial<Record<'happiness' | 'karma' | 'health' | 'looks', number>>;
   prisonConsequences?: PrisonConsequencesSummary;
 }
 
@@ -287,6 +290,9 @@ export function buildCourtVerdictView(
     probationYears: result.probationYears,
     sentenceYears: result.sentenceYears,
     employmentTerminated: result.employmentTerminated,
+    terminatedJobTitle: result.terminatedJobTitle ?? null,
+    expelledFromSchool: result.expelledFromSchool ?? null,
+    appliedStatDeltas: result.appliedStatDeltas,
     prisonConsequences: result.prisonConsequences,
   };
 }

@@ -1,5 +1,6 @@
 import type { CharacterProfile, LifeEvent } from '../../../types/game';
 import { createId } from '../../../utils/id';
+import { evaluateFinancingEligibility } from '../../crime/services/crimeSelectors';
 import { getPropertyListing } from '../data/propertyCatalog';
 import type { OwnedProperty, PlayerAssetPortfolio, PropertyMortgage, PropertyType } from '../types';
 import {
@@ -130,7 +131,22 @@ export function purchaseProperty(
   }
 
   const cash = finiteNumber(character.cash) ? character.cash : 0;
-  const downPayment = Math.round(listing.purchasePrice * PROPERTY_DOWN_PAYMENT_RATE);
+  let effectiveDownPaymentRate = PROPERTY_DOWN_PAYMENT_RATE;
+  if (financing === 'mortgage') {
+    const baseDownPayment = Math.round(listing.purchasePrice * PROPERTY_DOWN_PAYMENT_RATE);
+    const requestedLoanAmount = Math.max(1, listing.purchasePrice - baseDownPayment);
+    const underwriting = evaluateFinancingEligibility(
+      character,
+      'mortgage',
+      requestedLoanAmount,
+    );
+    if (!underwriting.eligible) {
+      return fail(character, underwriting.reason || 'Mortgage underwriting declined.');
+    }
+    effectiveDownPaymentRate = PROPERTY_DOWN_PAYMENT_RATE + underwriting.extraDownPaymentRate;
+  }
+
+  const downPayment = Math.round(listing.purchasePrice * effectiveDownPaymentRate);
   const cashDue = financing === 'cash' ? listing.purchasePrice : downPayment;
   if (cash < cashDue) return fail(character, 'You do not have enough cash for this purchase.');
 

@@ -3,7 +3,12 @@ import { calculatePlayerNetWorth } from '../../assets/services/assetService';
 import { migrateToCanonicalWorldState } from '../../autonomy/services/migrationService';
 import type { ActiveBusinessProfile } from '../../business/types';
 import { createInitialCareerState, progressCareerForYear } from '../../career/services/careerService';
-import { createInitialEducation } from '../../education/services/educationService';
+import { UNIVERSITY_MAJORS } from '../../education/data/majors';
+import {
+  createInitialEducation,
+  evaluateMajorEligibility,
+} from '../../education/services/educationService';
+import { selectEducationSummary } from '../../identity/services/identitySelectors';
 import {
   applyCourtOutcome,
   determineCourtOutcome,
@@ -1046,10 +1051,162 @@ function testPrisonLiquidationDivorceSocialPriorityAndIdempotency() {
   );
 }
 
+function testProbationJobLossStatsDropAndUniversityExpulsion() {
+  // Exact scenario reported: adult Vehicle Theft (felony), private_attorney -> probation
+  // while employed AND actively enrolled in University.
+  const vehicleTheftCase = makePendingCase({
+    id: 'vehicle-theft-prob-case',
+    crimeId: 'vehicle_theft',
+    title: 'Vehicle Theft',
+    tier: 'mid',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    executionSucceeded: true,
+    attemptedPayout: 3200,
+    baseFine: 4000,
+    baseSentenceYears: 3,
+  });
+
+  const uniStudentWorker = createLegalTestCharacter({
+    age: 20,
+    cash: 8000,
+    occupation: 'Accountant',
+    stats: {
+      health: 92,
+      happiness: 88,
+      smarts: 82,
+      looks: 75,
+      karma: 85,
+    },
+    education: {
+      ...createInitialEducation(),
+      currentStage: 'university',
+      schoolName: 'Austin State University',
+      stageStartAge: 18,
+      yearInStage: 2,
+      totalYearsInStage: 4,
+      gradeLevelLabel: 'Sophomore',
+      grades: 84,
+      popularity: 72,
+      diplomas: ['High School Diploma'],
+      studentDebt: 14000,
+      university: {
+        universityName: 'Austin State University',
+        majorId: UNIVERSITY_MAJORS[0].id,
+        majorName: UNIVERSITY_MAJORS[0].name,
+        degreeTitle: UNIVERSITY_MAJORS[0].degreeTitle,
+        year: 2,
+        totalYears: 4,
+        fundingType: 'student_loan',
+        tuitionPerYear: 12000,
+      },
+    },
+    relationships: [
+      {
+        id: 'uni-friend-1',
+        firstName: 'Sam',
+        lastName: 'Parker',
+        gender: 'male',
+        age: 20,
+        role: 'Friend',
+        relationshipType: 'friend',
+        relationship: 78,
+        originStory: 'Campus',
+        stageMet: 'university',
+      },
+    ],
+    crime: {
+      ...createEmptyCrimeState(),
+      pendingCase: vehicleTheftCase,
+    },
+  });
+
+  const probRes = applyCourtOutcome(
+    uniStudentWorker,
+    vehicleTheftCase,
+    'private_attorney',
+    'probation',
+  );
+  assert(probRes.ok && probRes.outcome === 'probation', 'Resolved adult felony probation');
+
+  // 1. Job terminated immediately and occupation updated cleanly
+  assert(
+    probRes.employmentTerminated === true &&
+      probRes.terminatedJobTitle === 'Accountant at Ledger Co' &&
+      probRes.character.career.currentJob === null &&
+      probRes.character.career.history.some((h) => h.reasonForLeaving === 'fired'),
+    'Adult probation immediately terminates active employment',
+  );
+
+  // 2. Meaningful stat drops across happiness, karma, health, looks, and social bonds
+  assert(
+    probRes.character.stats.happiness === 88 - 24 &&
+      probRes.character.stats.karma === 85 - 22 &&
+      probRes.character.stats.health === 92 - 8 &&
+      probRes.character.stats.looks === 75 - 4 &&
+      probRes.appliedStatDeltas?.happiness === -24 &&
+      probRes.appliedStatDeltas?.karma === -22 &&
+      probRes.appliedStatDeltas?.health === -8,
+    'Adult felony probation inflicts substantial drops across happiness, karma, health, and looks',
+  );
+  assert(
+    probRes.character.relationships.find((r) => r.id === 'uni-friend-1')?.relationship === 78 - 14 &&
+      probRes.character.partner?.relationship === 80 - 20 &&
+      probRes.character.parents.father.relationship === 70 - 16,
+    'Adult felony probation lowers partner, parent, and friend relationships',
+  );
+
+  // 3. University immediately expelled, history preserves 'expelled', studentDebt kept,
+  //    occupation resolves to Unemployed, and re-admission is blocked while on probation/felony.
+  assert(
+    probRes.expelledFromSchool === 'Austin State University' &&
+      probRes.character.education.currentStage === 'graduated' &&
+      probRes.character.education.university === null &&
+      probRes.character.education.schoolName === null &&
+      probRes.character.education.studentDebt === 14000 &&
+      probRes.character.education.popularity === 72 - 25 &&
+      probRes.character.education.history.some(
+        (h) => h.status === 'expelled' && h.schoolName === 'Austin State University',
+      ) &&
+      probRes.character.occupation === 'Unemployed',
+    'Adult felony probation immediately expels enrolled university student and updates occupation to Unemployed',
+  );
+
+  const reapplyCheck = evaluateMajorEligibility(probRes.character, UNIVERSITY_MAJORS[0]);
+  assert(
+    !reapplyCheck.isAdmissible && Boolean(reapplyCheck.reasonIfIneligible),
+    'Expelled student cannot immediately re-enroll in University while on probation / active felony',
+  );
+
+  const identityEducationView = selectEducationSummary(probRes.character);
+  assert(
+    identityEducationView.history.some((h) => h.status === 'expelled'),
+    'Identity summary preserves expelled SchoolHistoryEntry cleanly',
+  );
+
+  // 4. Dismissal or acquittal must NOT expel university student or fire them
+  const acquitRes = applyCourtOutcome(
+    uniStudentWorker,
+    vehicleTheftCase,
+    'private_attorney',
+    'acquitted',
+  );
+  assert(
+    acquitRes.ok &&
+      !acquitRes.employmentTerminated &&
+      acquitRes.expelledFromSchool === null &&
+      acquitRes.character.career.currentJob !== null &&
+      acquitRes.character.education.currentStage === 'university' &&
+      acquitRes.character.education.university !== null,
+    'Acquittal preserves both job and active university enrollment',
+  );
+}
+
 testJuvenileCourtOutcomesAndBoundaries();
 testCounselCashGuardProceedsAndEmploymentSeparately();
 testProbationMergeAndJuvenileJurisdictionPreservation();
 testAdultExpungementWaitingPeriodsAndEligibility();
 testMalformedAndMissingCourtStateResilience();
 testPrisonLiquidationDivorceSocialPriorityAndIdempotency();
+testProbationJobLossStatsDropAndUniversityExpulsion();
 console.log('courtLegal.test.ts passed all assertions');

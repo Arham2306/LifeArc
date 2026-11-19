@@ -18,11 +18,21 @@ import {
 } from '../data/jobCatalog';
 import { getPromotionLadderForJob } from '../data/careerLadders';
 import { applyEffects } from '../../character/services/statService';
+import { resolveCharacterOccupation } from '../../character/services/occupationService';
+import {
+  evaluateEmploymentConsequence,
+  type EmploymentConsequenceDecision,
+} from '../../crime/data/crimeConsequences';
 import {
   hasSensitiveFieldConviction,
   isCurrentlyIncarcerated,
   SENSITIVE_CAREER_FIELDS,
 } from '../../crime/services/crimeSelectors';
+import type {
+  CrimeExposureLevel,
+  CrimeOutcomeStatus,
+  PendingCourtCase,
+} from '../../crime/types';
 import { cohortService } from '../../relationships/services/cohortService';
 import { createId } from '../../../utils/id';
 import { chance, randomInt } from '../../../utils/random';
@@ -507,7 +517,12 @@ export function progressCareerForYear(
   }
 
   const job = career.currentJob;
-  const grossSalary = job.salary;
+  const suspension = job.suspendedPendingTrial ?? null;
+  const payMultiplier =
+    suspension && (suspension.payMultiplier === 0 || suspension.payMultiplier === 0.5)
+      ? suspension.payMultiplier
+      : 1;
+  const grossSalary = Math.round(job.salary * payMultiplier);
   // Standard 20% tax & living withholding for part-time/freelance, 22% for full-time
   const taxRate = job.type === 'full_time' ? 0.22 : 0.15;
   const afterTaxPay = Math.round(grossSalary * (1 - taxRate));
@@ -535,6 +550,44 @@ export function progressCareerForYear(
   }
 
   const netPayEarned = afterTaxPay - studentLoanPaid;
+
+  // When suspended pending trial, salary is paid once at 50% or 0%, while tenure, performance
+  // drift, auto-termination, and merit raises remain paused until court disposition.
+  if (suspension !== null) {
+    events.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title:
+        payMultiplier === 0.5
+          ? 'Paid Administrative Leave (50%)'
+          : 'Unpaid Administrative Suspension',
+      message:
+        payMultiplier === 0.5
+          ? `While suspended pending trial at ${job.companyName}, you received 50% administrative leave pay ($${grossSalary.toLocaleString()} gross) with tenure and reviews paused.`
+          : `Your position as ${job.title} at ${job.companyName} remained on unpaid suspension pending court resolution.`,
+      category: 'career',
+      icon: '⏸️',
+    });
+
+    return {
+      career: {
+        ...career,
+        currentJob: {
+          ...job,
+          suspendedPendingTrial: suspension,
+        },
+        totalCareerEarnings: career.totalCareerEarnings + netPayEarned,
+        rejectedJobIdsThisYear: [],
+        yearActions: createInitialYearActions(),
+      },
+      events,
+      netPayEarned,
+      studentLoanPaid,
+      remainingStudentDebt,
+    };
+  }
+
   const nextYearsInJob = job.yearsInJob + 1;
 
   // Drift job performance based on Smarts & Happiness
@@ -678,6 +731,236 @@ export interface PromotionEligibilityCheck {
  * 3. Minimum Tenure in role (1 - 3 years)
  * 4. Minimum Smarts cutoff
  */
+export interface CareerCrimeConsequenceResult {
+  character: CharacterProfile;
+  decision: EmploymentConsequenceDecision;
+  applied: boolean;
+  terminated: boolean;
+  terminatedJobTitle: string | null;
+  suspended: boolean;
+  reinstated: boolean;
+}
+
+/**
+ * Integrates Phase 1 `evaluateEmploymentConsequence()` into active career state with strict
+ * per-case idempotency across pre-trial arrest suspension, acquittal reinstatement, non-custodial
+ * preservation, dishonesty/violent termination, and custodial firing.
+ */
+export function applyCareerCrimeConsequence(
+  character: CharacterProfile,
+  pendingCase: Pick<PendingCourtCase, 'id' | 'crimeId' | 'offenseClass' | 'jurisdiction' | 'title'>,
+  stage: 'arrest' | CrimeOutcomeStatus,
+  exposure: CrimeExposureLevel,
+): CareerCrimeConsequenceResult {
+  const decision = evaluateEmploymentConsequence(character, pendingCase, stage, exposure);
+  const career = character.career || createInitialCareerState();
+  const job = career.currentJob;
+
+  if (!job) {
+    return {
+      character,
+      decision,
+      applied: false,
+      terminated: false,
+      terminatedJobTitle: null,
+      suspended: false,
+      reinstated: false,
+    };
+  }
+
+  if (stage === 'arrest') {
+    if (
+      job.suspendedPendingTrial?.caseId === pendingCase.id ||
+      job.lastCrimeConsequenceCaseId === pendingCase.id
+    ) {
+      return {
+        character,
+        decision,
+        applied: false,
+        terminated: false,
+        terminatedJobTitle: null,
+        suspended: job.suspendedPendingTrial?.caseId === pendingCase.id,
+        reinstated: false,
+      };
+    }
+
+    if (decision.action !== 'suspend_pending_trial') {
+      return {
+        character,
+        decision,
+        applied: false,
+        terminated: false,
+        terminatedJobTitle: null,
+        suspended: false,
+        reinstated: false,
+      };
+    }
+
+    const payMultiplier: 0 | 0.5 = decision.payMultiplier === 0.5 ? 0.5 : 0;
+    const reason =
+      decision.reason ||
+      `Suspended pending court resolution for ${pendingCase.title}.`;
+    const leaveEvent: LifeEvent = {
+      id: `${pendingCase.id}-career-suspend`,
+      age: character.age,
+      year: character.birthYear + character.age,
+      title:
+        payMultiplier === 0.5
+          ? 'Placed on Paid Administrative Leave'
+          : 'Suspended Pending Trial',
+      message: `${job.companyName} placed you on ${
+        payMultiplier === 0.5 ? '50% paid administrative leave' : 'unpaid administrative suspension'
+      } as ${job.title} pending resolution of ${pendingCase.title}.`,
+      category: 'career',
+      icon: '⏸️',
+    };
+
+    return {
+      character: {
+        ...character,
+        career: {
+          ...career,
+          currentJob: {
+            ...job,
+            suspendedPendingTrial: {
+              caseId: pendingCase.id,
+              reason,
+              payMultiplier,
+              startedAtAge: character.age,
+            },
+          },
+        },
+        timeline: character.timeline.some((e) => e.id === leaveEvent.id)
+          ? character.timeline
+          : [...character.timeline, leaveEvent],
+      },
+      decision,
+      applied: true,
+      terminated: false,
+      terminatedJobTitle: null,
+      suspended: true,
+      reinstated: false,
+    };
+  }
+
+  // Verdict disposition idempotency guard
+  const firedHistoryId = `${pendingCase.id}-career-fired`;
+  if (
+    job.lastCrimeConsequenceCaseId === pendingCase.id ||
+    career.history.some((h) => h.id === firedHistoryId)
+  ) {
+    return {
+      character,
+      decision,
+      applied: false,
+      terminated: false,
+      terminatedJobTitle: null,
+      suspended: false,
+      reinstated: false,
+    };
+  }
+
+  if (decision.action === 'terminate') {
+    const terminatedJobTitle = `${job.title} at ${job.companyName}`;
+    const firedEntry: CareerHistoryEntry = {
+      id: firedHistoryId,
+      jobId: job.jobId,
+      title: job.title,
+      companyName: job.companyName,
+      type: job.type,
+      startAge: job.hiredAge,
+      endAge: character.age,
+      finalSalary: job.salary,
+      reasonForLeaving: 'fired',
+    };
+    const nextOccupation =
+      stage === 'imprisoned'
+        ? 'Incarcerated'
+        : resolveCharacterOccupation(character, {
+            age: character.age,
+            currentOccupationBaseline: 'Unemployed',
+            educationStage: character.education?.currentStage,
+            professionalSchool: character.education?.professionalSchool ?? null,
+            activeJobTitle: undefined,
+            business: character.business ?? null,
+          });
+
+    return {
+      character: {
+        ...character,
+        occupation: nextOccupation,
+        career: {
+          ...career,
+          currentJob: null,
+          history: [...career.history, firedEntry],
+          yearActions: createInitialYearActions(),
+        },
+      },
+      decision,
+      applied: true,
+      terminated: true,
+      terminatedJobTitle,
+      suspended: false,
+      reinstated: false,
+    };
+  }
+
+  const wasSuspended = Boolean(job.suspendedPendingTrial);
+  const nextPerformance = clamp(job.performance + decision.performanceDelta);
+
+  return {
+    character: {
+      ...character,
+      career: {
+        ...career,
+        currentJob: {
+          ...job,
+          performance: nextPerformance,
+          suspendedPendingTrial: null,
+          lastCrimeConsequenceCaseId: pendingCase.id,
+        },
+      },
+    },
+    decision,
+    applied: wasSuspended || decision.performanceDelta !== 0,
+    terminated: false,
+    terminatedJobTitle: null,
+    suspended: false,
+    reinstated: wasSuspended && decision.action === 'reinstate',
+  };
+}
+
+function getWorkplaceActionBlock(
+  character: CharacterProfile,
+  currentJob: ActiveCareerProfile,
+): WorkplaceActionOutcome | null {
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      character,
+      title: 'Unavailable While Incarcerated',
+      subtitle: `${currentJob.title} • ${currentJob.companyName}`,
+      message: 'Workplace actions are unavailable while incarcerated.',
+      icon: '🔒',
+      appliedEffects: {},
+      isSuccess: false,
+    };
+  }
+  if (currentJob.suspendedPendingTrial) {
+    return {
+      character,
+      title: 'Suspended Pending Trial',
+      subtitle: `${currentJob.title} • ${currentJob.companyName}`,
+      message:
+        currentJob.suspendedPendingTrial.reason ||
+        'Workplace actions are paused while your pending court case is unresolved.',
+      icon: '⏸️',
+      appliedEffects: {},
+      isSuccess: false,
+    };
+  }
+  return null;
+}
+
 export function checkPromotionEligibility(
   character: CharacterProfile
 ): PromotionEligibilityCheck {
@@ -688,6 +971,22 @@ export function checkPromotionEligibility(
       nextTier: null,
       missingDegree: false,
       reason: 'You are not currently employed.',
+    };
+  }
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      isEligible: false,
+      nextTier: null,
+      missingDegree: false,
+      reason: 'Promotions are unavailable while incarcerated.',
+    };
+  }
+  if (currentJob.suspendedPendingTrial) {
+    return {
+      isEligible: false,
+      nextTier: null,
+      missingDegree: false,
+      reason: 'Promotions are paused while suspended pending trial.',
     };
   }
 
@@ -809,6 +1108,8 @@ export function performWorkHarder(
       isSuccess: false,
     };
   }
+  const blocked = getWorkplaceActionBlock(character, currentJob);
+  if (blocked) return blocked;
 
   if (character.career.yearActions?.workedHarder) {
     return {
@@ -904,6 +1205,8 @@ export function performSlackOff(
       isSuccess: false,
     };
   }
+  const blocked = getWorkplaceActionBlock(character, currentJob);
+  if (blocked) return blocked;
 
   if (character.career.yearActions?.slackedOff) {
     return {
@@ -985,6 +1288,8 @@ export function performAskForRaise(
       isSuccess: false,
     };
   }
+  const blocked = getWorkplaceActionBlock(character, currentJob);
+  if (blocked) return blocked;
 
   if (character.career.yearActions?.askedForRaise) {
     return {
@@ -1155,6 +1460,8 @@ export function performAskForPromotion(
       isSuccess: false,
     };
   }
+  const blocked = getWorkplaceActionBlock(character, currentJob);
+  if (blocked) return blocked;
 
   const { age, birthYear } = character;
 
@@ -1324,6 +1631,8 @@ export function performSocializeWithCoworkers(
       isSuccess: false,
     };
   }
+  const blocked = getWorkplaceActionBlock(character, currentJob);
+  if (blocked) return blocked;
 
   if (character.career.yearActions?.socializedWithCoworkers) {
     return {

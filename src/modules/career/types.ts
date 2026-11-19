@@ -57,6 +57,13 @@ export interface JobTemplate {
   };
 }
 
+export interface CareerPendingTrialSuspension {
+  caseId: string;
+  reason: string;
+  payMultiplier: 0 | 0.5;
+  startedAtAge: number;
+}
+
 export interface ActiveCareerProfile {
   jobId: string;
   title: string;
@@ -68,6 +75,10 @@ export interface ActiveCareerProfile {
   performance: number; // 0 - 100
   hiredAge: number;
   icon: string;
+  /** Active pre-trial administrative leave (50% paid or 0% unpaid) while a criminal case is pending. */
+  suspendedPendingTrial?: CareerPendingTrialSuspension | null;
+  /** Idempotency guard recording the last settled court case ID applied to this active job. */
+  lastCrimeConsequenceCaseId?: string;
 }
 
 export interface CareerHistoryEntry {

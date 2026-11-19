@@ -133,7 +133,7 @@ export interface SchoolHistoryEntry {
   startAge: number;
   endAge: number;
   finalGrades: number;
-  status: 'graduated' | 'dropped_out';
+  status: 'graduated' | 'dropped_out' | 'expelled';
 }
 
 export interface YearlyStudentActions {
@@ -141,6 +141,8 @@ export interface YearlyStudentActions {
   slackedOff: boolean;
   askedForTutor: boolean;
 }
+
+export type EducationDisciplinaryStatus = 'none' | 'warning' | 'probation' | 'suspended';
 
 export interface EducationProfile {
   currentStage: SchoolStage;
@@ -169,6 +171,16 @@ export interface EducationProfile {
   professionalSchool: ProfessionalSchoolProfile | null;
   /** Accumulated student loan debt from higher education. */
   studentDebt: number;
+  /** Current academic disciplinary status from criminal or conduct proceedings. */
+  disciplinaryStatus?: EducationDisciplinaryStatus;
+  /** Remaining years of active higher-ed academic suspension (counts down cleanly on Age Up). */
+  disciplinaryDurationYears?: number;
+  /** Organic K-12 academic growth penalty from school suspension / missed classes (applied once on next Age Up). */
+  missedClassPenalty?: number;
+  /** Higher-ed stages from which the student was independently expelled. */
+  expelledFromStages?: ('university' | 'professional_school')[];
+  /** Idempotency guard recording the last court case applied to education state. */
+  lastCrimeConsequenceCaseId?: string;
 }
 
 export type SchoolMilestoneType =

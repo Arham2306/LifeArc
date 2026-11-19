@@ -52,7 +52,23 @@ export type ExecutiveActionType =
   | 'open_branch'
   | 'pay_loan_early'
   | 'rebrand'
-  | 'set_owner_salary';
+  | 'set_owner_salary'
+  | 'appoint_manager';
+
+export type BusinessManagementCapability =
+  | 'owner_operated'
+  | 'delegated_management'
+  | 'management_unavailable'
+  | 'legacy_unassigned';
+
+export type BusinessOperationalStatus =
+  | 'active'
+  | 'paused_incarceration'
+  | 'liquidated';
+
+export type BusinessLoanGuaranteeType =
+  | 'corporate_only'
+  | 'personally_guaranteed';
 
 export interface ActiveBusinessProfile {
   id: string;
@@ -90,6 +106,13 @@ export interface ActiveBusinessProfile {
   // Debt & Loans
   outstandingLoan: number;        // Commercial bank loan balance ($)
   annualLoanPayment: number;      // Annual debt service ($)
+  loanGuaranteeType?: BusinessLoanGuaranteeType;
+
+  // Explicit Management & Continuity Metadata
+  managementCapability?: BusinessManagementCapability;
+  operationalStatus?: BusinessOperationalStatus;
+  absenteeLossYears?: number;
+  lastCrimeConsequenceCaseId?: string;
 
   // Lifetime Telemetry
   yearsInOperation: number;
@@ -130,12 +153,17 @@ export interface BusinessFiscalReport {
   marketingExpense: number;
   rndExpense: number;
   facilityExpense: number;
+  managementExpense?: number;
   loanPayment: number;
+  loanInterestExpense?: number;
+  loanPrincipalPaid?: number;
+  loanUnpaidInterestCapitalized?: number;
   operatingExpenses: number;
   preTaxProfit: number;
   taxesPaid: number;
   netProfit: number;
   ownerDividendPaid: number;
+  externalShareholderDividendPaid?: number;
   ownerSalaryPaid: number;
   totalPayoutToPlayer: number;
   netTreasuryAddition: number;

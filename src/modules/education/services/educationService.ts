@@ -35,6 +35,21 @@ import {
   getProfessionalSchoolById,
 } from '../data/professionalSchools'
 import { applyEffects } from '../../character/services/statService'
+import {
+  evaluateEducationConsequence,
+  type EducationConsequenceDecision,
+} from '../../crime/data/crimeConsequences'
+import {
+  hasActiveAdultConviction,
+  hasActiveFelony,
+  isCurrentlyIncarcerated,
+  isOnProbation,
+} from '../../crime/services/crimeSelectors'
+import type {
+  CrimeExposureLevel,
+  CrimeOutcomeStatus,
+  PendingCourtCase,
+} from '../../crime/types'
 import { createId } from '../../../utils/id'
 import { chance, pickRandom, randomInt } from '../../../utils/random'
 
@@ -253,10 +268,47 @@ export function progressEducationForYear(
     };
   }
 
+  const missedPenalty = Math.max(0, Math.min(15, edu.missedClassPenalty ?? 0));
+
   // Process any active extracurriculars for the year that just finished
   const activityPass = processAnnualActivities(character, nextAge);
   events.push(...activityPass.activityEvents);
   let combinedEffects: StatEffects = { ...activityPass.activityEffects };
+
+  // Higher-education academic suspension pauses degree progression & tuition accrual for 1 year
+  if (
+    (edu.currentStage === 'university' || edu.currentStage === 'professional_school') &&
+    edu.disciplinaryStatus === 'suspended' &&
+    (edu.disciplinaryDurationYears ?? 0) > 0
+  ) {
+    const remainingSuspension = Math.max(0, (edu.disciplinaryDurationYears ?? 1) - 1);
+    const suspensionCleared = remainingSuspension === 0;
+    events.push({
+      id: createId(),
+      age: nextAge,
+      year: nextYear,
+      title: suspensionCleared ? 'Academic Suspension Lifted' : 'Academic Suspension Ongoing',
+      message: suspensionCleared
+        ? `Your disciplinary suspension at ${edu.schoolName || 'school'} ended. You are cleared to resume your coursework next year.`
+        : `Your academic enrollment at ${edu.schoolName || 'school'} remained suspended (${remainingSuspension} year(s) left).`,
+      category: 'education',
+      icon: suspensionCleared ? '📚' : '⏸️',
+    });
+
+    return {
+      education: {
+        ...edu,
+        yearActions: resetActions,
+        activities: [],
+        disciplines: activityPass.updatedDisciplines,
+        disciplinaryStatus: suspensionCleared ? 'none' : 'suspended',
+        disciplinaryDurationYears: remainingSuspension,
+        missedClassPenalty: 0,
+      },
+      events,
+      statEffects: combinedEffects,
+    };
+  }
 
   // 1. Age 5: Enroll in Elementary School
   if (nextAge === SCHOOL_STAGE_CONFIG.elementary.startAge && edu.currentStage === 'none') {
@@ -313,7 +365,7 @@ export function progressEducationForYear(
 
     const newSchoolName = generateSchoolName(character.city, 'middle_school');
     const nextGrades = clamp(
-      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0)
+      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0) - missedPenalty
     );
     const nextPopularity = clamp(
       driftPopularity(edu.popularity, character.stats.looks, character.stats.happiness) +
@@ -346,6 +398,9 @@ export function progressEducationForYear(
         yearActions: resetActions,
         activities: [],
         disciplines: activityPass.updatedDisciplines,
+        disciplinaryStatus: 'none',
+        disciplinaryDurationYears: 0,
+        missedClassPenalty: 0,
       },
       events,
       statEffects: combinedEffects,
@@ -369,7 +424,7 @@ export function progressEducationForYear(
 
     const newSchoolName = generateSchoolName(character.city, 'high_school');
     const nextGrades = clamp(
-      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0)
+      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0) - missedPenalty
     );
     const nextPopularity = clamp(
       driftPopularity(edu.popularity, character.stats.looks, character.stats.happiness) +
@@ -402,6 +457,9 @@ export function progressEducationForYear(
         yearActions: resetActions,
         activities: [],
         disciplines: activityPass.updatedDisciplines,
+        disciplinaryStatus: 'none',
+        disciplinaryDurationYears: 0,
+        missedClassPenalty: 0,
       },
       events,
       statEffects: combinedEffects,
@@ -412,7 +470,7 @@ export function progressEducationForYear(
   if (nextAge === 18 && edu.currentStage === 'high_school') {
     const prevConfig = SCHOOL_STAGE_CONFIG.high_school;
     const finalGrades = clamp(
-      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0)
+      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0) - missedPenalty
     );
     const gradeMeta = getLetterGradeMeta(finalGrades);
     const diplomaTitle =
@@ -454,6 +512,9 @@ export function progressEducationForYear(
         yearActions: resetActions,
         activities: [],
         disciplines: activityPass.updatedDisciplines,
+        disciplinaryStatus: 'none',
+        disciplinaryDurationYears: 0,
+        missedClassPenalty: 0,
       },
       events,
       statEffects: combinedEffects,
@@ -656,7 +717,7 @@ export function progressEducationForYear(
     const yearInStage = nextAge - config.startAge + 1;
     const gradeLevelLabel = config.gradeLabelsByAge[nextAge] || edu.gradeLevelLabel;
     const nextGrades = clamp(
-      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0)
+      driftGrades(edu.grades, character.stats.smarts) + (combinedEffects.grades ?? 0) - missedPenalty
     );
     const nextPopularity = clamp(
       driftPopularity(edu.popularity, character.stats.looks, character.stats.happiness) +
@@ -687,6 +748,9 @@ export function progressEducationForYear(
         yearActions: resetActions,
         activities: activityPass.updatedActivities,
         disciplines: activityPass.updatedDisciplines,
+        disciplinaryStatus: 'none',
+        disciplinaryDurationYears: 0,
+        missedClassPenalty: 0,
       },
       events,
       statEffects: combinedEffects,
@@ -1199,30 +1263,274 @@ export function performDropOut(character: CharacterProfile): StudentActionResult
     icon: '🚪',
   };
 
+    return {
+      character: {
+        ...updated,
+        occupation: 'High School Dropout',
+        education: {
+          ...updated.education,
+          currentStage: 'dropped_out',
+          schoolName: null,
+          stageStartAge: null,
+          yearInStage: 0,
+          totalYearsInStage: 0,
+          gradeLevelLabel: 'High School Dropout',
+          activities: [],
+          history: [...updated.education.history, dropoutHistoryEntry],
+        },
+        timeline: [...updated.timeline, journalEvent],
+      },
+      outcome: {
+        title: 'Dropped Out of School',
+        subtitle: `Left ${schoolName} at Age ${age}`,
+        message,
+        icon: '🚪',
+        appliedEffects: applied,
+      },
+    };
+}
+
+/**
+ * Expels the character from active university or professional school enrollment
+ * following a qualifying criminal conviction (adult felony, probation, or imprisonment).
+ * Preserves earned diplomas and accumulated studentDebt.
+ */
+export function expelFromHigherEducationForCrime(
+  character: CharacterProfile,
+  crimeTitle: string,
+  outcome: 'imprisoned' | 'probation' | 'fined',
+): {
+  character: CharacterProfile;
+  expelled: boolean;
+  expelledFromSchool: string | null;
+} {
+  const edu = character.education;
+  if (!edu) {
+    return { character, expelled: false, expelledFromSchool: null };
+  }
+
+  const isUniversity = edu.currentStage === 'university' && edu.university !== null;
+  const isProf = edu.currentStage === 'professional_school' && edu.professionalSchool !== null;
+  if (!isUniversity && !isProf) {
+    return { character, expelled: false, expelledFromSchool: null };
+  }
+
+  const { age, birthYear, city } = character;
+  const schoolName = isUniversity
+    ? edu.university?.universityName || edu.schoolName || `${city} University`
+    : edu.professionalSchool?.schoolName || edu.schoolName || `${city} Graduate School`;
+  const stageLabel = isUniversity
+    ? edu.university?.degreeTitle || 'University'
+    : edu.professionalSchool?.programName || 'Professional School';
+
+  const expelledEntry: SchoolHistoryEntry = {
+    id: createId(),
+    stage: isUniversity ? 'university' : 'professional_school',
+    stageLabel,
+    schoolName,
+    startAge: edu.stageStartAge ?? age,
+    endAge: age,
+    finalGrades: edu.grades,
+    status: 'expelled',
+  };
+
+  const verdictPhrase =
+    outcome === 'imprisoned'
+      ? 'prison sentence'
+      : outcome === 'probation'
+        ? 'probation sentence'
+        : 'felony conviction';
+  const message = `${schoolName} immediately expelled you from your ${stageLabel} program following your ${verdictPhrase} for ${crimeTitle}.`;
+  const expelEvent: LifeEvent = {
+    id: createId(),
+    age,
+    year: birthYear + age,
+    title: isUniversity ? 'Expelled from University' : 'Expelled from Graduate School',
+    message,
+    category: 'education',
+    icon: '🚫',
+  };
+
+  const hasCollegeDegree = edu.diplomas.some(
+    (d) =>
+      d.startsWith('B.') ||
+      d.toLowerCase().includes('bachelor') ||
+      d.toLowerCase().includes('degree'),
+  );
+
+  const expelledStage: 'university' | 'professional_school' = isUniversity
+    ? 'university'
+    : 'professional_school';
+  const prevExpelledStages = edu.expelledFromStages ?? [];
+  const nextExpelledStages = prevExpelledStages.includes(expelledStage)
+    ? prevExpelledStages
+    : [...prevExpelledStages, expelledStage];
+
   return {
     character: {
-      ...updated,
-      occupation: 'High School Dropout',
+      ...character,
       education: {
-        ...updated.education,
-        currentStage: 'dropped_out',
+        ...edu,
+        currentStage: 'graduated',
         schoolName: null,
         stageStartAge: null,
         yearInStage: 0,
         totalYearsInStage: 0,
-        gradeLevelLabel: 'High School Dropout',
+        gradeLevelLabel: isUniversity
+          ? 'Expelled from University'
+          : hasCollegeDegree
+            ? 'Expelled from Graduate School'
+            : 'High School Graduate',
+        popularity: clamp(edu.popularity - 25),
         activities: [],
-        history: [...updated.education.history, dropoutHistoryEntry],
+        university: null,
+        professionalSchool: null,
+        disciplinaryStatus: 'none',
+        disciplinaryDurationYears: 0,
+        missedClassPenalty: 0,
+        expelledFromStages: nextExpelledStages,
+        history: [...edu.history, expelledEntry],
       },
-      timeline: [...updated.timeline, journalEvent],
+      timeline: [...character.timeline, expelEvent],
     },
-    outcome: {
-      title: 'Dropped Out of School',
-      subtitle: `Left ${schoolName} at Age ${age}`,
-      message,
-      icon: '🚪',
-      appliedEffects: applied,
+    expelled: true,
+    expelledFromSchool: schoolName,
+  };
+}
+
+export interface EducationCrimeConsequenceResult {
+  character: CharacterProfile;
+  decision: EducationConsequenceDecision;
+  applied: boolean;
+  disposition: 'none' | 'warning' | 'probation' | 'suspended' | 'expelled';
+  expelledFromSchool: string | null;
+}
+
+/**
+ * Integrates Phase 1 `evaluateEducationConsequence()` into education state with per-case
+ * idempotency: handles K-12 detention/suspension (`missedClassPenalty`, compulsory progression
+ * intact) and higher-ed conduct warning, disciplinary probation, 1-year suspension, or expulsion.
+ */
+export function applyEducationCrimeConsequence(
+  character: CharacterProfile,
+  pendingCase: Pick<PendingCourtCase, 'id' | 'crimeId' | 'offenseClass' | 'jurisdiction' | 'title'>,
+  outcome: CrimeOutcomeStatus,
+  exposure: CrimeExposureLevel,
+): EducationCrimeConsequenceResult {
+  const decision = evaluateEducationConsequence(character, pendingCase, outcome, exposure);
+  const edu = character.education;
+
+  if (!edu || edu.lastCrimeConsequenceCaseId === pendingCase.id || decision.action === 'none') {
+    return {
+      character,
+      decision,
+      applied: false,
+      disposition: 'none',
+      expelledFromSchool: null,
+    };
+  }
+
+  if (decision.action === 'expelled') {
+    const verdictArg: 'imprisoned' | 'probation' | 'fined' =
+      outcome === 'imprisoned'
+        ? 'imprisoned'
+        : outcome === 'probation'
+          ? 'probation'
+          : 'fined';
+    const expelledRes = expelFromHigherEducationForCrime(
+      character,
+      pendingCase.title,
+      verdictArg,
+    );
+    return {
+      character: expelledRes.expelled
+        ? {
+            ...expelledRes.character,
+            education: {
+              ...expelledRes.character.education,
+              lastCrimeConsequenceCaseId: pendingCase.id,
+            },
+          }
+        : expelledRes.character,
+      decision,
+      applied: expelledRes.expelled,
+      disposition: expelledRes.expelled ? 'expelled' : 'none',
+      expelledFromSchool: expelledRes.expelledFromSchool,
+    };
+  }
+
+  const nextPopularity = clamp(edu.popularity + decision.popularityDelta);
+  const nextActivities = decision.dropActivities ? [] : edu.activities;
+  const nextMissedClassPenalty = Math.max(
+    edu.missedClassPenalty ?? 0,
+    decision.missedClassPenalty,
+  );
+  const nextDisciplinaryStatus =
+    decision.action === 'detention'
+      ? 'warning'
+      : decision.action === 'k12_suspension'
+        ? 'suspended'
+        : decision.action;
+
+  const schoolName = edu.schoolName || `${character.city} School`;
+  const eventId = `${pendingCase.id}-edu-discipline`;
+  const eventTitle =
+    decision.action === 'detention'
+      ? 'School Detention Issued'
+      : decision.action === 'k12_suspension'
+        ? 'School Suspension'
+        : decision.action === 'suspended'
+          ? 'Academic Suspension'
+          : decision.action === 'probation'
+            ? 'Academic Disciplinary Probation'
+            : 'Campus Conduct Warning';
+  const eventMessage =
+    decision.reason ||
+    `${schoolName} issued a disciplinary action following ${pendingCase.title}.`;
+
+  const nextTimeline = character.timeline.some((e) => e.id === eventId)
+    ? character.timeline
+    : [
+        ...character.timeline,
+        {
+          id: eventId,
+          age: character.age,
+          year: character.birthYear + character.age,
+          title: eventTitle,
+          message: eventMessage,
+          category: 'education' as const,
+          icon: decision.action === 'suspended' || decision.action === 'k12_suspension' ? '⏸️' : '⚠️',
+        },
+      ];
+
+  const mappedDisposition: EducationCrimeConsequenceResult['disposition'] =
+    decision.action === 'detention' || decision.action === 'warning'
+      ? 'warning'
+      : decision.action === 'k12_suspension' || decision.action === 'suspended'
+        ? 'suspended'
+        : 'probation';
+
+  return {
+    character: {
+      ...character,
+      education: {
+        ...edu,
+        popularity: nextPopularity,
+        activities: nextActivities,
+        disciplinaryStatus: nextDisciplinaryStatus,
+        disciplinaryDurationYears:
+          decision.suspensionYears > 0
+            ? Math.max(edu.disciplinaryDurationYears ?? 0, decision.suspensionYears)
+            : edu.disciplinaryDurationYears ?? 0,
+        missedClassPenalty: nextMissedClassPenalty,
+        lastCrimeConsequenceCaseId: pendingCase.id,
+      },
+      timeline: nextTimeline,
     },
+    decision,
+    applied: true,
+    disposition: mappedDisposition,
+    expelledFromSchool: null,
   };
 }
 
@@ -1544,12 +1852,20 @@ export function evaluateMajorEligibility(
   const meetsGrades = effectiveGrades >= major.minGrades;
   const meetsSmarts = effectiveSmarts >= major.minSmarts;
   const meetsHealth = !major.minHealth || stats.health + bonus >= major.minHealth;
+  const criminalAdmissionsBlock = getCriminalHigherEdAdmissionsBlock(character);
 
   const isAdmissible =
-    hasHSDiploma && !alreadyEarned && meetsGrades && meetsSmarts && meetsHealth;
+    !criminalAdmissionsBlock &&
+    hasHSDiploma &&
+    !alreadyEarned &&
+    meetsGrades &&
+    meetsSmarts &&
+    meetsHealth;
 
   let reasonIfIneligible: string | undefined;
-  if (alreadyEarned) {
+  if (criminalAdmissionsBlock) {
+    reasonIfIneligible = criminalAdmissionsBlock;
+  } else if (alreadyEarned) {
     reasonIfIneligible = 'Degree Already Earned';
   } else if (!hasHSDiploma) {
     reasonIfIneligible = 'Requires High School Diploma';
@@ -1772,6 +2088,26 @@ export interface ProfessionalSchoolEligibility {
   reasonIfIneligible?: string;
 }
 
+function getCriminalHigherEdAdmissionsBlock(character: CharacterProfile): string | null {
+  if (isCurrentlyIncarcerated(character)) {
+    return 'Unavailable while incarcerated';
+  }
+  if (isOnProbation(character)) {
+    return 'Blocked while serving probation';
+  }
+  if (
+    character.education?.disciplinaryStatus === 'suspended' &&
+    (character.education?.disciplinaryDurationYears ?? 0) > 0
+  ) {
+    return 'Blocked while serving academic suspension';
+  }
+  const hasExpulsion = (character.education?.history || []).some((h) => h.status === 'expelled');
+  if (hasActiveFelony(character) || (hasExpulsion && hasActiveAdultConviction(character))) {
+    return 'Barred due to active criminal record';
+  }
+  return null;
+}
+
 /**
  * Evaluates whether the character meets admissions requirements for a Professional School
  * (Medical, Law, Flight, Dental, Veterinary, Nursing, Graduate, Fine Arts).
@@ -1802,12 +2138,20 @@ export function evaluateProfessionalSchoolEligibility(
   const meetsGrades = edu.grades >= school.minGrades;
   const meetsSmarts = stats.smarts >= school.minSmarts;
   const meetsHealth = !school.minHealth || stats.health >= school.minHealth;
+  const criminalAdmissionsBlock = getCriminalHigherEdAdmissionsBlock(character);
 
   const isAdmissible =
-    !alreadyEarned && hasRequiredDegree && meetsGrades && meetsSmarts && meetsHealth;
+    !criminalAdmissionsBlock &&
+    !alreadyEarned &&
+    hasRequiredDegree &&
+    meetsGrades &&
+    meetsSmarts &&
+    meetsHealth;
 
   let reasonIfIneligible: string | undefined;
-  if (alreadyEarned) {
+  if (criminalAdmissionsBlock) {
+    reasonIfIneligible = criminalAdmissionsBlock;
+  } else if (alreadyEarned) {
     reasonIfIneligible = 'Degree Already Earned';
   } else if (!hasRequiredDegree) {
     reasonIfIneligible = `Requires ${school.requiredDegreeTitles[0]}`;

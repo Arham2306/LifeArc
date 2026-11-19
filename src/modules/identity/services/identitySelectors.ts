@@ -318,7 +318,13 @@ function isValidSchoolHistoryEntry(value: unknown): value is SchoolHistoryEntry 
   if (!finiteNumber(value.startAge) || value.startAge < 0) return false;
   if (!finiteNumber(value.endAge) || value.endAge < 0) return false;
   if (!finiteNumber(value.finalGrades) || value.finalGrades < 0) return false;
-  if (value.status !== 'graduated' && value.status !== 'dropped_out') return false;
+  if (
+    value.status !== 'graduated' &&
+    value.status !== 'dropped_out' &&
+    value.status !== 'expelled'
+  ) {
+    return false;
+  }
   return true;
 }
 

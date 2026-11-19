@@ -267,6 +267,21 @@ function ownedAustinStudio(id = 'home-1') {
     age: 22,
     cash: 25000,
     stats: { health: 60, happiness: 50, smarts: 70, looks: 70, karma: 100 },
+    career: {
+      ...createInitialCareerState(),
+      currentJob: {
+        jobId: 'clerk',
+        title: 'Store Clerk',
+        companyName: 'Local Mart',
+        field: 'hospitality_retail',
+        type: 'full_time',
+        salary: 40000,
+        yearsInJob: 1,
+        performance: 75,
+        hiredAge: 21,
+        icon: '🛒',
+      },
+    },
     housing: {
       arrangement: 'unhoused',
       moveOutDeadlineAge: 21,
