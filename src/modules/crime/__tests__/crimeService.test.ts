@@ -165,7 +165,15 @@ function testFourExecutionDetectionCombinationsAndProceeds() {
   assert(res2.character.cash === 500, 'Cash NOT credited while court case is pending');
   assert(res2.character.bankBalance === 4000, 'Bank balance untouched');
   assert(res2.character.career.currentJob !== null, 'Arrest alone must not terminate employment');
-  assert(res2.character.parents.father.relationship < 70, 'Living father relationship reacts');
+  if (res2.exposure === 'private') {
+    assert(
+      res2.character.parents.father.relationship === 70 &&
+        res2.character.partner?.relationship === 82,
+      'Adult private arrest without public/witness/statutory basis must not create ungrounded family/partner reactions',
+    );
+  } else {
+    assert(res2.character.parents.father.relationship < 70, 'Publicized arrest triggers living father reaction');
+  }
   assert(res2.character.parents.mother.relationship === 88, 'Deceased mother relationship untouched');
   assert(
     res2.character.relationships.find((r) => r.id === 'coworker-1')?.relationship === 60,

@@ -93,6 +93,8 @@ export function performPrisonAction(
   let sentenceReductionYears = 0;
   let nextProbation = sanitized.probation;
   let nextOccupation = character.occupation;
+  let nextBusiness = character.business;
+  let nextRecords = sanitized.records;
   const statEffects: StatEffects = {};
   let eventTitle = '';
   let eventIcon = '🏛️';
@@ -173,8 +175,19 @@ export function performPrisonAction(
         eventIcon = '⚖️';
         if (nextYearsRemaining === 0) {
           released = true;
+          if (nextBusiness && nextBusiness.operationalStatus === 'paused_incarceration') {
+            nextBusiness = { ...nextBusiness, operationalStatus: 'active' };
+          }
+          if (prison.originCaseId) {
+            nextRecords = nextRecords.map((entry) =>
+              entry.id === prison.originCaseId && entry.sentenceStatus === 'active'
+                ? { ...entry, sentenceStatus: 'completed' }
+                : entry,
+            );
+          }
           nextOccupation = resolveCharacterOccupation(character, {
             prisonContext: prison,
+            business: nextBusiness,
             currentOccupationBaseline: 'Unemployed',
           });
           message =
@@ -212,15 +225,48 @@ export function performPrisonAction(
         released = true;
         const paroleYears = Math.max(1, prison.yearsRemaining);
         nextYearsRemaining = 0;
+        if (nextBusiness && nextBusiness.operationalStatus === 'paused_incarceration') {
+          nextBusiness = { ...nextBusiness, operationalStatus: 'active' };
+        }
+        const matchedPrisonRecord = !prison.originCaseId
+          ? [...sanitized.records]
+              .reverse()
+              .find(
+                (entry) =>
+                  entry.outcome === 'imprisoned' &&
+                  entry.sentenceStatus !== 'completed' &&
+                  entry.title === prison.chargeTitle,
+              )
+          : undefined;
+        const requiresIndependentTermEntry =
+          Array.isArray(sanitized.probation?.activeTerms) &&
+          sanitized.probation.activeTerms.length > 0;
+        const paroleRecordId =
+          prison.originCaseId ??
+          matchedPrisonRecord?.id ??
+          (requiresIndependentTermEntry
+            ? deterministicUUID(
+                'legacy_parole_term',
+                character.id,
+                character.age,
+                prison.chargeTitle,
+                paroleYears,
+              )
+            : undefined);
         nextProbation = mergeProbationState(
           sanitized.probation,
           prison.chargeTitle,
           'adult',
           paroleYears,
           character.age,
+          {
+            recordId: paroleRecordId,
+            isParole: true,
+          },
         );
         nextOccupation = resolveCharacterOccupation(character, {
           prisonContext: prison,
+          business: nextBusiness,
           currentOccupationBaseline: 'Unemployed',
         });
         statEffects.happiness = 15;
@@ -270,10 +316,13 @@ export function performPrisonAction(
     {
       ...character,
       occupation: nextOccupation,
+      business: nextBusiness,
       crime: {
         ...sanitized,
+        ...(released ? { lastMidYearReleaseAge: character.age } : {}),
         prison: updatedPrison,
         probation: nextProbation,
+        records: nextRecords,
       },
       timeline: [...character.timeline, actionEvent],
     },

@@ -7,6 +7,7 @@ import { UNIVERSITY_EVENTS } from './universityEvents'
 import { WORKPLACE_EVENTS } from './workplaceEvents'
 import { PARENT_EVENTS } from './parentEvents'
 import { BUSINESS_EVENTS } from './businessEvents'
+import { JAIL_EVENTS } from './jailEvents'
 
 /**
  * Every interactive event in the game.
@@ -21,4 +22,6 @@ export const EVENT_POOL: LifeEventTemplate[] = [
   ...WORKPLACE_EVENTS,
   ...PARENT_EVENTS,
   ...BUSINESS_EVENTS,
+  /** Prison-only events (requiresIncarcerated). Never roll outside custody. */
+  ...JAIL_EVENTS,
 ];

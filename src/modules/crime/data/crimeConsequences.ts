@@ -10,6 +10,7 @@ import type {
   CrimeOutcomeStatus,
   CrimeRollEvaluation,
   CrimeTemplate,
+  LegalJurisdiction,
   PendingCourtCase,
 } from '../types';
 import { JUVENILE_WARNING_RESTITUTION_MAX } from './legalCatalog';
@@ -996,4 +997,64 @@ export function evaluateAwarenessSocialScale(
   }
   // 'private' police intake/fine
   return { householdScale: 0.45, socialCircleScale: 0, colleagueScale: 0 };
+}
+
+export type ArrestWitnessGroup = 'family' | 'partner' | 'friends' | 'colleagues';
+
+export type InstitutionalNotificationTarget = 'none' | 'employer' | 'school' | 'parents';
+
+export interface ArrestAwarenessEvidenceInput {
+  jurisdiction: LegalJurisdiction;
+  exposure: CrimeExposureLevel;
+  explicitWitnessGroups?: readonly ArrestWitnessGroup[];
+  institutionalReportFiled?: boolean;
+  institutionalTarget?: InstitutionalNotificationTarget;
+  statutoryParentNotification?: boolean;
+}
+
+export interface ArrestSocialAwarenessDecision {
+  parentsAware: boolean;
+  partnerAware: boolean;
+  friendsAware: boolean;
+  colleaguesAware: boolean;
+  /** Established arrest deltas (binary: full established delta or 0—never invented multipliers). */
+  parentsDelta: number;
+  partnerDelta: number;
+  friendsDelta: number;
+  colleaguesDelta: number;
+}
+
+/**
+ * Evaluates pre-trial arrest social awareness strictly from explicit awareness recipients
+ * and documented notification rules, keeping legal status, police detection, witness
+ * awareness, institutional reporting, and public exposure independent.
+ */
+export function evaluateArrestSocialAwareness(
+  input: ArrestAwarenessEvidenceInput,
+): ArrestSocialAwarenessDecision {
+  const witnessGroups = new Set<ArrestWitnessGroup>(input.explicitWitnessGroups ?? []);
+  const isPublic = input.exposure === 'publicly_reported';
+  const hasInstitutionalParentsNotice =
+    Boolean(input.institutionalReportFiled) && input.institutionalTarget === 'parents';
+  const hasStatutoryParentsNotice = Boolean(input.statutoryParentNotification);
+
+  const parentsAware =
+    hasStatutoryParentsNotice ||
+    hasInstitutionalParentsNotice ||
+    witnessGroups.has('family') ||
+    isPublic;
+  const partnerAware = witnessGroups.has('partner') || isPublic;
+  const friendsAware = witnessGroups.has('friends') || isPublic;
+  const colleaguesAware = witnessGroups.has('colleagues') || isPublic;
+
+  return {
+    parentsAware,
+    partnerAware,
+    friendsAware,
+    colleaguesAware,
+    parentsDelta: parentsAware ? (input.jurisdiction === 'juvenile' ? -5 : -4) : 0,
+    partnerDelta: partnerAware ? -3 : 0,
+    friendsDelta: 0,
+    colleaguesDelta: 0,
+  };
 }

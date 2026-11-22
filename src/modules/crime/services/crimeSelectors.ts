@@ -20,6 +20,9 @@ import type {
   ProbationConditionId,
   ProbationState,
   ProbationTermEntry,
+  RecordReliefOption,
+  RecordReliefStatus,
+  RecordReliefTier,
 } from '../types';
 
 export const MAX_CRIME_ATTEMPTS_PER_YEAR = 2;
@@ -259,6 +262,14 @@ function sanitizeCrimeRecord(entry: CrimeRecordEntry): CrimeRecordEntry {
     sentenceYears: entry.sentenceYears,
     sealed: entry.sealed,
     expunged: entry.expunged,
+    ...(typeof entry.pardoned === 'boolean' ? { pardoned: entry.pardoned } : {}),
+    ...(typeof entry.lastPetitionDeniedAge === 'number' &&
+    Number.isFinite(entry.lastPetitionDeniedAge) &&
+    entry.lastPetitionDeniedAge >= 0
+      ? { lastPetitionDeniedAge: Math.floor(entry.lastPetitionDeniedAge) }
+      : entry.lastPetitionDeniedAge === null
+        ? { lastPetitionDeniedAge: null }
+        : {}),
     ...(exposure !== undefined ? { exposure } : {}),
     ...(sentenceStatus !== undefined ? { sentenceStatus } : {}),
     ...(typeof entry.stateForfeitedProceeds === 'number' &&
@@ -464,6 +475,9 @@ export function getSanitizedCrimeState(
     attemptCountLifetime: Math.floor(toFiniteNonNegative(raw.attemptCountLifetime, 0)),
     lastAttemptAge: toNullableAge(raw.lastAttemptAge),
     lastProgressedAge: toNullableAge(raw.lastProgressedAge),
+    ...(raw.lastMidYearReleaseAge !== undefined
+      ? { lastMidYearReleaseAge: toNullableAge(raw.lastMidYearReleaseAge) }
+      : {}),
     pendingCase: isValidPendingCase(raw.pendingCase) ? sanitizePendingCase(raw.pendingCase) : null,
     prison,
     probation,
@@ -596,6 +610,16 @@ export function getUnpaidFines(character: Pick<CharacterProfile, 'crime'>): numb
 
 export const EXPUNGEMENT_MISDEMEANOR_CLEAN_YEARS = 5;
 export const EXPUNGEMENT_FELONY_CLEAN_YEARS = 8;
+export const RECORD_RELIEF_NONVIOLENT_PRISON_CLEAN_YEARS = 8;
+export const RECORD_RELIEF_VIOLENT_PRISON_CLEAN_YEARS = 12;
+export const RECORD_RELIEF_RETRY_COOLDOWN_YEARS = 2;
+export const EXECUTIVE_PARDON_MIN_KARMA = 60;
+export const RECORD_RELIEF_FEES = {
+  standard_free: 0,
+  self_filed: 2000,
+  attorney: 8000,
+  executive_pardon: 15000,
+} as const;
 
 export function getExpungementEligibleRecords(
   character: Pick<CharacterProfile, 'age' | 'crime'>,
@@ -625,6 +649,213 @@ export function getExpungementEligibleRecords(
     }
     return entry.outcome !== 'imprisoned' && cleanYears >= EXPUNGEMENT_FELONY_CLEAN_YEARS;
   });
+}
+
+/**
+ * Evaluates the 3-tier Record Relief eligibility, waiting-period countdown, legal debt/karma
+ * requirements, and interactive petition options for any active adult conviction.
+ * Returns `null` for juvenile, already cleared, or non-conviction records.
+ */
+export function evaluateRecordReliefStatus(
+  character: Pick<
+    CharacterProfile,
+    'isAlive' | 'age' | 'cash' | 'karma' | 'career' | 'business' | 'crime'
+  >,
+  entry: CrimeRecordEntry,
+  referenceAge = character.age,
+): RecordReliefStatus | null {
+  if (
+    entry.jurisdiction !== 'adult' ||
+    entry.sealed ||
+    entry.expunged ||
+    !CONVICTION_OR_ADJUDICATION_OUTCOMES.has(entry.outcome)
+  ) {
+    return null;
+  }
+
+  const isViolentPrisonFelony =
+    entry.offenseClass === 'felony' &&
+    entry.outcome === 'imprisoned' &&
+    (entry.crimeId === 'robbery' || entry.crimeId === 'bank_heist');
+
+  const tier: RecordReliefTier =
+    entry.offenseClass === 'misdemeanor' || entry.outcome !== 'imprisoned'
+      ? 'standard'
+      : isViolentPrisonFelony
+        ? 'executive_pardon'
+        : 'court_petition';
+
+  const requiredCleanYears =
+    tier === 'standard'
+      ? entry.offenseClass === 'misdemeanor'
+        ? EXPUNGEMENT_MISDEMEANOR_CLEAN_YEARS
+        : EXPUNGEMENT_FELONY_CLEAN_YEARS
+      : tier === 'court_petition'
+        ? RECORD_RELIEF_NONVIOLENT_PRISON_CLEAN_YEARS
+        : RECORD_RELIEF_VIOLENT_PRISON_CLEAN_YEARS;
+
+  const sanitized = getSanitizedCrimeState(character);
+  const convictionOrAdjudicationRecords = sanitized.records.filter((r) =>
+    CONVICTION_OR_ADJUDICATION_OUTCOMES.has(r.outcome),
+  );
+  const latestConvictionResolutionAge =
+    convictionOrAdjudicationRecords.length > 0
+      ? Math.max(...convictionOrAdjudicationRecords.map((r) => r.age + r.sentenceYears))
+      : entry.age + entry.sentenceYears;
+
+  const cleanStartAge = Math.max(
+    entry.age + entry.sentenceYears,
+    latestConvictionResolutionAge,
+  );
+  const cleanYearsCompleted = Math.max(0, referenceAge - cleanStartAge);
+  const yearsRemaining = Math.max(0, requiredCleanYears - cleanYearsCompleted);
+  const unlockAge = cleanStartAge + requiredCleanYears;
+
+  const unpaidLegalDebt = getUnpaidFines(character) + getUnpaidRestitution(character);
+  const currentKarma = Math.max(
+    0,
+    Math.min(100, Math.round(Number.isFinite(character.karma) ? character.karma : 50)),
+  );
+  const karmaShortfall =
+    tier === 'executive_pardon' ? Math.max(0, EXECUTIVE_PARDON_MIN_KARMA - currentKarma) : 0;
+
+  const cooldownYearsRemaining =
+    tier !== 'standard' &&
+    typeof entry.lastPetitionDeniedAge === 'number' &&
+    Number.isFinite(entry.lastPetitionDeniedAge)
+      ? Math.max(
+          0,
+          RECORD_RELIEF_RETRY_COOLDOWN_YEARS - (referenceAge - entry.lastPetitionDeniedAge),
+        )
+      : 0;
+
+  const blockingReasons: string[] = [];
+  if (!character.isAlive) {
+    blockingReasons.push('Deceased characters cannot petition for record relief.');
+  }
+  if (isCurrentlyIncarcerated(character)) {
+    blockingReasons.push('Complete prison sentence first.');
+  }
+  if (isOnProbation(character)) {
+    blockingReasons.push('Complete active probation first.');
+  }
+  if (hasPendingCourtCase(character)) {
+    blockingReasons.push('Resolve pending court case first.');
+  }
+  if (yearsRemaining > 0) {
+    blockingReasons.push(`Need ${yearsRemaining} more clean year${yearsRemaining === 1 ? '' : 's'} (Age ${unlockAge}).`);
+  }
+  if (tier !== 'standard' && unpaidLegalDebt > 0) {
+    blockingReasons.push(`Pay off $${unpaidLegalDebt.toLocaleString()} in legal fines/restitution first.`);
+  }
+  if (tier !== 'standard' && cooldownYearsRemaining > 0) {
+    blockingReasons.push(
+      `Wait ${cooldownYearsRemaining} more year${cooldownYearsRemaining === 1 ? '' : 's'} after last denial.`,
+    );
+  }
+  if (tier === 'executive_pardon' && karmaShortfall > 0) {
+    blockingReasons.push(`Requires Karma ≥ ${EXECUTIVE_PARDON_MIN_KARMA} (currently ${currentKarma}).`);
+  }
+
+  const eligibleNow = blockingReasons.length === 0;
+  const safeCash = Math.max(0, Math.floor(Number.isFinite(character.cash) ? character.cash : 0));
+  const hasSteadyIncome = Boolean(character.career?.currentJob || character.business);
+  const extraCleanYears = Math.max(0, cleanYearsCompleted - requiredCleanYears);
+
+  let options: RecordReliefOption[] = [];
+  if (tier === 'standard') {
+    options = [
+      {
+        id: 'standard_free',
+        label: 'Standard Expungement',
+        description: 'Administrative record clearance after completing the clean waiting period.',
+        fee: RECORD_RELIEF_FEES.standard_free,
+        canAfford: true,
+        approvalProbability: 1,
+      },
+    ];
+  } else if (tier === 'court_petition') {
+    const cleanBonus = Math.min(0.15, extraCleanYears * 0.03);
+    const workBonus = hasSteadyIncome ? 0.12 : 0;
+    const karmaAdj = ((currentKarma - 50) / 50) * 0.15;
+    const sharedBonus = cleanBonus + workBonus + karmaAdj;
+
+    const selfProb = Math.round(Math.max(0.15, Math.min(0.88, 0.45 + sharedBonus)) * 100) / 100;
+    const attorneyProb =
+      Math.round(Math.max(0.35, Math.min(0.96, 0.72 + sharedBonus)) * 100) / 100;
+
+    options = [
+      {
+        id: 'self_filed',
+        label: 'Self-Filed Petition (Pro Se)',
+        description:
+          'File your own rehabilitation petition with the court. Lower cost, but harder to convince the judge.',
+        fee: RECORD_RELIEF_FEES.self_filed,
+        canAfford: safeCash >= RECORD_RELIEF_FEES.self_filed,
+        approvalProbability: selfProb,
+      },
+      {
+        id: 'attorney',
+        label: 'Expungement Specialist Attorney',
+        description:
+          'Retain a specialist attorney to present your rehabilitation record and employment history.',
+        fee: RECORD_RELIEF_FEES.attorney,
+        canAfford: safeCash >= RECORD_RELIEF_FEES.attorney,
+        approvalProbability: attorneyProb,
+      },
+    ];
+  } else {
+    const cleanBonus = Math.min(0.18, extraCleanYears * 0.03);
+    const workBonus = hasSteadyIncome ? 0.1 : 0;
+    const highKarmaBonus = Math.min(0.2, Math.max(0, currentKarma - EXECUTIVE_PARDON_MIN_KARMA) * 0.005);
+    const pardonProb =
+      Math.round(
+        Math.max(0.2, Math.min(0.82, 0.38 + cleanBonus + workBonus + highKarmaBonus)) * 100,
+      ) / 100;
+
+    options = [
+      {
+        id: 'executive_pardon',
+        label: "Governor's Executive Pardon",
+        description:
+          'Submit a formal clemency dossier for a violent felony. Rare, costly, and requires strong rehabilitation.',
+        fee: RECORD_RELIEF_FEES.executive_pardon,
+        canAfford: safeCash >= RECORD_RELIEF_FEES.executive_pardon,
+        approvalProbability: pardonProb,
+      },
+    ];
+  }
+
+  const tierLabel =
+    tier === 'standard'
+      ? 'Expungement'
+      : tier === 'court_petition'
+        ? 'Court Petition'
+        : "Governor's Pardon";
+
+  const summaryText = eligibleNow
+    ? tier === 'standard'
+      ? 'Eligible for Standard Expungement'
+      : tier === 'court_petition'
+        ? 'Eligible to Petition Court for Expungement'
+        : "Eligible to Apply for Governor's Pardon"
+    : `${tierLabel}: ${blockingReasons.slice(0, 2).join(' ')}`;
+
+  return {
+    recordId: entry.id,
+    tier,
+    eligibleNow,
+    cleanYearsCompleted,
+    requiredCleanYears,
+    yearsRemaining,
+    unlockAge,
+    cooldownYearsRemaining,
+    unpaidLegalDebt,
+    karmaShortfall,
+    blockingReasons,
+    summaryText,
+    options,
+  };
 }
 
 export function getAttemptsUsedThisYear(character: Pick<CharacterProfile, 'age' | 'crime'>): number {

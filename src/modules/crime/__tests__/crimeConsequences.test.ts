@@ -12,6 +12,7 @@ import {
 } from '../../education/services/educationService';
 import { getCrimeTemplate } from '../data/crimeCatalog';
 import {
+  evaluateArrestSocialAwareness,
   evaluateAttemptMoodAndKarma,
   evaluateAwarenessSocialScale,
   evaluateBusinessConsequence,
@@ -24,6 +25,12 @@ import {
   resolveBusinessManagementCapability,
 } from '../data/crimeConsequences';
 import {
+  applyCourtOutcome,
+  attemptCrime,
+  payUnpaidRestitution,
+  performProbationAction,
+} from '../services/crimeService';
+import {
   calculatePersonalLiabilitiesForUnderwriting,
   createEmptyCrimeState,
   evaluateFinancingEligibility,
@@ -34,6 +41,7 @@ import {
   hasFinancialFraudConviction,
   hasViolentFelonyConviction,
   isCriminalRecordEntry,
+  isOnProbation,
   resolveBusinessLoanGuaranteeType,
 } from '../services/crimeSelectors';
 import type {
@@ -1496,6 +1504,367 @@ function testPhase2EducationCrimeIntegration() {
   );
 }
 
+function makeTestBusiness(overrides: Partial<ActiveBusinessProfile> = {}): ActiveBusinessProfile {
+  return {
+    id: 'biz-phase3-1',
+    templateId: 'coffee_shop',
+    name: 'Mercer Analytics',
+    sector: 'food_hospitality',
+    icon: '💻',
+    foundedYear: 2023,
+    foundedAge: 23,
+    treasury: 50000,
+    valuation: 50000,
+    equityPct: 100,
+    pricing: 'standard',
+    marketing: 'moderate',
+    payroll: 'standard',
+    rnd: 'balanced',
+    ownerSalary: 30000,
+    dividendRatePct: 20,
+    morale: 80,
+    brandReputation: 70,
+    qualityScore: 75,
+    employeeCount: 4,
+    locationsCount: 1,
+    equipmentTier: 0,
+    hasAuditCompleted: false,
+    actionCooldowns: {},
+    outstandingLoan: 0,
+    annualLoanPayment: 0,
+    managementCapability: 'owner_operated',
+    operationalStatus: 'active',
+    yearsInOperation: 3,
+    lifetimeRevenue: 180000,
+    lifetimeProfit: 45000,
+    isPubliclyTraded: false,
+    ...overrides,
+  };
+}
+
+function testPhase3LifecycleIntegrationAndSafeguards() {
+  // 1. Recipient- & evidence-gated arrest awareness (5 distinct dimensions, binary established deltas)
+  const privAdultAware = evaluateArrestSocialAwareness({
+    jurisdiction: 'adult',
+    exposure: 'private',
+    statutoryParentNotification: false,
+    institutionalReportFiled: false,
+    institutionalTarget: 'none',
+  });
+  assert(
+    !privAdultAware.parentsAware &&
+      !privAdultAware.partnerAware &&
+      !privAdultAware.friendsAware &&
+      !privAdultAware.colleaguesAware &&
+      privAdultAware.parentsDelta === 0 &&
+      privAdultAware.partnerDelta === 0,
+    'Private adult arrest creates zero ungrounded family, partner, friend, or colleague reactions',
+  );
+
+  const witnessFriendOnly = evaluateArrestSocialAwareness({
+    jurisdiction: 'adult',
+    exposure: 'witness_known',
+    explicitWitnessGroups: ['friends'],
+    institutionalReportFiled: false,
+    institutionalTarget: 'none',
+  });
+  assert(
+    witnessFriendOnly.friendsAware &&
+      !witnessFriendOnly.parentsAware &&
+      !witnessFriendOnly.partnerAware &&
+      witnessFriendOnly.parentsDelta === 0 &&
+      witnessFriendOnly.partnerDelta === 0,
+    'Witness awareness targeting friends does not leak to family or partner',
+  );
+
+  const employerNoticeOnly = evaluateArrestSocialAwareness({
+    jurisdiction: 'adult',
+    exposure: 'witness_known',
+    institutionalReportFiled: true,
+    institutionalTarget: 'employer',
+  });
+  assert(
+    !employerNoticeOnly.parentsAware &&
+      !employerNoticeOnly.partnerAware &&
+      employerNoticeOnly.parentsDelta === 0 &&
+      employerNoticeOnly.partnerDelta === 0,
+    'Employer institutional notice does not leak to parents or partner',
+  );
+
+  const juvenileStatutory = evaluateArrestSocialAwareness({
+    jurisdiction: 'juvenile',
+    exposure: 'witness_known',
+    statutoryParentNotification: true,
+    institutionalReportFiled: false,
+    institutionalTarget: 'none',
+  });
+  assert(
+    juvenileStatutory.parentsAware &&
+      juvenileStatutory.parentsDelta === -5 &&
+      !juvenileStatutory.partnerAware &&
+      juvenileStatutory.partnerDelta === 0,
+    'Juvenile statutory parent notice applies established -5 delta without notifying partners',
+  );
+
+  const publicAdult = evaluateArrestSocialAwareness({
+    jurisdiction: 'adult',
+    exposure: 'publicly_reported',
+  });
+  assert(
+    publicAdult.parentsAware &&
+      publicAdult.partnerAware &&
+      publicAdult.friendsAware &&
+      publicAdult.colleaguesAware &&
+      publicAdult.parentsDelta === -4 &&
+      publicAdult.partnerDelta === -3,
+    'Publicly reported adult arrest applies established -4 parent and -3 partner deltas',
+  );
+
+  // 2. End-to-end pre-trial suspension on arrest -> acquittal reinstatement + full proceeds release
+  const acctWithPartner = makeCharacter({
+    cash: 2500,
+    bankBalance: 15000,
+    partner: {
+      id: 'part-p3',
+      firstName: 'Morgan',
+      lastName: 'Hale',
+      gender: 'female',
+      age: 26,
+      role: 'Partner',
+      relationshipType: 'partner',
+      romanticStage: 'dating',
+      relationship: 80,
+      romanceMeter: 75,
+      originStory: 'Work',
+      stageMet: 'adulthood',
+    },
+  });
+  let detectedFraudAttempt: ReturnType<typeof attemptCrime> | null = null;
+  for (let i = 0; i < 150; i++) {
+    const candidate = { ...acctWithPartner, id: `p3-fraud-${i}` };
+    const attempt = attemptCrime(candidate, 'fraud_scam');
+    if (
+      attempt.ok &&
+      attempt.pendingCase &&
+      attempt.pendingCase.executionSucceeded &&
+      attempt.pendingCase.attemptedPayout > 0
+    ) {
+      detectedFraudAttempt = attempt;
+      break;
+    }
+  }
+  assert(detectedFraudAttempt !== null && detectedFraudAttempt.pendingCase, 'Found fraud_scam arrest seed');
+  assert(
+    detectedFraudAttempt.pendingCase.legalStatus === 'pending_trial' &&
+      detectedFraudAttempt.character.career.currentJob?.suspendedPendingTrial?.payMultiplier === 0.5 &&
+      detectedFraudAttempt.pendingCase.arrestHappinessApplied !== undefined,
+    'Detected fraud arrest sets pending_trial, 50% paid suspension on Accountant, and records arrest happiness shock',
+  );
+  const acquittedAfterArrest = applyCourtOutcome(
+    detectedFraudAttempt.character,
+    detectedFraudAttempt.pendingCase,
+    'private_attorney',
+    'acquitted',
+  );
+  assert(
+    acquittedAfterArrest.ok &&
+      acquittedAfterArrest.character.career.currentJob !== null &&
+      acquittedAfterArrest.character.career.currentJob.suspendedPendingTrial === null &&
+      acquittedAfterArrest.releasedPayout === 0,
+    'Acquittal reinstates suspended Accountant job and never pays out seized criminal proceeds',
+  );
+
+  // 3. Approach B Restitution + Corporate vs Personal Isolation + Burglary Fined Preservation
+  const corpTreasurer = makeCharacter({
+    id: 'p3-corp-sep',
+    cash: 1200,
+    bankBalance: 18000,
+    business: makeTestBusiness({ treasury: 85000, managementCapability: 'delegated_management' }),
+  });
+  const burgFinedCase = makePendingCase({
+    id: 'case-p3-burg-fine',
+    crimeId: 'burglary',
+    title: 'Burglary',
+    offenseClass: 'misdemeanor',
+    baseFine: 400,
+    exposure: 'private',
+  });
+  const burgFined = applyCourtOutcome(
+    { ...corpTreasurer, crime: { ...createEmptyCrimeState(), pendingCase: burgFinedCase } },
+    burgFinedCase,
+    'public_defender',
+    'fined',
+  );
+  assert(
+    burgFined.ok &&
+      burgFined.character.career.currentJob !== null &&
+      (burgFined.restitutionImposed ?? 0) >= 750 &&
+      burgFined.restitutionPaid === 0 &&
+      burgFined.unpaidRestitutionAdded === burgFined.restitutionImposed &&
+      burgFined.character.crime?.unpaidRestitution === burgFined.restitutionImposed &&
+      burgFined.character.cash === 1200 - burgFined.finePaid &&
+      burgFined.character.bankBalance === 18000 &&
+      burgFined.character.business?.treasury === 85000,
+    'Approach B collects fine from personal cash only, keeps restitution in unpaidRestitution, preserves Accountant on burglary fine, and never touches bankBalance or corporate treasury',
+  );
+
+  const partialRestitutionPay = payUnpaidRestitution(burgFined.character, 300);
+  assert(
+    partialRestitutionPay.ok &&
+      partialRestitutionPay.paidAmount === 300 &&
+      partialRestitutionPay.character.cash === burgFined.character.cash - 300 &&
+      partialRestitutionPay.character.bankBalance === 18000 &&
+      partialRestitutionPay.character.business?.treasury === 85000 &&
+      partialRestitutionPay.remainingUnpaidRestitution === (burgFined.restitutionImposed ?? 0) - 300,
+    'payUnpaidRestitution deducts personal cash only while keeping bankBalance and corporate treasury untouched',
+  );
+
+  // Juvenile Approach B zero-debt rule
+  const juvChar = makeCharacter({
+    age: 15,
+    cash: 100,
+    bankBalance: 500,
+    career: createInitialCareerState(),
+  });
+  const juvFinedCase = makePendingCase({
+    id: 'case-p3-juv-fine',
+    crimeId: 'vandalism',
+    title: 'Vandalism',
+    tier: 'petty',
+    offenseClass: 'misdemeanor',
+    jurisdiction: 'juvenile',
+    arrestedAtAge: 15,
+    baseFine: 400,
+    baseSentenceYears: 0,
+    exposure: 'witness_known',
+  });
+  const juvRes = applyCourtOutcome(juvChar, juvFinedCase, 'public_defender', 'fined');
+  assert(
+    juvRes.ok &&
+      juvRes.character.crime?.unpaidRestitution === 0 &&
+      juvRes.character.crime?.unpaidFines === 0 &&
+      juvRes.unpaidRestitutionAdded === 0,
+    'Juvenile sentencing keeps unpaidFines and unpaidRestitution strictly at $0',
+  );
+
+  // 4. Business Continuity & Forced Liquidation Safeguards (Corporate debt first + equityPct entitlement + single credit)
+  const delegatedChar = makeCharacter({
+    id: 'p3-delegated-prison',
+    cash: 500,
+    business: makeTestBusiness({
+      treasury: 40000,
+      managementCapability: 'delegated_management',
+      loanGuaranteeType: 'corporate_only',
+      outstandingLoan: 15000,
+    }),
+  });
+  const robCase = makePendingCase({
+    id: 'case-p3-delegated-rob',
+    crimeId: 'robbery',
+    title: 'Armed Robbery',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    baseFine: 2000,
+    baseSentenceYears: 3,
+    exposure: 'publicly_reported',
+  });
+  const delegatedPrisonRes = applyCourtOutcome(delegatedChar, robCase, 'public_defender', 'imprisoned');
+  assert(
+    delegatedPrisonRes.ok &&
+      delegatedPrisonRes.businessDisposition === 'delegated_continued' &&
+      delegatedPrisonRes.character.business !== null &&
+      delegatedPrisonRes.character.business !== undefined &&
+      delegatedPrisonRes.character.business?.treasury === 40000 &&
+      delegatedPrisonRes.character.business?.loanGuaranteeType === 'corporate_only',
+    'Delegated management business survives owner imprisonment with corporate treasury & corporate_only debt intact',
+  );
+
+  const partialEquityOwner = makeCharacter({
+    id: 'p3-partial-equity',
+    cash: 100,
+    business: makeTestBusiness({
+      treasury: 50000,
+      valuation: 50000, // 50000 + 50000*0.2 - 20000 = 40000 net * 50% equity = $20,000
+      equityPct: 50,
+      outstandingLoan: 20000,
+      loanGuaranteeType: 'personally_guaranteed',
+      managementCapability: 'owner_operated',
+    }),
+  });
+  const ownerOpCase = makePendingCase({
+    id: 'case-p3-owner-op',
+    crimeId: 'robbery',
+    title: 'Armed Robbery',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    baseFine: 1000,
+    baseSentenceYears: 2,
+    exposure: 'publicly_reported',
+  });
+  const liquidatedRes = applyCourtOutcome(partialEquityOwner, ownerOpCase, 'public_defender', 'imprisoned');
+  assert(
+    liquidatedRes.ok &&
+      liquidatedRes.businessDisposition === 'liquidated' &&
+      liquidatedRes.character.business === null &&
+      liquidatedRes.prisonConsequences?.businessLiquidationProceeds === 20000 &&
+      liquidatedRes.character.cash === 100 + 20000 - liquidatedRes.finePaid &&
+      liquidatedRes.character.crime?.prison?.originCaseId === ownerOpCase.id &&
+      liquidatedRes.record?.sentenceStatus === 'active',
+    'Forced liquidation settles corporate debt before distributing 50% equity entitlement once and links originCaseId',
+  );
+
+  // 5. Probation Revocation Flag & Violation Counter
+  const probChar = makeCharacter({
+    id: 'p3-prob-rev',
+    crime: {
+      ...createEmptyCrimeState(),
+      probation: {
+        chargeTitle: 'Burglary',
+        jurisdiction: 'adult',
+        yearsRemaining: 2,
+        startedAtAge: 25,
+        lastProgressedAge: null,
+        activeTerms: [
+          {
+            recordId: 'prior-prob-rec',
+            chargeTitle: 'Burglary',
+            jurisdiction: 'adult',
+            yearsRemaining: 2,
+            startedAtAge: 25,
+            communityServiceHoursRemaining: 16,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+        ],
+      },
+    },
+  });
+  assert(isOnProbation(probChar), 'Active probation detected');
+  const secondOffenseCase = makePendingCase({
+    id: 'case-p3-revocation',
+    crimeId: 'vehicle_theft',
+    title: 'Vehicle Theft',
+    offenseClass: 'felony',
+    offendedOnProbation: true,
+    exposure: 'witness_known',
+  });
+  const revConviction = applyCourtOutcome(probChar, secondOffenseCase, 'public_defender', 'probation');
+  assert(
+    revConviction.ok &&
+      revConviction.probationViolated === true &&
+      (revConviction.character.crime?.probation?.violationCount ?? 0) === 1 &&
+      revConviction.character.crime?.probation?.activeTerms?.length === 2,
+    'Conviction while on probation increments violationCount and preserves both activeTerms entries',
+  );
+  const serviceRes = performProbationAction(revConviction.character, 'community_service');
+  assert(
+    serviceRes.ok &&
+      serviceRes.hoursCompleted === 8 &&
+      serviceRes.character.crime?.probation?.activeTerms?.[0].communityServiceHoursRemaining === 8,
+    'performProbationAction completes 8 community service hours cleanly on earliest term',
+  );
+}
+
 testPerRecordLegalStatusAndLegacySanitization();
 testEvidenceBasedExposureSeparation();
 testSeparatedVictimRestitutionAndStateForfeiture();
@@ -1506,4 +1875,5 @@ testMalformedSaveSanitizationAndJsonRoundTrip();
 testLegalStatusPrisonOriginAndIncompleteServiceBoundary();
 testAdditionalEvaluatorAndUnderwritingBoundaries();
 testPhase2EducationCrimeIntegration();
+testPhase3LifecycleIntegrationAndSafeguards();
 console.log('crimeConsequences.test.ts passed all assertions');

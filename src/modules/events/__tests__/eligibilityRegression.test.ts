@@ -22,6 +22,7 @@ function assert(condition: unknown, message: string): asserts condition {
  */
 function legacyStructuralEligible(event: LifeEventTemplate, character: CharacterProfile): boolean {
   if (!character.isAlive) return false;
+  if (event.requiresIncarcerated) return false;
   const currentStage = character.education?.currentStage;
   const currentJob = character.career?.currentJob;
   const isEmployedOrBusiness = Boolean(currentJob || character.business);
@@ -181,7 +182,7 @@ function expectSameEligibility(name: string, character: CharacterProfile): void 
   }
 }
 
-assert(EVENT_POOL.length === 150, `Expected 150 templates, found ${EVENT_POOL.length}`);
+assert(EVENT_POOL.length === 174, `Expected 174 templates, found ${EVENT_POOL.length}`);
 assert(
   EVENT_POOL.every((event) => event.requires === undefined && event.excludes === undefined),
   'Existing templates must not define requires or excludes'
@@ -359,9 +360,16 @@ const imprisonedChar: CharacterProfile = {
     records: [],
   },
 };
+const imprisonedEligible = getEligibleEvents(imprisonedChar);
 assert(
-  getEligibleEvents(imprisonedChar).length === 0,
-  'Ordinary free-world, workplace, and business events are suppressed while incarcerated'
+  imprisonedEligible.length > 0 &&
+    imprisonedEligible.every((event) => Boolean(event.requiresIncarcerated || event.prisonCompatible)),
+  'Only prison-only or prison-compatible events are eligible while incarcerated; ordinary free-world events are suppressed'
+);
+const freeEligible = getEligibleEvents(baseCharacter(26, 'none'));
+assert(
+  freeEligible.every((event) => !event.requiresIncarcerated),
+  'Jail-only events never appear when out of jail'
 );
 const prisonCompatibleTemplate: LifeEventTemplate = {
   ...repeatable,
@@ -377,11 +385,11 @@ const imprisonedCtx = buildEventContext(imprisonedChar, createEventContextRegist
 assert(
   isEventEligible(prisonCompatibleTemplate, imprisonedChar, imprisonedCtx) &&
     isEventEligible(prisonOnlyTemplate, imprisonedChar, imprisonedCtx) &&
-    isEventEligible(prisonOnlyTemplate, seenRepeatable, repeatableContext, {
+    !isEventEligible(prisonOnlyTemplate, seenRepeatable, repeatableContext, {
       incarceratedThisYear: true,
     }) &&
     !isEventEligible(prisonOnlyTemplate, seenRepeatable, repeatableContext),
-  'Prison-compatible and prison-only events remain eligible during incarceration contexts only'
+  'Prison-only events require active incarceration and do not leak onto free or post-release characters'
 );
 
 console.log(`✅ Structural eligibility matched across ${EVENT_POOL.length} templates and ${fixtures.length} fixtures`);

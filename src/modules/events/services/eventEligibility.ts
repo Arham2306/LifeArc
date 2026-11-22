@@ -15,12 +15,13 @@ function isStructurallyEligible(
   options?: EventEligibilityOptions
 ): boolean {
   if (!character.isAlive) return false;
-  const inPrisonContext = Boolean(
-    options?.incarceratedThisYear ?? isCurrentlyIncarcerated(character)
+  const currentlyInPrison = isCurrentlyIncarcerated(character);
+  const inPrisonOrReleaseTurn = Boolean(
+    options?.incarceratedThisYear ?? currentlyInPrison
   );
-  if (inPrisonContext) {
-    if (!event.prisonCompatible && !event.requiresIncarcerated) return false;
-  } else if (event.requiresIncarcerated) {
+  if (event.requiresIncarcerated) {
+    if (!currentlyInPrison) return false;
+  } else if (inPrisonOrReleaseTurn && !event.prisonCompatible) {
     return false;
   }
 

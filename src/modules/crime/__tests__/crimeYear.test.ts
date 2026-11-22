@@ -1060,6 +1060,7 @@ function testMultiYearCrimeLockoutPermanentClosureAndReleaseEvents() {
       actionCooldowns: {},
       outstandingLoan: 0,
       annualLoanPayment: 0,
+      managementCapability: 'owner_operated',
       yearsInOperation: 4,
       lifetimeRevenue: 100000,
       lifetimeProfit: 20000,
@@ -1089,21 +1090,28 @@ function testMultiYearCrimeLockoutPermanentClosureAndReleaseEvents() {
     !attemptCrime(twoYearPrisoner, 'shoplifting').ok,
     'Street crimes blocked at start of 2-year prison sentence',
   );
+  const year0Eligible = getEligibleEvents(twoYearPrisoner);
+  const year0Rolled = rollEventForCharacter(twoYearPrisoner, 1);
   assert(
-    getEligibleEvents(twoYearPrisoner).length === 0 &&
-      rollEventForCharacter(twoYearPrisoner, 1) === null,
-    'Ordinary free-world events suppressed while incarcerated',
+    year0Eligible.length > 0 &&
+      year0Eligible.every((e) => Boolean(e.requiresIncarcerated || e.prisonCompatible)) &&
+      year0Rolled !== null &&
+      Boolean(year0Rolled.requiresIncarcerated || year0Rolled.prisonCompatible),
+    'Ordinary free-world events suppressed while incarcerated; only jail events are eligible',
   );
 
-  // Age Up Year 1: still in prison (yearsRemaining = 1) -> street crimes & events still locked
+  // Age Up Year 1: still in prison (yearsRemaining = 1) -> street crimes & free-world events still locked
   const afterYear1 = ageUpCharacter(twoYearPrisoner);
   assert(
     isCurrentlyIncarcerated(afterYear1) && afterYear1.crime?.prison?.yearsRemaining === 1,
     'Year 1 completed with 1 year still remaining',
   );
+  const year1Eligible = getEligibleEvents(afterYear1);
   assert(
-    !attemptCrime(afterYear1, 'shoplifting').ok && getEligibleEvents(afterYear1).length === 0,
-    'Street crimes and free-world events stay blocked during second prison year',
+    !attemptCrime(afterYear1, 'shoplifting').ok &&
+      year1Eligible.length > 0 &&
+      year1Eligible.every((e) => Boolean(e.requiresIncarcerated || e.prisonCompatible)),
+    'Street crimes and free-world events stay blocked during second prison year while jail events remain eligible',
   );
 
   // Age Up Year 2 (final prison year): prisoner is released during this Age Up,
@@ -1168,6 +1176,152 @@ function testMultiYearCrimeLockoutPermanentClosureAndReleaseEvents() {
   );
 }
 
+function testPrisonReleaseProbationFreezeTermIsolationAndRestitutionGarnishment() {
+  // 1. Prison years and release-year grace period freeze concurrent probation without completing it,
+  //    and prison sentence completion marks ONLY originCaseId completed.
+  const prisonRec = makeRecord({
+    id: 'rec-prison-orig',
+    crimeId: 'robbery',
+    title: 'Armed Robbery',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    age: 26,
+    outcome: 'imprisoned',
+    sentenceYears: 2,
+    sentenceStatus: 'active',
+  });
+  const probShort = makeRecord({
+    id: 'rec-prob-short',
+    crimeId: 'shoplifting',
+    title: 'Shoplifting',
+    offenseClass: 'misdemeanor',
+    jurisdiction: 'adult',
+    age: 25,
+    outcome: 'probation',
+    sentenceYears: 0,
+    sentenceStatus: 'active',
+  });
+  const probLong = makeRecord({
+    id: 'rec-prob-long',
+    crimeId: 'burglary',
+    title: 'Burglary',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    age: 25,
+    outcome: 'probation',
+    sentenceYears: 0,
+    sentenceStatus: 'active',
+  });
+
+  const baseFrozen = createBaseCharacter({
+    age: 26,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makeOneYearPrison({
+        chargeTitle: 'Armed Robbery',
+        yearsTotal: 2,
+        yearsServed: 0,
+        yearsRemaining: 2,
+        originCaseId: 'rec-prison-orig',
+      }),
+      probation: {
+        chargeTitle: 'Burglary',
+        jurisdiction: 'adult',
+        yearsRemaining: 2,
+        startedAtAge: 25,
+        lastProgressedAge: null,
+        conditions: ['supervision_checkins', 'community_service', 'no_new_offenses'],
+        activeTerms: [
+          {
+            recordId: 'rec-prob-short',
+            chargeTitle: 'Shoplifting',
+            jurisdiction: 'adult',
+            yearsRemaining: 1,
+            startedAtAge: 25,
+            communityServiceHoursRemaining: 0,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+          {
+            recordId: 'rec-prob-long',
+            chargeTitle: 'Burglary',
+            jurisdiction: 'adult',
+            yearsRemaining: 2,
+            startedAtAge: 25,
+            communityServiceHoursRemaining: 12,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+        ],
+      },
+      records: [probShort, probLong, prisonRec],
+    },
+  });
+
+  // Prison year 1: probation stays frozen (2 yrs, both terms untouched)
+  const yr1 = progressCrimeForYear(baseFrozen, 27, { incomingCash: 0, postExpenseSpendableCash: 0 });
+  assert(
+    yr1.crime?.prison?.yearsRemaining === 1 &&
+      yr1.crime?.probation?.yearsRemaining === 2 &&
+      yr1.crime?.probation?.activeTerms?.length === 2,
+    'Prison year freezes active probation and preserves both independent terms',
+  );
+
+  // Release-year Age Up (prison reaches 0 & releasedFromPrison = true): grace freeze preserves probation!
+  const yr2Release = progressCrimeForYear(
+    { ...baseFrozen, age: 27, crime: yr1.crime },
+    28,
+    { incomingCash: 0, postExpenseSpendableCash: 0 },
+  );
+  assert(
+    yr2Release.releasedFromPrison &&
+      yr2Release.crime?.prison === null &&
+      yr2Release.crime?.probation?.yearsRemaining === 2 &&
+      yr2Release.crime?.probation?.activeTerms?.length === 2 &&
+      yr2Release.crime?.records.find((r) => r.id === 'rec-prison-orig')?.sentenceStatus === 'completed' &&
+      yr2Release.crime?.records.find((r) => r.id === 'rec-prob-short')?.sentenceStatus === 'active' &&
+      yr2Release.crime?.records.find((r) => r.id === 'rec-prob-long')?.sentenceStatus === 'active',
+    'Release year freezes probation grace period and marks ONLY prison originCaseId completed',
+  );
+
+  // Free year after release: short probation term finishes (marking ONLY rec-prob-short completed), long continues!
+  const yr3Free = progressCrimeForYear(
+    { ...baseFrozen, age: 28, crime: yr2Release.crime },
+    29,
+    { incomingCash: 0, postExpenseSpendableCash: 0 },
+  );
+  assert(
+    !yr3Free.probationCompleted &&
+      yr3Free.crime?.probation?.yearsRemaining === 1 &&
+      yr3Free.crime?.probation?.activeTerms?.length === 1 &&
+      yr3Free.crime?.probation?.activeTerms?.[0].recordId === 'rec-prob-long' &&
+      yr3Free.crime?.records.find((r) => r.id === 'rec-prob-short')?.sentenceStatus === 'completed' &&
+      yr3Free.crime?.records.find((r) => r.id === 'rec-prob-long')?.sentenceStatus === 'active',
+    'First free year completes ONLY rec-prob-short while preserving concurrent rec-prob-long',
+  );
+
+  // 2. Approach B Restitution-First Annual Garnishment within single 25% cap
+  const garnishChar = createBaseCharacter({
+    age: 30,
+    crime: {
+      ...createEmptyCrimeState(),
+      unpaidRestitution: 1500,
+      unpaidFines: 2000,
+    },
+  });
+  // incomingCash = 8000 -> 25% cap = $2000 total -> clears $1500 restitution first + $500 toward fines!
+  const garnishRes = progressCrimeForYear(garnishChar, 31, {
+    incomingCash: 8000,
+    postExpenseSpendableCash: 5000,
+  });
+  assert(
+    garnishRes.garnishedAmount === 2000 &&
+      garnishRes.crime?.unpaidRestitution === 0 &&
+      garnishRes.crime?.unpaidFines === 1500,
+    '25% annual garnishment pays unpaidRestitution ($1,500) before unpaidFines ($500)',
+  );
+}
+
 testProbationProgressionAndJuvenilePreservationAt18();
 testJuvenileSealingBoundariesAndAdultExclusion();
 testFineGarnishmentCapsAndZeroEdgeCases();
@@ -1175,4 +1329,5 @@ testAgeUpIntegrationDuringIncarcerationAndRelease();
 testNarrowRestrictionsAcrossCareerBusinessAndAdoption();
 testPostReleaseOccupationRestoration();
 testMultiYearCrimeLockoutPermanentClosureAndReleaseEvents();
+testPrisonReleaseProbationFreezeTermIsolationAndRestitutionGarnishment();
 console.log('crimeYear.test.ts passed all assertions');

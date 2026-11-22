@@ -3,12 +3,16 @@ import type { ActiveBusinessProfile } from '../../business/types';
 import { createInitialCareerState } from '../../career/services/careerService';
 import { createInitialEducation } from '../../education/services/educationService';
 import { performPrisonAction, PRISON_WORK_PAY, progressPrisonForYear } from '../services/prisonService';
+import { applyCourtOutcome } from '../services/crimeService';
+import { progressCrimeForYear } from '../services/crimeYearService';
 import {
   createEmptyCrimeState,
+  getCrimeLegalStatus,
+  getSanitizedCrimeState,
   isCurrentlyIncarcerated,
   isOnProbation,
 } from '../services/crimeSelectors';
-import type { CrimeRecordEntry, PrisonState } from '../types';
+import type { CrimeRecordEntry, PendingCourtCase, PrisonState } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -493,9 +497,510 @@ function testMidYearAppealAndParoleOccupationRestoration() {
   );
 }
 
+function testAppealOriginCompletionAndParoleProbationPreservation() {
+  // 1. Mid-year appeal commuting sentence to 0 marks ONLY originCaseId completed and resumes paused_incarceration business
+  const appealTargetRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'appeal-orig-rec',
+    sentenceStatus: 'active',
+  };
+  const unrelatedProbRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'unrelated-prob-rec',
+    crimeId: 'burglary',
+    title: 'Burglary',
+    outcome: 'probation',
+    sentenceStatus: 'active',
+  };
+  const appealChar = createIncarceratedChar({
+    occupation: 'Incarcerated',
+    business: {
+      ...makeSampleBusiness(false),
+      operationalStatus: 'paused_incarceration',
+      managementCapability: 'legacy_unassigned',
+    },
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        yearsServed: 1,
+        yearsRemaining: 1,
+        behaviorScore: 85,
+        originCaseId: 'appeal-orig-rec',
+      }),
+      records: [unrelatedProbRec, appealTargetRec],
+    },
+  });
+  const appealRelease = findAppealRelease(appealChar);
+  assert(appealRelease !== null && appealRelease.released, 'Found appeal commutation release');
+  assert(
+    appealRelease.character.business?.operationalStatus === 'active' &&
+      appealRelease.character.crime?.records.find((r) => r.id === 'appeal-orig-rec')?.sentenceStatus === 'completed' &&
+      appealRelease.character.crime?.records.find((r) => r.id === 'unrelated-prob-rec')?.sentenceStatus === 'active',
+    'Appeal release resumes paused_incarceration business and marks ONLY originCaseId sentence completed',
+  );
+
+  // 2. Parole preserves prior probation activeTerms & conditions alongside new parole term
+  const paroleChar = createIncarceratedChar({
+    occupation: 'Incarcerated',
+    business: {
+      ...makeSampleBusiness(false),
+      operationalStatus: 'paused_incarceration',
+    },
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        yearsServed: 2,
+        yearsRemaining: 2,
+        behaviorScore: 85,
+        originCaseId: 'parole-orig-rec',
+      }),
+      probation: {
+        chargeTitle: 'Burglary',
+        jurisdiction: 'adult',
+        yearsRemaining: 1,
+        startedAtAge: 23,
+        lastProgressedAge: null,
+        conditions: ['supervision_checkins', 'community_service', 'restitution_payments'],
+        activeTerms: [
+          {
+            recordId: 'unrelated-prob-rec',
+            chargeTitle: 'Burglary',
+            jurisdiction: 'adult',
+            yearsRemaining: 1,
+            startedAtAge: 23,
+            communityServiceHoursRemaining: 12,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+        ],
+      },
+      records: [unrelatedProbRec, { ...appealTargetRec, id: 'parole-orig-rec' }],
+    },
+  });
+  const paroleRelease = findParoleRelease(paroleChar);
+  assert(paroleRelease !== null && paroleRelease.released, 'Found parole release with prior probation');
+  const nextProb = paroleRelease.character.crime?.probation;
+  assert(
+    nextProb !== null &&
+      nextProb !== undefined &&
+      nextProb.activeTerms?.length === 2 &&
+      nextProb.activeTerms.some((t) => t.recordId === 'unrelated-prob-rec' && t.communityServiceHoursRemaining === 12) &&
+      nextProb.activeTerms.some((t) => t.recordId === 'parole-orig-rec' && t.yearsRemaining === 2) &&
+      nextProb.conditions?.includes('community_service') &&
+      nextProb.conditions?.includes('restitution_payments') &&
+      paroleRelease.character.business?.operationalStatus === 'active' &&
+      paroleRelease.character.crime?.records.find((r) => r.id === 'parole-orig-rec')?.sentenceStatus === 'active',
+    'Parole preserves prior probation terms/conditions, resumes paused business, and keeps parole record active',
+  );
+}
+
+function testMidYearReleaseFreezeOriginIdentityAndLegacyParoleLifecycle() {
+  const unrelatedPrisonRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'unrelated-prison-rec',
+    title: 'Bank Heist',
+    crimeId: 'bank_heist',
+    sentenceStatus: 'active',
+  };
+  const concurrentProbRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'concurrent-prob-1y',
+    crimeId: 'burglary',
+    title: 'Burglary',
+    outcome: 'probation',
+    sentenceYears: 0,
+    sentenceStatus: 'active',
+  };
+  const paroleOrigRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'parole-origin-2y',
+    crimeId: 'robbery',
+    title: 'Armed Robbery',
+    outcome: 'imprisoned',
+    sentenceYears: 4,
+    sentenceStatus: 'active',
+  };
+
+  // 1 & 3 & 6. Parole with valid originCaseId + concurrent 1y probation -> Age Up release-year freeze ->
+  //            post-release countdown -> independent completion leaving unrelated records untouched
+  const paroleBase = createIncarceratedChar({
+    age: 26,
+    occupation: 'Incarcerated',
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        chargeTitle: 'Armed Robbery',
+        yearsServed: 2,
+        yearsRemaining: 2,
+        behaviorScore: 88,
+        originCaseId: 'parole-origin-2y',
+      }),
+      probation: {
+        chargeTitle: 'Burglary',
+        jurisdiction: 'adult',
+        yearsRemaining: 1,
+        startedAtAge: 24,
+        lastProgressedAge: null,
+        conditions: ['supervision_checkins', 'community_service', 'no_new_offenses'],
+        activeTerms: [
+          {
+            recordId: 'concurrent-prob-1y',
+            chargeTitle: 'Burglary',
+            jurisdiction: 'adult',
+            yearsRemaining: 1,
+            startedAtAge: 24,
+            communityServiceHoursRemaining: 10,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+        ],
+      },
+      records: [unrelatedPrisonRec, concurrentProbRec, paroleOrigRec],
+    },
+  });
+
+  const paroled = findParoleRelease(paroleBase);
+  assert(paroled !== null && paroled.released, 'Found parole grant for multi-year lifecycle test');
+  assert(
+    paroled.character.crime?.prison === null &&
+      paroled.character.crime?.lastMidYearReleaseAge === 26 &&
+      getCrimeLegalStatus(
+        paroled.character.crime.records.find((r) => r.id === 'parole-origin-2y')!,
+        paroled.character,
+      ) === 'convicted',
+    'Parole clears prison, records lastMidYearReleaseAge=26, and keeps originating sentence active',
+  );
+
+  // Release-year Age Up (26 -> 27): BOTH activeTerms[] stay frozen & marker clears to null
+  const age27 = progressCrimeForYear(paroled.character, 27, {
+    incomingCash: 0,
+    postExpenseSpendableCash: 0,
+  });
+  assert(
+    age27.crime?.lastMidYearReleaseAge === null &&
+      age27.crime?.probation?.yearsRemaining === 2 &&
+      age27.crime?.probation?.activeTerms?.length === 2 &&
+      age27.crime.probation.activeTerms.find((t) => t.recordId === 'concurrent-prob-1y')?.yearsRemaining === 1 &&
+      age27.crime.probation.activeTerms.find((t) => t.recordId === 'parole-origin-2y')?.yearsRemaining === 2 &&
+      age27.crime.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'active' &&
+      age27.crime.records.find((r) => r.id === 'parole-origin-2y')?.sentenceStatus === 'active' &&
+      age27.crime.records.find((r) => r.id === 'unrelated-prison-rec')?.sentenceStatus === 'active',
+    'Release-year Age Up (26 -> 27) freezes all parole and concurrent probation terms and clears marker',
+  );
+
+  // Post-release Year 1 (27 -> 28): concurrent 1y completes; parole drops 2 -> 1 and stays active
+  const age28Char: CharacterProfile = { ...paroled.character, age: 27, crime: age27.crime };
+  const age28 = progressCrimeForYear(age28Char, 28, {
+    incomingCash: 0,
+    postExpenseSpendableCash: 0,
+  });
+  assert(
+    !age28.probationCompleted &&
+      age28.crime?.probation?.yearsRemaining === 1 &&
+      age28.crime?.probation?.activeTerms?.length === 1 &&
+      age28.crime.probation.activeTerms[0].recordId === 'parole-origin-2y' &&
+      age28.crime.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'completed' &&
+      age28.crime.records.find((r) => r.id === 'parole-origin-2y')?.sentenceStatus === 'active' &&
+      age28.crime.records.find((r) => r.id === 'unrelated-prison-rec')?.sentenceStatus === 'active',
+    'Following year completes only concurrent 1y term while keeping parole originCaseId active',
+  );
+
+  // Post-release Year 2 (28 -> 29): parole finishes 1 -> 0 and completes ONLY parole-origin-2y
+  const age29Char: CharacterProfile = { ...age28Char, age: 28, crime: age28.crime };
+  const age29 = progressCrimeForYear(age29Char, 29, {
+    incomingCash: 0,
+    postExpenseSpendableCash: 0,
+  });
+  assert(
+    age29.probationCompleted &&
+      age29.crime?.probation === null &&
+      age29.crime?.records.find((r) => r.id === 'parole-origin-2y')?.sentenceStatus === 'completed' &&
+      age29.crime?.records.find((r) => r.id === 'unrelated-prison-rec')?.sentenceStatus === 'active',
+    'Parole completion flips only originCaseId to completed while leaving unrelated prison record untouched',
+  );
+
+  // 2. Mid-year appeal release (1 -> 0) with concurrent 1y probation preserves release-year freeze
+  const appealTargetRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'appeal-freeze-orig',
+    sentenceStatus: 'active',
+  };
+  const appealChar = createIncarceratedChar({
+    age: 26,
+    occupation: 'Incarcerated',
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        yearsServed: 1,
+        yearsRemaining: 1,
+        behaviorScore: 85,
+        originCaseId: 'appeal-freeze-orig',
+      }),
+      probation: {
+        chargeTitle: 'Burglary',
+        jurisdiction: 'adult',
+        yearsRemaining: 1,
+        startedAtAge: 24,
+        lastProgressedAge: null,
+        activeTerms: [
+          {
+            recordId: 'concurrent-prob-1y',
+            chargeTitle: 'Burglary',
+            jurisdiction: 'adult',
+            yearsRemaining: 1,
+            startedAtAge: 24,
+            communityServiceHoursRemaining: 0,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+        ],
+      },
+      records: [concurrentProbRec, appealTargetRec],
+    },
+  });
+  const appealed = findAppealRelease(appealChar);
+  assert(appealed !== null && appealed.released, 'Found mid-year appeal release with concurrent probation');
+  assert(
+    appealed.character.crime?.lastMidYearReleaseAge === 26 &&
+      appealed.character.crime?.records.find((r) => r.id === 'appeal-freeze-orig')?.sentenceStatus === 'completed' &&
+      appealed.character.crime?.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'active',
+    'Mid-year appeal sets lastMidYearReleaseAge=26 and completes only appeal originCaseId',
+  );
+  const appealAge27 = progressCrimeForYear(appealed.character, 27, {
+    incomingCash: 0,
+    postExpenseSpendableCash: 0,
+  });
+  assert(
+    appealAge27.crime?.lastMidYearReleaseAge === null &&
+      appealAge27.crime?.probation?.yearsRemaining === 1 &&
+      appealAge27.crime?.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'active',
+    'Release-year Age Up after mid-year appeal freezes concurrent probation',
+  );
+  const appealAge28 = progressCrimeForYear(
+    { ...appealed.character, age: 27, crime: appealAge27.crime },
+    28,
+    { incomingCash: 0, postExpenseSpendableCash: 0 },
+  );
+  assert(
+    appealAge28.probationCompleted &&
+      appealAge28.crime?.probation === null &&
+      appealAge28.crime?.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'completed',
+    'Following year after mid-year appeal resumes and completes concurrent probation cleanly',
+  );
+
+  // 4a. Legacy parole without originCaseId or matching record, WITH an unrelated existing activeTerms[] entry
+  const legacyNoMatchWithTerm = createIncarceratedChar({
+    age: 26,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        chargeTitle: 'Unmatched Legacy Charge',
+        yearsServed: 2,
+        yearsRemaining: 3,
+        behaviorScore: 88,
+        originCaseId: undefined,
+      }),
+      probation: {
+        chargeTitle: 'Burglary',
+        jurisdiction: 'adult',
+        yearsRemaining: 1,
+        startedAtAge: 24,
+        lastProgressedAge: null,
+        activeTerms: [
+          {
+            recordId: 'concurrent-prob-1y',
+            chargeTitle: 'Burglary',
+            jurisdiction: 'adult',
+            yearsRemaining: 1,
+            startedAtAge: 24,
+            communityServiceHoursRemaining: 0,
+            technicalWarnings: 0,
+            violationCount: 0,
+          },
+        ],
+      },
+      records: [concurrentProbRec],
+    },
+  });
+  const legacyParoleRes = findParoleRelease(legacyNoMatchWithTerm);
+  assert(legacyParoleRes !== null && legacyParoleRes.released, 'Found legacy parole release');
+  assert(
+    legacyParoleRes.character.crime?.probation?.activeTerms?.length === 2,
+    'Legacy parole without originCaseId synthesizes an independent activeTerms entry when activeTerms already exists',
+  );
+  const legacyAge27 = progressCrimeForYear(legacyParoleRes.character, 27, {
+    incomingCash: 0,
+    postExpenseSpendableCash: 0,
+  });
+  const legacyAge28 = progressCrimeForYear(
+    { ...legacyParoleRes.character, age: 27, crime: legacyAge27.crime },
+    28,
+    { incomingCash: 0, postExpenseSpendableCash: 0 },
+  );
+  assert(
+    !legacyAge28.probationCompleted &&
+      legacyAge28.crime?.probation !== null &&
+      legacyAge28.crime?.probation?.yearsRemaining === 2 &&
+      legacyAge28.crime?.probation?.activeTerms?.length === 1 &&
+      legacyAge28.crime?.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'completed',
+    'Legacy parole duration (2 yrs remaining) survives completion of the unrelated 1y probation term',
+  );
+
+  // 4b. Legacy parole without originCaseId resolves most recent matching uncompleted imprisoned record by chargeTitle
+  const legacyMatchedRec: CrimeRecordEntry = {
+    ...makePrisonRecord(),
+    id: 'legacy-matched-imprisoned',
+    title: 'Armed Robbery',
+    outcome: 'imprisoned',
+    sentenceStatus: 'active',
+  };
+  const legacyMatchedChar = createIncarceratedChar({
+    age: 26,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        chargeTitle: 'Armed Robbery',
+        yearsServed: 2,
+        yearsRemaining: 1,
+        behaviorScore: 88,
+        originCaseId: undefined,
+      }),
+      records: [unrelatedPrisonRec, legacyMatchedRec],
+    },
+  });
+  const legacyMatchedParole = findParoleRelease(legacyMatchedChar);
+  assert(
+    legacyMatchedParole !== null &&
+      legacyMatchedParole.character.crime?.probation?.activeTerms?.some(
+        (t) => t.recordId === 'legacy-matched-imprisoned',
+      ),
+    'Legacy parole resolves matching uncompleted imprisoned record by chargeTitle',
+  );
+  const lmAge27 = progressCrimeForYear(legacyMatchedParole.character, 27, {
+    incomingCash: 0,
+    postExpenseSpendableCash: 0,
+  });
+  const lmAge28 = progressCrimeForYear(
+    { ...legacyMatchedParole.character, age: 27, crime: lmAge27.crime },
+    28,
+    { incomingCash: 0, postExpenseSpendableCash: 0 },
+  );
+  assert(
+    lmAge28.probationCompleted &&
+      lmAge28.crime?.records.find((r) => r.id === 'legacy-matched-imprisoned')?.sentenceStatus === 'completed' &&
+      lmAge28.crime?.records.find((r) => r.id === 'unrelated-prison-rec')?.sentenceStatus === 'active',
+    'Completing matched legacy parole completes only that record and leaves unrelated prison record active',
+  );
+
+  // 4c. Legacy scalar-only probation without originCaseId or matching record is NOT unnecessarily converted to activeTerms[]
+  const scalarOnlyChar = createIncarceratedChar({
+    age: 26,
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({
+        chargeTitle: 'Unmatched Scalar Charge',
+        yearsServed: 2,
+        yearsRemaining: 3,
+        behaviorScore: 88,
+        originCaseId: undefined,
+      }),
+      probation: {
+        chargeTitle: 'Shoplifting',
+        jurisdiction: 'adult',
+        yearsRemaining: 1,
+        startedAtAge: 24,
+        lastProgressedAge: null,
+      },
+      records: [],
+    },
+  });
+  const scalarParole = findParoleRelease(scalarOnlyChar);
+  assert(
+    scalarParole !== null &&
+      scalarParole.character.crime?.probation?.activeTerms === undefined &&
+      scalarParole.character.crime?.probation?.yearsRemaining === 3,
+    'Legacy scalar-only probation stays scalar without unnecessary term-structure conversion',
+  );
+
+  // 5. Denied parole & parole revocation (new imprisonment) never falsely complete originating sentence
+  let deniedParoleRes: ReturnType<typeof performPrisonAction> | null = null;
+  for (let i = 0; i < 80; i++) {
+    const res = performPrisonAction(
+      {
+        ...paroleBase,
+        id: `denied-parole-${i}`,
+        crime: {
+          ...paroleBase.crime!,
+          prison: { ...paroleBase.crime!.prison!, behaviorScore: 30 },
+        },
+      },
+      'parole',
+    );
+    if (res.ok && !res.released) {
+      deniedParoleRes = res;
+      break;
+    }
+  }
+  assert(
+    deniedParoleRes !== null &&
+      isCurrentlyIncarcerated(deniedParoleRes.character) &&
+      deniedParoleRes.character.crime?.lastMidYearReleaseAge === undefined &&
+      deniedParoleRes.character.crime?.records.find((r) => r.id === 'parole-origin-2y')?.sentenceStatus === 'active',
+    'Denied parole leaves prison active, does not set lastMidYearReleaseAge, and keeps originCaseId active',
+  );
+
+  const revocationCase: PendingCourtCase = {
+    id: 'parole-revocation-case',
+    crimeId: 'burglary',
+    title: 'Burglary',
+    tier: 'mid',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    arrestedAtAge: 26,
+    arrestedAtYear: 2026,
+    executionSucceeded: true,
+    injured: false,
+    attemptedPayout: 1200,
+    baseFine: 1000,
+    baseSentenceYears: 2,
+    offendedOnProbation: true,
+    exposure: 'publicly_reported',
+  };
+  const revoked = applyCourtOutcome(
+    {
+      ...paroled.character,
+      crime: { ...paroled.character.crime!, pendingCase: revocationCase },
+    },
+    revocationCase,
+    'public_defender',
+    'imprisoned',
+  );
+  assert(
+    revoked.ok &&
+      revoked.probationViolated === true &&
+      revoked.character.crime?.lastMidYearReleaseAge === null &&
+      revoked.character.crime?.prison?.originCaseId === 'parole-revocation-case' &&
+      revoked.character.crime?.records.find((r) => r.id === 'parole-origin-2y')?.sentenceStatus === 'active' &&
+      revoked.character.crime?.records.find((r) => r.id === 'concurrent-prob-1y')?.sentenceStatus === 'active' &&
+      revoked.character.crime?.records.find((r) => r.id === 'unrelated-prison-rec')?.sentenceStatus === 'active',
+    'Parole revocation clears stale lastMidYearReleaseAge, isolates new originCaseId, and keeps originating & unrelated records active',
+  );
+
+  // Sanitization check for malformed lastMidYearReleaseAge
+  const malformedSanitized = getSanitizedCrimeState({
+    crime: { ...createEmptyCrimeState(), lastMidYearReleaseAge: -7 },
+  });
+  assert(
+    malformedSanitized.lastMidYearReleaseAge === null,
+    'Malformed negative lastMidYearReleaseAge sanitizes safely to null',
+  );
+}
+
 testPrisonActionsAndAnnualCooldown();
 testAppealAndParoleOutcomes();
 testSentenceProgressionCompletionAndDuplicateGuard();
 testMidYearAppealAndParoleOccupationRestoration();
+testAppealOriginCompletionAndParoleProbationPreservation();
+testMidYearReleaseFreezeOriginIdentityAndLegacyParoleLifecycle();
 console.log('prisonSimulation.test.ts passed all assertions');
 

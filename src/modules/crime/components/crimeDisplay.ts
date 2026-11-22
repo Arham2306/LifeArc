@@ -7,6 +7,7 @@ import {
   computeInjuryProbability,
 } from '../services/crimeRiskService';
 import {
+  evaluateRecordReliefStatus,
   getActiveAdultConvictions,
   getArrestCount,
   getAttemptsUsedThisYear,
@@ -17,6 +18,7 @@ import {
   getRemainingAttemptsThisYear,
   getSanitizedCrimeState,
   getUnpaidFines,
+  getUnpaidRestitution,
   hasPendingCourtCase,
   isCrimeEligibleForCharacter,
   isCurrentlyIncarcerated,
@@ -37,6 +39,7 @@ import type {
   PrisonActionId,
   PrisonConsequencesSummary,
   PrisonState,
+  RecordReliefStatus,
 } from '../types';
 
 export const CRIME_MENU_MIN_AGE = 10;
@@ -125,6 +128,7 @@ export interface ClassifiedCrimeRecord {
   isClearedJuvenile: boolean;
   isClearedAdult: boolean;
   canPetitionExpungement: boolean;
+  reliefStatus?: RecordReliefStatus | null;
 }
 
 export function formatCrimeMoney(amount: number): string {
@@ -385,11 +389,13 @@ export function getPrisonActionViews(
 export function classifyCrimeRecord(
   entry: CrimeRecordEntry,
   expungementEligibleIds: ReadonlySet<string>,
+  character?: CharacterProfile,
 ): ClassifiedCrimeRecord {
   const jurisdictionLabel = formatJurisdictionLabel(entry.jurisdiction);
   const isClearedJuvenile = entry.jurisdiction === 'juvenile' && entry.sealed;
   const isClearedAdult = entry.jurisdiction === 'adult' && entry.expunged;
   const canPetitionExpungement = expungementEligibleIds.has(entry.id);
+  const reliefStatus = character ? evaluateRecordReliefStatus(character, entry) : null;
 
   if (entry.outcome === 'warned') {
     return {
@@ -424,7 +430,7 @@ export function classifyCrimeRecord(
   if (isClearedAdult) {
     return {
       entry,
-      badgeLabel: 'Expunged (Adult)',
+      badgeLabel: entry.pardoned ? 'Pardoned (Adult)' : 'Expunged (Adult)',
       badgeVariant: 'emerald',
       jurisdictionLabel,
       isFormalArrest: true,
@@ -433,6 +439,7 @@ export function classifyCrimeRecord(
       isClearedJuvenile: false,
       isClearedAdult: true,
       canPetitionExpungement: false,
+      reliefStatus: null,
     };
   }
 
@@ -490,6 +497,7 @@ export function classifyCrimeRecord(
     isClearedJuvenile: false,
     isClearedAdult: false,
     canPetitionExpungement,
+    reliefStatus,
   };
 }
 
@@ -505,6 +513,7 @@ export interface CrimeDashboardSummary {
   isOnProbation: boolean;
   isIncarcerated: boolean;
   unpaidFines: number;
+  unpaidRestitution: number;
   statusLabel: string;
   statusVariant: 'emerald' | 'amber' | 'rose' | 'sky';
   activeAdultConvictionCount: number;
@@ -522,6 +531,7 @@ export function buildCrimeDashboardSummary(character: CharacterProfile): CrimeDa
   const onProbation = isOnProbation(character);
   const incarcerated = isCurrentlyIncarcerated(character);
   const unpaidFines = getUnpaidFines(character);
+  const unpaidRestitution = getUnpaidRestitution(character);
   const expungementEligibleIds = new Set(
     getExpungementEligibleRecords(character).map((r) => r.id),
   );
@@ -543,8 +553,8 @@ export function buildCrimeDashboardSummary(character: CharacterProfile): CrimeDa
         ? 'Juvenile Probation'
         : 'Adult Probation';
     statusVariant = 'amber';
-  } else if (unpaidFines > 0) {
-    statusLabel = 'Unpaid Court Fines';
+  } else if (unpaidFines > 0 || unpaidRestitution > 0) {
+    statusLabel = unpaidRestitution > 0 ? 'Unpaid Legal Debt' : 'Unpaid Court Fines';
     statusVariant = 'amber';
   } else if (activeAdultConvictionCount > 0) {
     statusLabel = 'Criminal Record';
@@ -566,6 +576,7 @@ export function buildCrimeDashboardSummary(character: CharacterProfile): CrimeDa
     isOnProbation: onProbation,
     isIncarcerated: incarcerated,
     unpaidFines,
+    unpaidRestitution,
     statusLabel,
     statusVariant,
     activeAdultConvictionCount,

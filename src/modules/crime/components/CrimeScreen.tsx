@@ -18,13 +18,20 @@ import {
   attemptCrime,
   expungeAdultRecord,
   payUnpaidFines,
+  payUnpaidRestitution,
+  petitionRecordRelief,
 } from '../services/crimeService';
 import {
   getSanitizedCrimeState,
   isCurrentlyIncarcerated,
 } from '../services/crimeSelectors';
 import { MAX_PRISON_ACTIONS_PER_YEAR, performPrisonAction } from '../services/prisonService';
-import type { CrimeRecordEntry, PrisonActionId } from '../types';
+import type {
+  CrimeRecordEntry,
+  PrisonActionId,
+  RecordReliefOptionId,
+  RecordReliefStatus,
+} from '../types';
 import {
   buildAttemptResultView,
   buildCrimeDashboardSummary,
@@ -67,8 +74,15 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
   onArrestSummaryVisibilityChange,
 }) => {
   const [selectedCrime, setSelectedCrime] = useState<CrimePreviewItem | null>(null);
+  const [reliefModalTarget, setReliefModalTarget] = useState<{
+    entry: CrimeRecordEntry;
+    status: RecordReliefStatus;
+  } | null>(null);
+  const [selectedReliefOptionId, setSelectedReliefOptionId] =
+    useState<RecordReliefOptionId | null>(null);
   const [outcomeModal, setOutcomeModal] = useState<OutcomeState | null>(null);
   const [fineInput, setFineInput] = useState<string>('');
+  const [restitutionInput, setRestitutionInput] = useState<string>('');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -99,6 +113,18 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
         ? Math.min(summary.unpaidFines, walletCash, parsedCustomFine)
         : Math.min(summary.unpaidFines, walletCash);
   const remainingFineAfterPay = Math.max(0, summary.unpaidFines - plannedFinePayment);
+
+  const parsedCustomRestitution = Number.parseInt(restitutionInput, 10);
+  const plannedRestitutionPayment =
+    summary.unpaidRestitution <= 0 || walletCash <= 0
+      ? 0
+      : Number.isFinite(parsedCustomRestitution) && parsedCustomRestitution > 0
+        ? Math.min(summary.unpaidRestitution, walletCash, parsedCustomRestitution)
+        : Math.min(summary.unpaidRestitution, walletCash);
+  const remainingRestitutionAfterPay = Math.max(
+    0,
+    summary.unpaidRestitution - plannedRestitutionPayment,
+  );
 
   const handleConfirmCrimeAttempt = () => {
     if (!selectedCrime || actionLock.current || isProcessing) return;
@@ -260,6 +286,109 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
     setIsProcessing(false);
   };
 
+  const handlePayRestitution = () => {
+    if (actionLock.current || isProcessing || plannedRestitutionPayment <= 0) return;
+    actionLock.current = true;
+    setIsProcessing(true);
+    setScreenError(null);
+
+    const result = payUnpaidRestitution(character, plannedRestitutionPayment);
+    if (!result.ok) {
+      setScreenError(result.reason || result.message);
+      actionLock.current = false;
+      setIsProcessing(false);
+      return;
+    }
+
+    setRestitutionInput('');
+    onUpdateCharacter(result.character);
+    setOutcomeModal({
+      title: 'Victim Restitution Payment',
+      message: result.message,
+      customDeltas: [
+        {
+          label: 'Paid (Cash)',
+          delta: `-${formatCrimeMoney(result.paidAmount)}`,
+          color: 'emerald',
+        },
+        {
+          label: 'Remaining Restitution',
+          delta: formatCrimeMoney(result.remainingUnpaidRestitution),
+          color: result.remainingUnpaidRestitution === 0 ? 'emerald' : 'amber',
+        },
+      ],
+      continueVariant: 'emerald',
+    });
+    setIsProcessing(false);
+  };
+
+  const handleOpenReliefModal = (entry: CrimeRecordEntry, status: RecordReliefStatus) => {
+    setScreenError(null);
+    setReliefModalTarget({ entry, status });
+    const defaultOpt = status.options.find((o) => o.canAfford) ?? status.options[0] ?? null;
+    setSelectedReliefOptionId(defaultOpt ? defaultOpt.id : null);
+  };
+
+  const handleConfirmRecordRelief = () => {
+    if (!reliefModalTarget || !selectedReliefOptionId || actionLock.current || isProcessing) return;
+    actionLock.current = true;
+    setIsProcessing(true);
+    setScreenError(null);
+
+    const { entry } = reliefModalTarget;
+    const result = petitionRecordRelief(character, entry.id, selectedReliefOptionId);
+    setReliefModalTarget(null);
+    setSelectedReliefOptionId(null);
+
+    if (!result.ok) {
+      setScreenError(result.reason || result.message);
+      actionLock.current = false;
+      setIsProcessing(false);
+      return;
+    }
+
+    onUpdateCharacter(result.character);
+    const isPardon = result.tier === 'executive_pardon';
+    setOutcomeModal({
+      title: result.granted
+        ? isPardon
+          ? "Governor's Pardon Granted"
+          : 'Court Petition Granted'
+        : isPardon
+          ? 'Pardon Application Denied'
+          : 'Court Petition Denied',
+      subtitle: `${entry.title} • ${Math.round((result.approvalProbability ?? 0) * 100)}% Estimated Odds`,
+      message: result.message,
+      statEffects: result.granted
+        ? isPardon
+          ? { happiness: 12, karma: 5 }
+          : { happiness: 8, karma: 2 }
+        : { happiness: -4 },
+      customDeltas: [
+        ...(result.feePaid > 0
+          ? [
+              {
+                label: 'Legal Petition Fee',
+                delta: `-${formatCrimeMoney(result.feePaid)}`,
+                color: 'amber' as const,
+              },
+            ]
+          : []),
+        {
+          label: 'Record Status',
+          delta: result.granted
+            ? isPardon
+              ? 'Pardoned & Cleared'
+              : 'Expunged & Cleared'
+            : 'Active (Retry in 2y)',
+          color: result.granted ? 'emerald' : 'rose',
+        },
+      ],
+      continueVariant: result.granted ? 'emerald' : 'rose',
+    });
+    setIsProcessing(false);
+  };
+
   const handlePetitionExpungement = (entry: CrimeRecordEntry) => {
     if (actionLock.current || isProcessing) return;
     actionLock.current = true;
@@ -297,7 +426,7 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
 
   const classifiedRecords = [...crimeState.records]
     .reverse()
-    .map((entry) => classifyCrimeRecord(entry, summary.expungementEligibleIds));
+    .map((entry) => classifyCrimeRecord(entry, summary.expungementEligibleIds, character));
 
   const visibleRecords = classifiedRecords.filter((item) => {
     if (historyFilter === 'active_adult') return item.isActiveConviction;
@@ -526,8 +655,8 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
         </section>
       )}
 
-      {/* Probation & Adult Unpaid Fine Management */}
-      {(summary.isOnProbation || summary.unpaidFines > 0) && (
+      {/* Probation & Adult Unpaid Fine / Restitution Management */}
+      {(summary.isOnProbation || summary.unpaidFines > 0 || summary.unpaidRestitution > 0) && (
         <section className="space-y-2.5">
           {summary.isOnProbation && crimeState.probation && (
             <div className="rounded-2xl border-2 border-slate-900 bg-amber-50 p-3 shadow-[2px_2px_0_#0f172a] space-y-1">
@@ -603,6 +732,63 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
                   onClick={handlePayFines}
                 >
                   Pay Fines
+                </CartoonButton>
+              </div>
+            </div>
+          )}
+
+          {summary.unpaidRestitution > 0 && (
+            <div className="rounded-2xl border-2 border-slate-900 bg-amber-50/80 p-3 shadow-[2px_2px_0_#0f172a] space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-slate-950 inline-flex items-center gap-1.5">
+                  <Scale className="w-4 h-4 text-amber-700" />
+                  Court-Ordered Victim Restitution
+                </span>
+                <Badge variant="amber" size="xs">
+                  Owed: {formatCrimeMoney(summary.unpaidRestitution)}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-[11px] font-bold text-slate-700">
+                <div className="rounded-xl bg-white border border-slate-300 px-2 py-1.5">
+                  <div className="text-[9px] font-black uppercase text-slate-500">Wallet Cash</div>
+                  <div className="font-black text-slate-950">{formatCrimeMoney(walletCash)}</div>
+                </div>
+                <div className="rounded-xl bg-white border border-slate-300 px-2 py-1.5">
+                  <div className="text-[9px] font-black uppercase text-slate-500">Pay Now</div>
+                  <div className="font-black text-emerald-700">
+                    {formatCrimeMoney(plannedRestitutionPayment)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white border border-slate-300 px-2 py-1.5">
+                  <div className="text-[9px] font-black uppercase text-slate-500">Remaining</div>
+                  <div className="font-black text-amber-700">
+                    {formatCrimeMoney(remainingRestitutionAfterPay)}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] font-bold text-slate-600">
+                Paying off victim restitution is required before petitioning the court or governor to clear an imprisoned felony record.
+              </p>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.min(walletCash, summary.unpaidRestitution)}
+                  value={restitutionInput}
+                  onChange={(e) => setRestitutionInput(e.target.value)}
+                  placeholder={`Amount (up to ${formatCrimeMoney(Math.min(walletCash, summary.unpaidRestitution))})`}
+                  className="flex-1 min-w-0 rounded-xl border-2 border-slate-900 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:outline-none"
+                />
+                <CartoonButton
+                  variant="emerald"
+                  size="sm"
+                  disabled={plannedRestitutionPayment <= 0 || isProcessing}
+                  onClick={handlePayRestitution}
+                >
+                  Pay Restitution
                 </CartoonButton>
               </div>
             </div>
@@ -770,7 +956,9 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
                         : item.isClearedJuvenile
                           ? 'Sealed juvenile record (hidden from adult background checks)'
                           : item.isClearedAdult
-                            ? 'Expunged adult record (cleared from active convictions)'
+                            ? entry.pardoned
+                              ? "Pardoned by the Governor (cleared from active convictions and credit checks)"
+                              : 'Expunged adult record (cleared from active convictions)'
                             : `Retained payout: ${formatCrimeMoney(entry.payout)} • Fine: ${formatCrimeMoney(entry.fineImposed)}`}
                     </span>
 
@@ -785,7 +973,49 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
                         Expunge Record
                       </CartoonButton>
                     )}
+
+                    {!item.canPetitionExpungement &&
+                      item.reliefStatus &&
+                      item.reliefStatus.eligibleNow &&
+                      item.reliefStatus.tier === 'court_petition' && (
+                        <CartoonButton
+                          variant="emerald"
+                          size="sm"
+                          disabled={isProcessing}
+                          onClick={() => handleOpenReliefModal(entry, item.reliefStatus!)}
+                          icon={<Scale className="w-3.5 h-3.5" />}
+                        >
+                          Petition Court
+                        </CartoonButton>
+                      )}
+
+                    {!item.canPetitionExpungement &&
+                      item.reliefStatus &&
+                      item.reliefStatus.eligibleNow &&
+                      item.reliefStatus.tier === 'executive_pardon' && (
+                        <CartoonButton
+                          variant="amber"
+                          size="sm"
+                          disabled={isProcessing}
+                          onClick={() => handleOpenReliefModal(entry, item.reliefStatus!)}
+                          icon={<ShieldCheck className="w-3.5 h-3.5" />}
+                        >
+                          Apply for Pardon
+                        </CartoonButton>
+                      )}
                   </div>
+
+                  {item.isActiveConviction && item.reliefStatus && (
+                    <div
+                      className={`rounded-xl px-2.5 py-1.5 text-[10px] font-bold border ${
+                        item.reliefStatus.eligibleNow
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                          : 'border-slate-200 bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      {item.reliefStatus.summaryText}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -869,6 +1099,117 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
               <span>{activeSelectedCrime.eligibility.reason}</span>
             </div>
           )}
+        </Modal>
+      )}
+
+      {/* Record Relief Petition Modal (Tier 2 Court Petition & Tier 3 Governor's Pardon) */}
+      {reliefModalTarget && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setReliefModalTarget(null);
+            setSelectedReliefOptionId(null);
+          }}
+          title={
+            reliefModalTarget.status.tier === 'executive_pardon'
+              ? "Governor's Pardon Petition"
+              : 'Court Rehabilitation Petition'
+          }
+          icon={
+            <span className="text-xl">
+              {reliefModalTarget.status.tier === 'executive_pardon' ? '🏛️' : '⚖️'}
+            </span>
+          }
+          maxWidth="md"
+          actions={
+            <>
+              <CartoonButton
+                variant={reliefModalTarget.status.tier === 'executive_pardon' ? 'amber' : 'emerald'}
+                size="md"
+                fullWidth
+                disabled={
+                  !selectedReliefOptionId ||
+                  isProcessing ||
+                  !reliefModalTarget.status.options.find((o) => o.id === selectedReliefOptionId)
+                    ?.canAfford
+                }
+                onClick={handleConfirmRecordRelief}
+              >
+                Submit Petition
+              </CartoonButton>
+              <CartoonButton
+                variant="white"
+                size="sm"
+                fullWidth
+                onClick={() => {
+                  setReliefModalTarget(null);
+                  setSelectedReliefOptionId(null);
+                }}
+              >
+                Cancel
+              </CartoonButton>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <div className="rounded-xl border-2 border-slate-900 bg-slate-50 p-2.5 text-xs space-y-1">
+              <div className="font-black text-slate-950">
+                Conviction: {reliefModalTarget.entry.title} (Age {reliefModalTarget.entry.age})
+              </div>
+              <div className="text-[11px] font-bold text-slate-600">
+                Clean Years: {reliefModalTarget.status.cleanYearsCompleted}y • Karma:{' '}
+                {Math.round(character.karma)}/100 •{' '}
+                {character.career?.currentJob || character.business
+                  ? 'Steady Income Bonus Active'
+                  : 'No Active Job/Business'}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {reliefModalTarget.status.options.map((opt) => {
+                const isSelected = selectedReliefOptionId === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={!opt.canAfford || isProcessing}
+                    onClick={() => setSelectedReliefOptionId(opt.id)}
+                    className={`w-full text-left rounded-xl border-2 p-3 transition-all space-y-1 ${
+                      isSelected
+                        ? 'border-slate-950 bg-emerald-50 shadow-[2px_2px_0_#0f172a]'
+                        : opt.canAfford
+                          ? 'border-slate-300 bg-white hover:border-slate-900 cursor-pointer'
+                          : 'border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black text-slate-950">{opt.label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="sky" size="xs">
+                          {Math.round(opt.approvalProbability * 100)}% Odds
+                        </Badge>
+                        <Badge variant={opt.canAfford ? 'amber' : 'rose'} size="xs">
+                          {formatCrimeMoney(opt.fee)}
+                        </Badge>
+                      </div>
+                    </div>
+                    <p className="text-[11px] font-bold text-slate-600 leading-snug">
+                      {opt.description}
+                    </p>
+                    {!opt.canAfford && (
+                      <p className="text-[10px] font-black text-rose-700">
+                        Need {formatCrimeMoney(opt.fee - walletCash)} more wallet cash.
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[10px] font-bold text-slate-500">
+              Fees are paid from wallet cash and are non-refundable if denied. Denied petitions can be re-filed after 2 years.
+            </p>
+          </div>
         </Modal>
       )}
 

@@ -5,14 +5,23 @@ import type {
   StatEffects,
 } from '../../../types/game';
 import { stampPlayerNetWorth } from '../../assets/services/assetService';
-import { liquidateBusinessForImprisonment } from '../../business/services/businessService';
-import type { CareerHistoryEntry } from '../../career/types';
+import { applyBusinessCrimeConsequence } from '../../business/services/businessService';
+import { applyCareerCrimeConsequence } from '../../career/services/careerService';
 import { resolveCharacterOccupation } from '../../character/services/occupationService';
 import { applyEffects } from '../../character/services/statService';
-import { expelFromHigherEducationForCrime } from '../../education/services/educationService';
+import { applyEducationCrimeConsequence } from '../../education/services/educationService';
 import { divorceService } from '../../romance/services/divorceService';
 import { romanceService } from '../../romance/services/romanceService';
 import { getCrimeTemplate, isValidCrimeId } from '../data/crimeCatalog';
+import {
+  evaluateArrestSocialAwareness,
+  evaluateAttemptMoodAndKarma,
+  evaluateAwarenessSocialScale,
+  evaluateEvidenceBasedExposure,
+  evaluatePhysicalAndMoodImpact,
+  evaluateProbationRevocationModifier,
+  evaluateVictimLossAndRestitution,
+} from '../data/crimeConsequences';
 import {
   getAttorneyFeeForCase,
   getDefenseStrategy,
@@ -21,6 +30,7 @@ import {
 } from '../data/legalCatalog';
 import type {
   CrimeAttemptResult,
+  CrimeExposureLevel,
   CrimeId,
   CrimeOutcomeStatus,
   CrimeRecordEntry,
@@ -34,16 +44,25 @@ import type {
   PrisonPartnerConsequenceSummary,
   PrisonSocialPenaltyGroup,
   PrisonState,
+  ProbationActionId,
+  ProbationActionResult,
+  ProbationConditionId,
   ProbationState,
+  ProbationTermEntry,
+  RecordReliefOptionId,
+  RecordReliefPetitionResult,
 } from '../types';
 import { CRIME_SIM_VERSION, evaluateCrimeAttempt } from './crimeRiskService';
 import { deterministicUUID, hashSeed, SeededPRNG } from '../../autonomy/services/seededPrngService';
 import {
+  evaluateRecordReliefStatus,
   getActiveAdultConvictions,
   getExpungementEligibleRecords,
   getJurisdictionForAge,
   getSanitizedCrimeState,
   isCrimeEligibleForCharacter,
+  isCurrentlyIncarcerated,
+  isOnProbation,
 } from './crimeSelectors';
 
 function clamp0to100(value: number): number {
@@ -451,21 +470,26 @@ const PROBATION_MISDEMEANOR_SOCIAL_DELTAS: SocialPenaltyDeltas = {
   otherContacts: -8,
 };
 
-function safeHealthStressDelta(currentHealth: number, drop: number): number {
-  if (!Number.isFinite(currentHealth) || currentHealth <= 5 || drop <= 0) return 0;
-  return -Math.min(drop, Math.max(0, Math.round(currentHealth) - 5));
+function mapBusinessDisposition(
+  action: 'none' | 'scandal' | 'continue_delegated' | 'pause_incarceration' | 'liquidate',
+): CourtResolutionResult['businessDisposition'] {
+  if (action === 'continue_delegated') return 'delegated_continued';
+  if (action === 'pause_incarceration') return 'paused_incarceration';
+  if (action === 'liquidate') return 'liquidated';
+  return action;
 }
 
 function applyProbationPartnerConsequence(
   character: CharacterProfile,
   isFelony: boolean,
+  householdScale = 1,
 ): {
   character: CharacterProfile;
   excludedPartnerId: string | null;
   excludedPartnerKey: string | null;
 } {
   const partner = character.partner;
-  if (!partner || partner.romanticStage === 'widowed') {
+  if (!partner || partner.romanticStage === 'widowed' || householdScale <= 0) {
     return {
       character,
       excludedPartnerId: null,
@@ -475,8 +499,15 @@ function applyProbationPartnerConsequence(
 
   const partnerId = partner.id;
   const partnerKey = getNpcDedupKey(partner, 'partner');
-  const relDelta = isFelony ? -20 : -12;
-  const romanceDelta = isFelony ? -18 : -10;
+  const relDelta = Math.round((isFelony ? -20 : -12) * householdScale);
+  const romanceDelta = Math.round((isFelony ? -18 : -10) * householdScale);
+  if (relDelta === 0 && romanceDelta === 0) {
+    return {
+      character,
+      excludedPartnerId: partnerId,
+      excludedPartnerKey: partnerKey,
+    };
+  }
   const updatedPartner: PersonProfile = {
     ...partner,
     relationship: clamp0to100(partner.relationship + relDelta),
@@ -496,6 +527,24 @@ function applyProbationPartnerConsequence(
     },
     excludedPartnerId: partnerId,
     excludedPartnerKey: partnerKey,
+  };
+}
+
+function scaleSocialDeltas(
+  base: SocialPenaltyDeltas,
+  outcome: CrimeOutcomeStatus,
+  exposure: CrimeExposureLevel,
+): SocialPenaltyDeltas {
+  const scale = evaluateAwarenessSocialScale(outcome, exposure);
+  return {
+    parents: Math.round(base.parents * scale.householdScale),
+    siblings: Math.round(base.siblings * scale.householdScale),
+    childrenOlder: Math.round(base.childrenOlder * scale.householdScale),
+    childrenYoung: Math.round(base.childrenYoung * scale.householdScale),
+    colleagues: Math.round(base.colleagues * scale.colleagueScale),
+    bestFriends: Math.round(base.bestFriends * scale.socialCircleScale),
+    friends: Math.round(base.friends * scale.socialCircleScale),
+    otherContacts: Math.round(base.otherContacts * scale.socialCircleScale),
   };
 }
 
@@ -869,64 +918,20 @@ function syncImprisonmentToWorldState(character: CharacterProfile): CharacterPro
   };
 }
 
-function terminateCivilianCareerForConviction(
-  character: CharacterProfile,
-  nextOccupation?: string,
-): {
-  character: CharacterProfile;
-  terminated: boolean;
-  terminatedJobTitle?: string;
-} {
-  const currentJob = character.career?.currentJob;
-  if (!currentJob) {
-    return {
-      character: nextOccupation
-        ? {
-            ...character,
-            occupation: nextOccupation,
-          }
-        : character,
-      terminated: false,
-    };
-  }
-
-  const firedEntry: CareerHistoryEntry = {
-    id: deterministicUUID(
-      'crime_fired',
-      character.id,
-      character.age,
-      currentJob.jobId,
-      character.career.history.length,
-    ),
-    jobId: currentJob.jobId,
-    title: currentJob.title,
-    companyName: currentJob.companyName,
-    type: currentJob.type,
-    startAge: currentJob.hiredAge,
-    endAge: character.age,
-    finalSalary: currentJob.salary,
-    reasonForLeaving: 'fired',
-  };
-
-  return {
-    character: {
-      ...character,
-      ...(nextOccupation ? { occupation: nextOccupation } : {}),
-      career: {
-        ...character.career,
-        currentJob: null,
-        history: [...character.career.history, firedEntry],
-      },
-    },
-    terminated: true,
-    terminatedJobTitle: `${currentJob.title} at ${currentJob.companyName}`,
-  };
+export interface MergeProbationOptions {
+  recordId?: string;
+  offenseClass?: PendingCourtCase['offenseClass'];
+  restitutionImposed?: number;
+  isParole?: boolean;
+  offendedWhileOnProbation?: boolean;
+  conditions?: readonly ProbationConditionId[];
 }
 
 /**
- * Merges an incoming probation sentence into the player's single probation slot.
- * Never stacks durations, never shortens an existing sentence, and gives adult
- * jurisdiction precedence over juvenile jurisdiction on overlap.
+ * Merges an incoming probation or parole supervision term into `ProbationState`:
+ * preserves prior active terms inside `activeTerms[]` cleanly, maintains unique supervision
+ * conditions, enforces adult precedence over juvenile jurisdiction, and preserves scalar
+ * compatibility for legacy callers.
  */
 export function mergeProbationState(
   existing: ProbationState | null,
@@ -934,8 +939,73 @@ export function mergeProbationState(
   incomingJurisdiction: LegalJurisdiction,
   incomingYears: number,
   currentAge: number,
+  options: MergeProbationOptions = {},
 ): ProbationState {
   const normalizedYears = Math.max(1, Math.round(incomingYears));
+  const incomingConditions = new Set<ProbationConditionId>([
+    ...(existing?.conditions ?? []),
+    'supervision_checkins',
+    'no_new_offenses',
+    ...(options.conditions ?? []),
+  ]);
+  if ((options.restitutionImposed ?? 0) > 0) {
+    incomingConditions.add('restitution_payments');
+  }
+  const communityServiceHours = options.isParole
+    ? 0
+    : incomingJurisdiction === 'juvenile'
+      ? 8 * normalizedYears
+      : options.offenseClass === 'felony'
+        ? 20 * normalizedYears
+        : 12 * normalizedYears;
+  if (communityServiceHours > 0) {
+    incomingConditions.add('community_service');
+  }
+
+  const baseTerms: ProbationTermEntry[] = [];
+  if (existing && existing.yearsRemaining > 0) {
+    if (Array.isArray(existing.activeTerms) && existing.activeTerms.length > 0) {
+      for (const term of existing.activeTerms) {
+        if (term.yearsRemaining > 0 || term.communityServiceHoursRemaining > 0) {
+          baseTerms.push({ ...term });
+        }
+      }
+    } else if (options.recordId) {
+      baseTerms.push({
+        recordId: `legacy-probation-${existing.startedAtAge}`,
+        chargeTitle: existing.chargeTitle,
+        jurisdiction: existing.jurisdiction,
+        yearsRemaining: Math.max(1, Math.round(existing.yearsRemaining)),
+        startedAtAge: existing.startedAtAge,
+        communityServiceHoursRemaining: 0,
+        technicalWarnings: existing.technicalWarnings ?? 0,
+        violationCount: existing.violationCount ?? 0,
+      });
+    }
+  }
+
+  if (options.recordId) {
+    const newTerm: ProbationTermEntry = {
+      recordId: options.recordId,
+      chargeTitle: incomingChargeTitle,
+      jurisdiction: incomingJurisdiction,
+      yearsRemaining: normalizedYears,
+      startedAtAge: currentAge,
+      communityServiceHoursRemaining: communityServiceHours,
+      technicalWarnings: 0,
+      violationCount: options.offendedWhileOnProbation ? 1 : 0,
+    };
+    const existingIdx = baseTerms.findIndex((t) => t.recordId === options.recordId);
+    if (existingIdx >= 0) {
+      baseTerms[existingIdx] = newTerm;
+    } else {
+      baseTerms.push(newTerm);
+    }
+  }
+
+  const nextViolationCount =
+    (existing?.violationCount ?? 0) + (options.offendedWhileOnProbation ? 1 : 0);
+
   if (!existing || existing.yearsRemaining <= 0) {
     return {
       chargeTitle: incomingChargeTitle,
@@ -943,6 +1013,14 @@ export function mergeProbationState(
       yearsRemaining: normalizedYears,
       startedAtAge: currentAge,
       lastProgressedAge: null,
+      ...(baseTerms.length > 0 ? { activeTerms: baseTerms } : {}),
+      conditions: Array.from(incomingConditions),
+      lastCheckInAge: existing?.lastCheckInAge ?? null,
+      lastServiceActionAge: existing?.lastServiceActionAge ?? null,
+      serviceActionsThisYear: existing?.serviceActionsThisYear ?? 0,
+      restitutionPaidThisYear: existing?.restitutionPaidThisYear ?? 0,
+      technicalWarnings: existing?.technicalWarnings ?? 0,
+      violationCount: nextViolationCount,
     };
   }
 
@@ -955,6 +1033,14 @@ export function mergeProbationState(
     yearsRemaining: Math.max(existing.yearsRemaining, normalizedYears),
     startedAtAge: existing.startedAtAge,
     lastProgressedAge: existing.lastProgressedAge,
+    ...(baseTerms.length > 0 ? { activeTerms: baseTerms } : {}),
+    conditions: Array.from(incomingConditions),
+    lastCheckInAge: existing.lastCheckInAge ?? null,
+    lastServiceActionAge: existing.lastServiceActionAge ?? null,
+    serviceActionsThisYear: existing.serviceActionsThisYear ?? 0,
+    restitutionPaidThisYear: existing.restitutionPaidThisYear ?? 0,
+    technicalWarnings: existing.technicalWarnings ?? 0,
+    violationCount: nextViolationCount,
   };
 }
 
@@ -993,6 +1079,10 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
 
   const roll = evaluateCrimeAttempt(character, template, attemptIndex);
   const year = character.birthYear + character.age;
+  const exposure = evaluateEvidenceBasedExposure(character, template, roll, {
+    seedKey: String(attemptIndex),
+  });
+  const moodEval = evaluateAttemptMoodAndKarma(template, roll, character.stats.karma);
 
   const nextHeat = clamp0to100(
     sanitized.policeHeat + (roll.detected ? template.heatGain : Math.ceil(template.heatGain * 0.6)),
@@ -1003,15 +1093,13 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
   );
 
   const statEffects: StatEffects = {
-    karma: -template.karmaPenalty,
+    karma: moodEval.karmaDelta,
   };
-  if (roll.injured && roll.injuryHealthLoss > 0) {
-    statEffects.health = -roll.injuryHealthLoss;
-    statEffects.happiness = -6;
-  } else if (roll.detected) {
-    statEffects.happiness = -6;
-  } else if (roll.executionSucceeded && !roll.detected) {
-    statEffects.happiness = 4;
+  if (moodEval.happinessDelta !== 0) {
+    statEffects.happiness = moodEval.happinessDelta;
+  }
+  if (moodEval.healthDelta !== 0) {
+    statEffects.health = moodEval.healthDelta;
   }
 
   if (roll.executionSucceeded && !roll.detected && roll.attemptedPayout > 0) {
@@ -1053,13 +1141,20 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
       attemptedPayout: roll.attemptedPayout,
       baseFine,
       baseSentenceYears,
+      legalStatus: 'pending_trial',
+      exposure,
+      offendedOnProbation: isOnProbation(character),
+      arrestHappinessApplied: moodEval.happinessDelta,
+      // Keep non-injury arrest stress strictly separate from roll.injured getaway trauma.
+      arrestHealthApplied: 0,
+      institutionalReportFiled: false,
     };
 
     const injuryText = roll.injured
       ? ` You suffered an injury (-${roll.injuryHealthLoss} Health) during the incident.`
       : '';
     const message = roll.executionSucceeded
-      ? `Police intercepted you right after attempting ${template.title}. $${roll.attemptedPayout.toLocaleString()} in suspected proceeds was seized pending court.${injuryText}`
+      ? `Police intercepted you right after attempting ${template.title}. $${roll.attemptedPayout.toLocaleString()} in suspected proceeds was seized by authorities.${injuryText}`
       : `Your ${template.title.toLowerCase()} attempt failed and authorities apprehended you at the scene.${injuryText}`;
 
     const arrestEvent: LifeEvent = {
@@ -1075,11 +1170,19 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
       icon: '🚓',
     };
 
+    const arrestAwareness = evaluateArrestSocialAwareness({
+      jurisdiction: roll.jurisdiction,
+      exposure,
+      statutoryParentNotification: roll.jurisdiction === 'juvenile',
+      institutionalReportFiled: false,
+      institutionalTarget: 'none',
+    });
+
     const { character: relUpdated, statEffects: parentEffects } = applyCrimeRelationshipConsequences(
       character,
       {
-        parents: roll.jurisdiction === 'juvenile' ? -5 : -4,
-        partner: -3,
+        parents: arrestAwareness.parentsDelta,
+        partner: arrestAwareness.partnerDelta,
         siblings: 0,
       },
     );
@@ -1101,10 +1204,13 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
       { ...statEffects, ...parentEffects },
     );
 
+    const careerArrest = applyCareerCrimeConsequence(affected, pendingCase, 'arrest', exposure);
+
     return {
       ok: true,
-      character: affected,
+      character: careerArrest.character,
       roll,
+      exposure,
       pendingCase,
       message,
     };
@@ -1127,6 +1233,8 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
     detected: false,
     injured: roll.injured,
     outcome,
+    exposure,
+    sentenceStatus: 'not_applicable',
     attemptedPayout: roll.attemptedPayout,
     payout,
     fineImposed: 0,
@@ -1177,6 +1285,7 @@ export function attemptCrime(character: CharacterProfile, crimeId: CrimeId): Cri
     ok: true,
     character: affected,
     roll,
+    exposure,
     record,
     message,
   };
@@ -1238,36 +1347,127 @@ export function determineCourtOutcome(
 
   const priorAdultCount = getActiveAdultConvictions(character).length;
   const isFelony = pendingCase.offenseClass === 'felony';
+  const isHighStakes = pendingCase.tier === 'high_stakes';
+  const isBankHeist = pendingCase.crimeId === 'bank_heist';
+  const offendingOnProbation = Boolean(pendingCase.offendedOnProbation || isOnProbation(character));
+  const revMod = offendingOnProbation
+    ? evaluateProbationRevocationModifier(pendingCase, sanitized.probation?.violationCount ?? 0)
+    : null;
+  const effectiveProbationShift = revMod
+    ? Math.max(0, strategy.shiftsPrisonToProbationBonus - revMod.probationShiftReduction)
+    : strategy.shiftsPrisonToProbationBonus;
+  const prisonBoost = revMod ? revMod.prisonWeightBoost : 0;
 
-  const adultCandidates: Array<{ outcome: CrimeOutcomeStatus; weight: number }> = [
-    {
-      outcome: 'dismissed',
-      weight: Math.max(0.03, 0.1 + strategy.dismissalBonus + failedAttemptBonus + smartsBonus),
-    },
-    {
-      outcome: 'acquitted',
-      weight: Math.max(0.04, 0.12 + strategy.acquittalBonus + failedAttemptBonus),
-    },
-    {
-      outcome: 'fined',
-      weight: Math.max(0.08, isFelony ? 0.18 : 0.42),
-    },
-    {
-      outcome: 'probation',
-      weight: Math.max(0.1, (isFelony ? 0.28 : 0.22) + strategy.shiftsPrisonToProbationBonus * 0.7),
-    },
-    {
-      outcome: 'imprisoned',
-      weight: Math.max(
-        0.02,
-        (pendingCase.baseSentenceYears > 0
-          ? (isFelony ? 0.34 : 0.08) + Math.min(0.18, priorAdultCount * 0.06)
-          : 0.02) -
-          strategy.shiftsPrisonToProbationBonus -
-          strategy.acquittalBonus * 0.4,
-      ),
-    },
-  ];
+  let adultCandidates: Array<{ outcome: CrimeOutcomeStatus; weight: number }>;
+  if (isHighStakes) {
+    // High-stakes violent felonies (Armed Robbery, Bank Heist): never fine-only, heavily weighted
+    // toward incarceration when caught red-handed, with very low public-defender walk-free odds.
+    const failedBoost = pendingCase.executionSucceeded ? 0 : 0.03;
+    adultCandidates = [
+      {
+        outcome: 'dismissed',
+        weight: Math.max(
+          0.005,
+          (isBankHeist ? 0.01 : 0.015) +
+            strategy.dismissalBonus * 0.45 +
+            failedBoost +
+            smartsBonus * 0.3,
+        ),
+      },
+      {
+        outcome: 'acquitted',
+        weight: Math.max(
+          0.005,
+          (isBankHeist ? 0.015 : 0.025) + strategy.acquittalBonus * 0.5 + failedBoost,
+        ),
+      },
+      {
+        outcome: 'probation',
+        weight: Math.max(
+          0.02,
+          (isBankHeist ? 0.04 : 0.1) +
+            effectiveProbationShift * 0.45 -
+            Math.min(0.06, priorAdultCount * 0.03),
+        ),
+      },
+      {
+        outcome: 'imprisoned',
+        weight: Math.max(
+          0.25,
+          (isBankHeist ? 0.93 : 0.86) +
+            Math.min(0.24, priorAdultCount * 0.08) +
+            prisonBoost -
+            effectiveProbationShift * 0.45 -
+            strategy.acquittalBonus * 0.3,
+        ),
+      },
+    ];
+  } else if (isFelony) {
+    // Mid-tier felonies (Financial Scam, Burglary, Vehicle Theft)
+    adultCandidates = [
+      {
+        outcome: 'dismissed',
+        weight: Math.max(
+          0.02,
+          0.06 + strategy.dismissalBonus * 0.85 + failedAttemptBonus + smartsBonus,
+        ),
+      },
+      {
+        outcome: 'acquitted',
+        weight: Math.max(0.02, 0.08 + strategy.acquittalBonus * 0.85 + failedAttemptBonus),
+      },
+      {
+        outcome: 'fined',
+        weight: Math.max(0.05, 0.14 - Math.min(0.08, priorAdultCount * 0.03)),
+      },
+      {
+        outcome: 'probation',
+        weight: Math.max(0.08, 0.3 + effectiveProbationShift * 0.7),
+      },
+      {
+        outcome: 'imprisoned',
+        weight: Math.max(
+          0.05,
+          0.42 +
+            Math.min(0.2, priorAdultCount * 0.07) +
+            prisonBoost -
+            effectiveProbationShift -
+            strategy.acquittalBonus * 0.35,
+        ),
+      },
+    ];
+  } else {
+    // Petty misdemeanors (Shoplifting, Vandalism, Pickpocketing)
+    adultCandidates = [
+      {
+        outcome: 'dismissed',
+        weight: Math.max(0.03, 0.1 + strategy.dismissalBonus + failedAttemptBonus + smartsBonus),
+      },
+      {
+        outcome: 'acquitted',
+        weight: Math.max(0.04, 0.12 + strategy.acquittalBonus + failedAttemptBonus),
+      },
+      {
+        outcome: 'fined',
+        weight: 0.42,
+      },
+      {
+        outcome: 'probation',
+        weight: Math.max(0.08, 0.22 + effectiveProbationShift * 0.7),
+      },
+      {
+        outcome: 'imprisoned',
+        weight: Math.max(
+          0.02,
+          (pendingCase.baseSentenceYears > 0
+            ? 0.08 + Math.min(0.18, priorAdultCount * 0.06) + prisonBoost
+            : 0.02 + prisonBoost * 0.5) -
+            effectiveProbationShift -
+            strategy.acquittalBonus * 0.4,
+        ),
+      },
+    ];
+  }
 
   const picked = prng.pickWeighted(adultCandidates);
   return picked ? picked.outcome : 'fined';
@@ -1371,8 +1571,25 @@ export function applyCourtOutcome(
   }
 
   const prng = createLegalPrng(workingChar, pendingCase.id, `disposition::${strategyId}`);
-  const availableCash = Math.max(0, workingChar.cash);
   const isFelony = pendingCase.offenseClass === 'felony';
+  const template = getCrimeTemplate(pendingCase.crimeId);
+  const exposure: CrimeExposureLevel =
+    pendingCase.exposure ??
+    evaluateEvidenceBasedExposure(
+      workingChar,
+      template,
+      {
+        detected: true,
+        jurisdiction: pendingCase.jurisdiction,
+        executionSucceeded: pendingCase.executionSucceeded,
+      },
+      {
+        explicitWitnessSignal: pendingCase.explicitWitnessSignal,
+        institutionalReportFiled: pendingCase.institutionalReportFiled,
+        seedKey: pendingCase.id,
+      },
+    );
+  const offendingOnProbation = Boolean(pendingCase.offendedOnProbation || isOnProbation(workingChar));
 
   let releasedPayout = 0;
   let fineImposed = 0;
@@ -1381,9 +1598,11 @@ export function applyCourtOutcome(
   let sentenceYears = 0;
   let probationYears = 0;
   let employmentTerminated = false;
+  let careerReinstated = false;
   let terminatedJobTitle: string | null = null;
   let closedBusinessName: string | null = null;
   let businessLiquidationProceeds = 0;
+  let businessDisposition: CourtResolutionResult['businessDisposition'] = 'none';
   let forfeitedProceeds = 0;
   let nextPrison: PrisonState | null = sanitized.prison;
   let nextProbation: ProbationState | null = sanitized.probation;
@@ -1391,33 +1610,47 @@ export function applyCourtOutcome(
   const extraStatEffects: StatEffects = {};
   let heatDelta = 0;
 
+  // Approach B: separate statutory fines, state forfeiture, and victim restitution.
+  const victimEval = evaluateVictimLossAndRestitution(pendingCase, outcome, prng);
+  const restitutionImposed = victimEval.restitutionImposed;
+  const restitutionPaid = 0;
+  const unpaidRestitutionAdded =
+    !isJuvenile && outcome !== 'dismissed' && outcome !== 'acquitted' && outcome !== 'warned'
+      ? restitutionImposed
+      : 0;
+  const probationViolated = Boolean(
+    offendingOnProbation &&
+      (outcome === 'fined' || outcome === 'probation' || outcome === 'imprisoned'),
+  );
+
   const baseRawFine = Math.max(
     isJuvenile ? 25 : 75,
     Math.round(pendingCase.baseFine * (isJuvenile ? 0.4 : 1) * strategy.fineMultiplier),
   );
+  const preSettlementCash = Math.max(0, workingChar.cash);
 
   switch (outcome) {
     case 'dismissed':
     case 'acquitted': {
-      releasedPayout = pendingCase.executionSucceeded ? pendingCase.attemptedPayout : 0;
-      if (releasedPayout > 0) {
-        extraStatEffects.cash = releasedPayout;
-      }
-      extraStatEffects.happiness = 8;
-      relSpec = { parents: 2, partner: 2, siblings: 0 };
+      // Seized stolen proceeds are never paid out as criminal profit upon dismissal or acquittal.
+      releasedPayout = 0;
+      relSpec = {
+        parents: isJuvenile || exposure !== 'private' ? 2 : 0,
+        partner: exposure === 'publicly_reported' ? 2 : 0,
+        siblings: 0,
+      };
       heatDelta = -6;
       break;
     }
 
     case 'warned': {
-      // Juvenile informal warning: held loot returned/forfeited, cash-capped modest restitution, $0 unpaidFines.
+      // Juvenile informal warning: held loot forfeited, cash-capped modest statutory fine/restitution, $0 unpaid debt.
       const suggestedRestitution = prng.nextInt(0, JUVENILE_WARNING_RESTITUTION_MAX);
-      fineImposed = Math.min(availableCash, suggestedRestitution);
+      fineImposed = Math.min(preSettlementCash, suggestedRestitution);
       finePaid = fineImposed;
       if (finePaid > 0) {
         extraStatEffects.cash = -finePaid;
       }
-      extraStatEffects.happiness = -3;
       relSpec = { parents: -4, partner: -2, siblings: 0 };
       heatDelta = -4;
       break;
@@ -1425,21 +1658,15 @@ export function applyCourtOutcome(
 
     case 'fined': {
       if (isJuvenile) {
-        fineImposed = Math.min(availableCash, baseRawFine);
+        fineImposed = Math.min(preSettlementCash, baseRawFine);
         finePaid = fineImposed;
       } else {
         fineImposed = baseRawFine;
-        finePaid = Math.min(availableCash, fineImposed);
+        finePaid = Math.min(preSettlementCash, fineImposed);
         unpaidFineAdded = fineImposed - finePaid;
       }
       if (finePaid > 0) {
         extraStatEffects.cash = -finePaid;
-      }
-      extraStatEffects.happiness = isFelony ? -14 : -8;
-      extraStatEffects.karma = isFelony ? -16 : -8;
-      if (isFelony) {
-        const stressHealth = safeHealthStressDelta(workingChar.stats.health, 4);
-        if (stressHealth < 0) extraStatEffects.health = stressHealth;
       }
       relSpec = {
         parents: isFelony ? -12 : -6,
@@ -1463,35 +1690,25 @@ export function applyCourtOutcome(
         pendingCase.jurisdiction,
         probationYears,
         workingChar.age,
+        {
+          recordId: pendingCase.id,
+          offenseClass: pendingCase.offenseClass,
+          restitutionImposed: unpaidRestitutionAdded,
+          offendedWhileOnProbation: offendingOnProbation,
+        },
       );
-
-      if (!isJuvenile) {
-        const careerResult = terminateCivilianCareerForConviction(workingChar);
-        workingChar = careerResult.character;
-        employmentTerminated = careerResult.terminated;
-        terminatedJobTitle = careerResult.terminatedJobTitle ?? null;
-      }
 
       const probationFineRaw = Math.round(baseRawFine * 0.5);
       if (isJuvenile) {
-        fineImposed = Math.min(availableCash, probationFineRaw);
+        fineImposed = Math.min(preSettlementCash, probationFineRaw);
         finePaid = fineImposed;
       } else {
         fineImposed = probationFineRaw;
-        finePaid = Math.min(availableCash, fineImposed);
+        finePaid = Math.min(preSettlementCash, fineImposed);
         unpaidFineAdded = fineImposed - finePaid;
       }
       if (finePaid > 0) {
         extraStatEffects.cash = -finePaid;
-      }
-      extraStatEffects.happiness = isFelony ? -24 : -15;
-      extraStatEffects.karma = isFelony ? -22 : -12;
-      const probStressHealth = safeHealthStressDelta(workingChar.stats.health, isFelony ? 8 : 4);
-      if (probStressHealth < 0) {
-        extraStatEffects.health = probStressHealth;
-      }
-      if (isFelony) {
-        extraStatEffects.looks = -4;
       }
       relSpec = {
         parents: isFelony ? -14 : -8,
@@ -1507,9 +1724,7 @@ export function applyCourtOutcome(
         1,
         Math.round(Math.max(1, pendingCase.baseSentenceYears) * strategy.sentenceMultiplier),
       );
-      forfeitedProceeds = pendingCase.executionSucceeded
-        ? Math.max(0, pendingCase.attemptedPayout)
-        : 0;
+      forfeitedProceeds = victimEval.stateForfeitedProceeds;
 
       const priorAdultPrisonCount = sanitized.records.filter(
         (r) => r.jurisdiction === 'adult' && r.outcome === 'imprisoned',
@@ -1541,25 +1756,30 @@ export function applyCourtOutcome(
         actionsTakenThisYear: 0,
         lastActionAge: null,
         lastProgressedAge: null,
+        originCaseId: pendingCase.id,
         priorRetirementOccupation,
       };
 
-      // 1. Terminate active civilian job
-      const careerResult = terminateCivilianCareerForConviction(workingChar, 'Incarcerated');
-      workingChar = careerResult.character;
-      employmentTerminated = careerResult.terminated;
-      terminatedJobTitle = careerResult.terminatedJobTitle ?? null;
+      if (nextProbation && offendingOnProbation) {
+        nextProbation = {
+          ...nextProbation,
+          violationCount: (nextProbation.violationCount ?? 0) + 1,
+        };
+      }
 
-      // 2-3. Liquidate active business & credit salvage proceeds before fine settlement
-      const liquidationResult = liquidateBusinessForImprisonment(workingChar);
+      // Apply business continuity/liquidation BEFORE statutory fine settlement so any legitimate
+      // shareholder winding-up distribution becomes personal cash cleanly once (never using
+      // an active/paused company's corporate treasury to pay personal fines or restitution).
+      const bizPrisonRes = applyBusinessCrimeConsequence(workingChar, pendingCase, 'imprisoned', exposure);
       workingChar = {
-        ...liquidationResult.character,
+        ...bizPrisonRes.character,
         occupation: 'Incarcerated',
       };
-      closedBusinessName = liquidationResult.closedBusinessName;
-      businessLiquidationProceeds = liquidationResult.payoutAmount;
+      closedBusinessName = bizPrisonRes.closedBusinessName;
+      businessLiquidationProceeds = bizPrisonRes.payoutAmount;
+      businessDisposition = mapBusinessDisposition(bizPrisonRes.decision.action);
 
-      // 4-5. Settle court fine using post-liquidation cash
+      // Settle statutory court fine from personal wallet cash only (bankBalance untouched).
       const postLiquidationCash = Math.max(0, workingChar.cash);
       const prisonFineRaw = Math.round(baseRawFine * 0.6);
       fineImposed = prisonFineRaw;
@@ -1569,12 +1789,6 @@ export function applyCourtOutcome(
         extraStatEffects.cash = -finePaid;
       }
 
-      extraStatEffects.happiness = -18;
-      extraStatEffects.karma = isFelony ? -25 : -15;
-      const prisonStressHealth = safeHealthStressDelta(workingChar.stats.health, 6);
-      if (prisonStressHealth < 0) {
-        extraStatEffects.health = prisonStressHealth;
-      }
       heatDelta = -12;
       break;
     }
@@ -1583,22 +1797,46 @@ export function applyCourtOutcome(
       break;
   }
 
-  let expelledFromSchool: string | null = null;
-  if (
-    outcome === 'imprisoned' ||
-    (outcome === 'probation' && !isJuvenile) ||
-    (outcome === 'fined' && !isJuvenile && isFelony)
-  ) {
-    const expulsionResult = expelFromHigherEducationForCrime(
-      workingChar,
-      pendingCase.title,
-      outcome,
-    );
-    workingChar = expulsionResult.character;
-    expelledFromSchool = expulsionResult.expelledFromSchool;
+  // Evaluate mood, karma, and cause-driven physical health (de-duplicating arrest shock, 0 looks loss).
+  const physicalMood = evaluatePhysicalAndMoodImpact(
+    pendingCase,
+    outcome,
+    workingChar.stats.health,
+  );
+  if (physicalMood.happinessDelta !== 0) {
+    extraStatEffects.happiness = physicalMood.happinessDelta;
+  }
+  if (physicalMood.karmaDelta !== 0) {
+    extraStatEffects.karma = physicalMood.karmaDelta;
+  }
+  if (physicalMood.healthDelta !== 0) {
+    extraStatEffects.health = physicalMood.healthDelta;
   }
 
-  if (outcome !== 'imprisoned' && (employmentTerminated || expelledFromSchool)) {
+  // Integrate Phase 2 Career consequences cleanly (idempotent per caseId).
+  const careerRes = applyCareerCrimeConsequence(workingChar, pendingCase, outcome, exposure);
+  workingChar = careerRes.character;
+  employmentTerminated = careerRes.terminated;
+  terminatedJobTitle = careerRes.terminatedJobTitle;
+  careerReinstated = careerRes.reinstated;
+
+  // Integrate Phase 2 Business scandal consequences for non-custodial verdicts.
+  if (outcome !== 'imprisoned') {
+    const bizRes = applyBusinessCrimeConsequence(workingChar, pendingCase, outcome, exposure);
+    workingChar = bizRes.character;
+    businessDisposition = mapBusinessDisposition(bizRes.decision.action);
+  }
+
+  // Integrate Phase 2 Education consequences cleanly across K-12 & higher education.
+  const eduRes = applyEducationCrimeConsequence(workingChar, pendingCase, outcome, exposure);
+  workingChar = eduRes.character;
+  const expelledFromSchool = eduRes.expelledFromSchool;
+  const educationDisposition = eduRes.disposition;
+
+  if (
+    outcome !== 'imprisoned' &&
+    (employmentTerminated || careerReinstated || educationDisposition === 'expelled')
+  ) {
     workingChar = {
       ...workingChar,
       occupation: resolveCharacterOccupation(workingChar, {
@@ -1625,8 +1863,16 @@ export function applyCourtOutcome(
     detected: true,
     injured: pendingCase.injured,
     outcome,
+    exposure,
+    sentenceStatus:
+      outcome === 'imprisoned' || outcome === 'probation' ? 'active' : 'not_applicable',
     attemptedPayout: pendingCase.attemptedPayout,
     payout: releasedPayout,
+    stateForfeitedProceeds: victimEval.stateForfeitedProceeds,
+    recoveredPropertyReturnedToVictim: victimEval.recoveredPropertyReturnedToVictim,
+    remainingVictimLoss: victimEval.remainingVictimLoss,
+    restitutionImposed,
+    restitutionPaid,
     fineImposed,
     finePaid,
     attorneyFeePaid: attorneyFee,
@@ -1642,12 +1888,16 @@ export function applyCourtOutcome(
   if (outcome === 'dismissed') {
     eventCategory = 'milestone';
     message = `Charges for ${pendingCase.title} were dismissed.${
-      releasedPayout > 0 ? ` Held proceeds of $${releasedPayout.toLocaleString()} were returned.` : ''
+      pendingCase.executionSucceeded && pendingCase.attemptedPayout > 0
+        ? ' Seized property and suspected proceeds remained in police custody.'
+        : ''
     }`;
   } else if (outcome === 'acquitted') {
     eventCategory = 'milestone';
     message = `Found Not Guilty of ${pendingCase.title}.${
-      releasedPayout > 0 ? ` Held proceeds of $${releasedPayout.toLocaleString()} were released.` : ''
+      pendingCase.executionSucceeded && pendingCase.attemptedPayout > 0
+        ? ' Seized property and suspected proceeds remained in police custody.'
+        : ''
     }`;
   } else if (outcome === 'warned') {
     eventIcon = '⚠️';
@@ -1656,11 +1906,15 @@ export function applyCourtOutcome(
     }`;
   } else if (outcome === 'fined') {
     const expelledText = expelledFromSchool ? ` You were expelled from ${expelledFromSchool}.` : '';
+    const restitutionText =
+      unpaidRestitutionAdded > 0
+        ? ` Victim restitution ordered: $${unpaidRestitutionAdded.toLocaleString()}.`
+        : '';
     message = `${
       isJuvenile ? 'Juvenile court' : 'Criminal court'
     } ordered a $${fineImposed.toLocaleString()} fine for ${pendingCase.title}. Paid $${finePaid.toLocaleString()}${
       unpaidFineAdded > 0 ? ` ($${unpaidFineAdded.toLocaleString()} added to unpaid fines)` : ''
-    }.${expelledText}`;
+    }.${restitutionText}${expelledText}`;
   } else if (outcome === 'probation') {
     const jobLossText = employmentTerminated ? ' Your civilian job was terminated.' : '';
     const expelledText = expelledFromSchool ? ` You were expelled from ${expelledFromSchool}.` : '';
@@ -1737,16 +1991,35 @@ export function applyCourtOutcome(
       ],
     };
   } else if (outcome === 'probation' && !isJuvenile) {
-    const probPartnerResult = applyProbationPartnerConsequence(workingChar, isFelony);
+    const probAwareness = evaluateAwarenessSocialScale('probation', exposure);
+    const probPartnerResult = applyProbationPartnerConsequence(
+      workingChar,
+      isFelony,
+      probAwareness.householdScale,
+    );
+    const scaledProbDeltas = scaleSocialDeltas(
+      isFelony ? PROBATION_FELONY_SOCIAL_DELTAS : PROBATION_MISDEMEANOR_SOCIAL_DELTAS,
+      'probation',
+      exposure,
+    );
     const probSocialResult = applySocialConsequencesForSentence(
       probPartnerResult.character,
       probPartnerResult.excludedPartnerId,
       probPartnerResult.excludedPartnerKey,
-      isFelony ? PROBATION_FELONY_SOCIAL_DELTAS : PROBATION_MISDEMEANOR_SOCIAL_DELTAS,
+      scaledProbDeltas,
     );
     relChar = probSocialResult.character;
   } else {
-    const relOutcome = applyCrimeRelationshipConsequences(workingChar, relSpec);
+    const verdictAwareness =
+      outcome === 'dismissed' || outcome === 'acquitted'
+        ? { householdScale: 1 }
+        : evaluateAwarenessSocialScale(outcome, exposure);
+    const scaledRelSpec: RelationshipDeltaSpec = {
+      parents: Math.round(relSpec.parents * verdictAwareness.householdScale),
+      partner: Math.round(relSpec.partner * verdictAwareness.householdScale),
+      siblings: Math.round(relSpec.siblings * verdictAwareness.householdScale),
+    };
+    const relOutcome = applyCrimeRelationshipConsequences(workingChar, scaledRelSpec);
     relChar = relOutcome.character;
     parentEffects = relOutcome.statEffects;
   }
@@ -1759,9 +2032,11 @@ export function applyCourtOutcome(
         ...sanitized,
         policeHeat: clamp0to100(sanitized.policeHeat + heatDelta),
         unpaidFines: sanitized.unpaidFines + unpaidFineAdded,
+        unpaidRestitution: (sanitized.unpaidRestitution ?? 0) + unpaidRestitutionAdded,
         pendingCase: null,
         prison: nextPrison,
         probation: nextProbation,
+        ...(outcome === 'imprisoned' ? { lastMidYearReleaseAge: null } : {}),
         records: [...sanitized.records, record],
       },
       timeline: [...relChar.timeline, courtEvent],
@@ -1778,23 +2053,32 @@ export function applyCourtOutcome(
   if (extraStatEffects.happiness) appliedStatDeltas.happiness = extraStatEffects.happiness;
   if (extraStatEffects.karma) appliedStatDeltas.karma = extraStatEffects.karma;
   if (extraStatEffects.health) appliedStatDeltas.health = extraStatEffects.health;
-  if (extraStatEffects.looks) appliedStatDeltas.looks = extraStatEffects.looks;
 
   return {
     ok: true,
     character: finalChar,
     outcome,
+    exposure,
     record,
     releasedPayout,
+    stateForfeitedProceeds: victimEval.stateForfeitedProceeds,
+    recoveredPropertyReturnedToVictim: victimEval.recoveredPropertyReturnedToVictim,
+    remainingVictimLoss: victimEval.remainingVictimLoss,
+    restitutionImposed,
+    restitutionPaid,
+    unpaidRestitutionAdded,
     fineImposed,
     finePaid,
     unpaidFineAdded,
     attorneyFeePaid: attorneyFee,
     sentenceYears,
     probationYears,
+    probationViolated,
     employmentTerminated,
     terminatedJobTitle,
     expelledFromSchool,
+    educationDisposition,
+    businessDisposition,
     appliedStatDeltas,
     prisonConsequences,
     message,
@@ -1958,6 +2242,481 @@ export function expungeAdultRecord(
     character: finalChar,
     expungedRecord: expungedEntry,
     message: expungeEvent.message,
+  };
+}
+
+/**
+ * Handles the 3-Tier Record Relief petition flow:
+ * - Tier 1 (`standard`): delegates to `expungeAdultRecord` ($0 fee, guaranteed).
+ * - Tier 2 (`court_petition`): imprisoned non-violent felonies (self-filed $2k or attorney $8k).
+ * - Tier 3 (`executive_pardon`): imprisoned violent felonies (Governor's Pardon $15k, Karma >= 60).
+ *
+ * Fees are strictly cash-only (never touching bank balance or corporate treasury).
+ * Approved petitions set `expunged: true` (and `pardoned: true` for Tier 3), which automatically
+ * clears all downstream financing, career, business, and identity record checks.
+ */
+export function petitionRecordRelief(
+  character: CharacterProfile,
+  recordId: string,
+  optionId: RecordReliefOptionId,
+  rng: () => number = Math.random,
+): RecordReliefPetitionResult {
+  if (!character.isAlive) {
+    return {
+      ok: false,
+      granted: false,
+      character,
+      feePaid: 0,
+      reason: 'Deceased characters cannot file for record relief.',
+      message: 'Deceased characters cannot file for record relief.',
+    };
+  }
+
+  const sanitized = getSanitizedCrimeState(character);
+  const targetRecord = sanitized.records.find((r) => r.id === recordId);
+  if (!targetRecord) {
+    return {
+      ok: false,
+      granted: false,
+      character,
+      feePaid: 0,
+      reason: 'Criminal record not found.',
+      message: 'Criminal record not found.',
+    };
+  }
+
+  const status = evaluateRecordReliefStatus(character, targetRecord);
+  if (!status) {
+    return {
+      ok: false,
+      granted: false,
+      character,
+      feePaid: 0,
+      reason: 'This record is not an active adult conviction eligible for relief.',
+      message: 'This record is not an active adult conviction eligible for relief.',
+    };
+  }
+
+  if (status.tier === 'standard') {
+    const stdRes = expungeAdultRecord(character, recordId);
+    return {
+      ok: stdRes.ok,
+      granted: stdRes.ok,
+      character: stdRes.character,
+      tier: 'standard',
+      optionId: 'standard_free',
+      feePaid: 0,
+      approvalProbability: 1,
+      updatedRecord: stdRes.expungedRecord,
+      reason: stdRes.reason,
+      message: stdRes.message,
+    };
+  }
+
+  if (!status.eligibleNow) {
+    const reason = status.blockingReasons[0] || 'This record does not yet meet relief requirements.';
+    return {
+      ok: false,
+      granted: false,
+      character,
+      tier: status.tier,
+      optionId,
+      feePaid: 0,
+      reason,
+      message: reason,
+    };
+  }
+
+  const selectedOption = status.options.find((opt) => opt.id === optionId);
+  if (!selectedOption) {
+    return {
+      ok: false,
+      granted: false,
+      character,
+      tier: status.tier,
+      optionId,
+      feePaid: 0,
+      reason: 'Selected petition option is not valid for this conviction tier.',
+      message: 'Selected petition option is not valid for this conviction tier.',
+    };
+  }
+
+  const safeCash = Math.max(0, Math.floor(Number.isFinite(character.cash) ? character.cash : 0));
+  if (safeCash < selectedOption.fee) {
+    const reason = `Insufficient wallet cash ($${safeCash.toLocaleString()}) to cover the $${selectedOption.fee.toLocaleString()} petition fee.`;
+    return {
+      ok: false,
+      granted: false,
+      character,
+      tier: status.tier,
+      optionId,
+      feePaid: 0,
+      reason,
+      message: reason,
+    };
+  }
+
+  const roll = Math.max(0, Math.min(0.999999, rng()));
+  const granted = roll < selectedOption.approvalProbability;
+  const isPardon = status.tier === 'executive_pardon';
+
+  const updatedRecord: CrimeRecordEntry = granted
+    ? {
+        ...targetRecord,
+        expunged: true,
+        ...(isPardon ? { pardoned: true } : {}),
+        lastPetitionDeniedAge: null,
+      }
+    : {
+        ...targetRecord,
+        lastPetitionDeniedAge: character.age,
+      };
+
+  const nextRecords = sanitized.records.map((entry) =>
+    entry.id === targetRecord.id ? updatedRecord : entry,
+  );
+
+  const event: LifeEvent = granted
+    ? {
+        id: `${targetRecord.id}-${isPardon ? 'pardoned' : 'petition-granted'}-${character.age}`,
+        age: character.age,
+        year: character.birthYear + character.age,
+        title: isPardon ? "Governor's Pardon Granted" : 'Court Petition Granted',
+        message: isPardon
+          ? `After years of demonstrated rehabilitation, the Governor granted a full executive pardon for your ${targetRecord.title} conviction. Your record has been cleared.`
+          : `The judge granted your rehabilitation petition (${selectedOption.label}) and formally expunged your ${targetRecord.title} conviction. Your record and credit access have been restored.`,
+        category: 'milestone',
+        icon: isPardon ? '🏛️' : '⚖️',
+      }
+    : {
+        id: `${targetRecord.id}-${isPardon ? 'pardon' : 'petition'}-denied-${character.age}`,
+        age: character.age,
+        year: character.birthYear + character.age,
+        title: isPardon ? 'Pardon Application Denied' : 'Court Petition Denied',
+        message: isPardon
+          ? `The clemency board denied your Governor's Pardon petition for ${targetRecord.title}. You paid $${selectedOption.fee.toLocaleString()} in legal costs and may re-apply in 2 years.`
+          : `The judge denied your rehabilitation petition (${selectedOption.label}) for ${targetRecord.title}. You paid $${selectedOption.fee.toLocaleString()} in legal costs and may re-petition in 2 years.`,
+        category: 'misfortune',
+        icon: '📋',
+      };
+
+  const effects = granted
+    ? isPardon
+      ? { happiness: 12, karma: 5 }
+      : { happiness: 8, karma: 2 }
+    : { happiness: -4 };
+
+  const { character: finalChar } = applyEffects(
+    {
+      ...character,
+      cash: Math.round(character.cash - selectedOption.fee),
+      crime: {
+        ...sanitized,
+        records: nextRecords,
+      },
+      timeline: [...character.timeline, event],
+    },
+    effects,
+  );
+
+  return {
+    ok: true,
+    granted,
+    character: finalChar,
+    tier: status.tier,
+    optionId: selectedOption.id,
+    feePaid: selectedOption.fee,
+    approvalProbability: selectedOption.approvalProbability,
+    updatedRecord,
+    message: event.message,
+  };
+}
+
+export interface RestitutionPaymentResult {
+  ok: boolean;
+  character: CharacterProfile;
+  reason?: string;
+  paidAmount: number;
+  remainingUnpaidRestitution: number;
+  message: string;
+}
+
+/**
+ * Voluntary cash-only payment toward outstanding adult unpaidRestitution (bankBalance and
+ * corporate treasury remain untouched). Updates annual probation restitution telemetry cleanly.
+ */
+export function payUnpaidRestitution(
+  character: CharacterProfile,
+  amount?: number,
+): RestitutionPaymentResult {
+  const sanitized = getSanitizedCrimeState(character);
+  const outstandingRestitution = Math.max(0, sanitized.unpaidRestitution ?? 0);
+  if (!character.isAlive) {
+    return {
+      ok: false,
+      character,
+      reason: 'Deceased characters cannot pay restitution.',
+      paidAmount: 0,
+      remainingUnpaidRestitution: outstandingRestitution,
+      message: 'Deceased characters cannot pay restitution.',
+    };
+  }
+
+  if (outstandingRestitution <= 0) {
+    return {
+      ok: false,
+      character,
+      reason: 'You have no outstanding victim restitution.',
+      paidAmount: 0,
+      remainingUnpaidRestitution: 0,
+      message: 'No outstanding victim restitution.',
+    };
+  }
+
+  const availableCash = Math.max(0, Math.floor(character.cash));
+  if (availableCash <= 0) {
+    return {
+      ok: false,
+      character,
+      reason: 'You have no available cash to put toward victim restitution.',
+      paidAmount: 0,
+      remainingUnpaidRestitution: outstandingRestitution,
+      message: 'Insufficient cash to pay victim restitution.',
+    };
+  }
+
+  const requested =
+    amount !== undefined && Number.isFinite(amount) && amount > 0
+      ? Math.floor(amount)
+      : outstandingRestitution;
+  const paidAmount = Math.min(availableCash, outstandingRestitution, requested);
+  if (paidAmount <= 0) {
+    return {
+      ok: false,
+      character,
+      reason: 'Invalid restitution payment amount.',
+      paidAmount: 0,
+      remainingUnpaidRestitution: outstandingRestitution,
+      message: 'Invalid restitution payment amount.',
+    };
+  }
+
+  const remainingUnpaidRestitution = outstandingRestitution - paidAmount;
+  const updatedProbation: ProbationState | null = sanitized.probation
+    ? {
+        ...sanitized.probation,
+        restitutionPaidThisYear: (sanitized.probation.restitutionPaidThisYear ?? 0) + paidAmount,
+      }
+    : null;
+
+  const paymentEvent: LifeEvent = {
+    id: deterministicUUID(
+      'crime_restitution_pay',
+      character.id,
+      character.age,
+      outstandingRestitution,
+      paidAmount,
+    ),
+    age: character.age,
+    year: character.birthYear + character.age,
+    title: 'Victim Restitution Payment',
+    message: `Paid $${paidAmount.toLocaleString()} toward court-ordered victim restitution. Remaining balance: $${remainingUnpaidRestitution.toLocaleString()}.`,
+    category: 'money',
+    icon: '⚖️',
+  };
+
+  const { character: finalChar } = applyEffects(
+    {
+      ...character,
+      crime: {
+        ...sanitized,
+        unpaidRestitution: remainingUnpaidRestitution,
+        probation: updatedProbation,
+      },
+      timeline: [...character.timeline, paymentEvent],
+    },
+    { cash: -paidAmount },
+  );
+
+  return {
+    ok: true,
+    character: finalChar,
+    paidAmount,
+    remainingUnpaidRestitution,
+    message: paymentEvent.message,
+  };
+}
+
+export const MAX_PROBATION_SERVICE_ACTIONS_PER_YEAR = 2;
+export const PROBATION_SERVICE_HOURS_PER_ACTION = 8;
+
+/**
+ * Executes an annual probation supervision check-in or community-service session.
+ */
+export function performProbationAction(
+  character: CharacterProfile,
+  actionId: ProbationActionId,
+): ProbationActionResult {
+  const sanitized = getSanitizedCrimeState(character);
+  const probation = sanitized.probation;
+
+  if (!character.isAlive) {
+    return {
+      ok: false,
+      character,
+      actionId,
+      reason: 'Deceased characters cannot perform probation actions.',
+      message: 'Deceased characters cannot perform probation actions.',
+    };
+  }
+  if (isCurrentlyIncarcerated(character)) {
+    return {
+      ok: false,
+      character,
+      actionId,
+      reason: 'Community probation supervision actions are unavailable while incarcerated.',
+      message: 'Unavailable while incarcerated.',
+    };
+  }
+  if (!probation || probation.yearsRemaining <= 0) {
+    return {
+      ok: false,
+      character,
+      actionId,
+      reason: 'You are not currently under active probation supervision.',
+      message: 'No active probation supervision.',
+    };
+  }
+
+  if (actionId === 'check_in') {
+    if (probation.lastCheckInAge === character.age) {
+      return {
+        ok: false,
+        character,
+        actionId,
+        reason: 'You already completed your annual probation officer check-in for this age.',
+        message: 'Annual check-in already completed this year.',
+      };
+    }
+
+    const updatedProbation: ProbationState = {
+      ...probation,
+      lastCheckInAge: character.age,
+    };
+    const event: LifeEvent = {
+      id: deterministicUUID('probation_checkin', character.id, character.age, probation.startedAtAge),
+      age: character.age,
+      year: character.birthYear + character.age,
+      title: 'Probation Officer Check-In',
+      message: `Completed scheduled ${probation.jurisdiction} supervision check-in for ${probation.chargeTitle}.`,
+      category: 'milestone',
+      icon: '📋',
+    };
+
+    const { character: nextChar } = applyEffects(
+      {
+        ...character,
+        crime: {
+          ...sanitized,
+          probation: updatedProbation,
+        },
+        timeline: [...character.timeline, event],
+      },
+      { karma: 1 },
+    );
+
+    return {
+      ok: true,
+      character: nextChar,
+      actionId,
+      message: event.message,
+    };
+  }
+
+  // actionId === 'community_service'
+  const actionsThisYear =
+    probation.lastServiceActionAge === character.age ? (probation.serviceActionsThisYear ?? 0) : 0;
+  if (actionsThisYear >= MAX_PROBATION_SERVICE_ACTIONS_PER_YEAR) {
+    return {
+      ok: false,
+      character,
+      actionId,
+      reason: `You can complete at most ${MAX_PROBATION_SERVICE_ACTIONS_PER_YEAR} community service sessions per year.`,
+      message: 'Annual community service limit reached.',
+    };
+  }
+
+  const activeTerms = probation.activeTerms ?? [];
+  const totalHoursRemaining = activeTerms.reduce(
+    (sum, t) => sum + Math.max(0, t.communityServiceHoursRemaining),
+    0,
+  );
+  if (totalHoursRemaining <= 0) {
+    return {
+      ok: false,
+      character,
+      actionId,
+      reason: 'You have no remaining court-ordered community service hours.',
+      message: 'No community service hours remaining.',
+    };
+  }
+
+  let hoursToDeduct = Math.min(PROBATION_SERVICE_HOURS_PER_ACTION, totalHoursRemaining);
+  let hoursCompleted = 0;
+  const nextTerms: ProbationTermEntry[] = activeTerms.map((term) => {
+    if (hoursToDeduct <= 0 || term.communityServiceHoursRemaining <= 0) {
+      return term;
+    }
+    const applied = Math.min(hoursToDeduct, term.communityServiceHoursRemaining);
+    hoursToDeduct -= applied;
+    hoursCompleted += applied;
+    return {
+      ...term,
+      communityServiceHoursRemaining: term.communityServiceHoursRemaining - applied,
+    };
+  });
+
+  const updatedProbation: ProbationState = {
+    ...probation,
+    activeTerms: nextTerms,
+    lastServiceActionAge: character.age,
+    serviceActionsThisYear: actionsThisYear + 1,
+  };
+
+  const serviceEvent: LifeEvent = {
+    id: deterministicUUID(
+      'probation_service',
+      character.id,
+      character.age,
+      actionsThisYear + 1,
+      hoursCompleted,
+    ),
+    age: character.age,
+    year: character.birthYear + character.age,
+    title: 'Community Service Completed',
+    message: `Completed ${hoursCompleted} hour(s) of court-ordered community service (${Math.max(0, totalHoursRemaining - hoursCompleted)} hr remaining).`,
+    category: 'milestone',
+    icon: '🤝',
+  };
+
+  const { character: nextChar } = applyEffects(
+    {
+      ...character,
+      crime: {
+        ...sanitized,
+        probation: updatedProbation,
+      },
+      timeline: [...character.timeline, serviceEvent],
+    },
+    { karma: 2, happiness: 1 },
+  );
+
+  return {
+    ok: true,
+    character: nextChar,
+    actionId,
+    hoursCompleted,
+    message: serviceEvent.message,
   };
 }
 

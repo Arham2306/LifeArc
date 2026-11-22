@@ -15,20 +15,28 @@ import {
   expungeAdultRecord,
   mergeProbationState,
   payUnpaidFines,
+  payUnpaidRestitution,
+  petitionRecordRelief,
   resolveCourtCase,
 } from '../services/crimeService';
 import {
   createEmptyCrimeState,
+  evaluateFinancingEligibility,
+  evaluateRecordReliefStatus,
   getActiveAdultConvictions,
   getArrestCount,
   getExpungementEligibleRecords,
   getJuvenileAdjudications,
   getJuvenileWarningCount,
+  getSanitizedCrimeState,
   hasActiveAdultConviction,
   hasActiveFelony,
+  hasFinancialFraudConviction,
   hasSensitiveFieldConviction,
+  hasViolentFelonyConviction,
   isCurrentlyIncarcerated,
 } from '../services/crimeSelectors';
+import { classifyCrimeRecord } from '../components/crimeDisplay';
 import type {
   CrimeOutcomeStatus,
   CrimeRecordEntry,
@@ -345,7 +353,7 @@ function testCounselCashGuardProceedsAndEmploymentSeparately() {
   assert(!rejectedFee.ok, 'Cannot retain unaffordable counsel using bankBalance');
   assert(rejectedFee.character === charWithCase, 'Rejected counsel keeps character untouched');
 
-  // Dismissal with public_defender ($0 fee) releases held $2,200 and keeps job
+  // Dismissal with public_defender ($0 fee) clears charges, keeps job, and NEVER pays out seized stolen proceeds
   const dismissChar = findCharForOutcome(
     createLegalTestCharacter({ cash: 1000, bankBalance: 8000, netWorth: 9000 }),
     heldProceedsCase,
@@ -354,13 +362,13 @@ function testCounselCashGuardProceedsAndEmploymentSeparately() {
   );
   const dismissRes = resolveCourtCase(dismissChar, 'public_defender');
   assert(dismissRes.ok && dismissRes.outcome === 'dismissed', 'Resolved dismissed');
-  assert(dismissRes.releasedPayout === 2200, 'Held proceeds released on dismissal');
-  assert(dismissRes.character.cash === 3200, 'Cash credited with held proceeds');
+  assert(dismissRes.releasedPayout === 0, 'Seized criminal proceeds are never paid out on dismissal');
+  assert(dismissRes.character.cash === 1000, 'Dismissal leaves personal cash untouched (no stolen payout credited)');
   assert(dismissRes.character.career.currentJob !== null, 'Dismissal preserves civilian job');
   assert(!hasActiveAdultConviction(dismissRes.character), 'Dismissal is not a conviction');
   assert(getArrestCount(dismissRes.character) === 1, 'Dismissed arrest counts as 1 formal arrest');
 
-  // Acquittal releases held $2,200, preserves job and clean record
+  // Acquittal clears charges, preserves job/clean record, and NEVER pays out seized stolen proceeds
   const acquitChar = findCharForOutcome(
     createLegalTestCharacter({ cash: 1000, bankBalance: 8000, netWorth: 9000 }),
     heldProceedsCase,
@@ -369,7 +377,7 @@ function testCounselCashGuardProceedsAndEmploymentSeparately() {
   );
   const acquitRes = resolveCourtCase(acquitChar, 'public_defender');
   assert(acquitRes.ok && acquitRes.outcome === 'acquitted', 'Resolved acquitted');
-  assert(acquitRes.releasedPayout === 2200 && acquitRes.character.cash === 3200, 'Acquittal releases proceeds');
+  assert(acquitRes.releasedPayout === 0 && acquitRes.character.cash === 1000, 'Acquittal never pays out seized criminal proceeds');
   assert(acquitRes.character.career.currentJob !== null, 'Acquittal preserves civilian job');
   assert(!hasActiveAdultConviction(acquitRes.character), 'Acquittal is not a conviction');
 
@@ -716,6 +724,7 @@ function testPrisonLiquidationDivorceSocialPriorityAndIdempotency() {
     actionCooldowns: {},
     outstandingLoan: 0,
     annualLoanPayment: 0,
+    managementCapability: 'owner_operated',
     yearsInOperation: 2,
     lifetimeRevenue: 120000,
     lifetimeProfit: 20000,
@@ -1065,6 +1074,7 @@ function testProbationJobLossStatsDropAndUniversityExpulsion() {
     attemptedPayout: 3200,
     baseFine: 4000,
     baseSentenceYears: 3,
+    exposure: 'publicly_reported',
   });
 
   const uniStudentWorker = createLegalTestCharacter({
@@ -1138,16 +1148,17 @@ function testProbationJobLossStatsDropAndUniversityExpulsion() {
     'Adult probation immediately terminates active employment',
   );
 
-  // 2. Meaningful stat drops across happiness, karma, health, looks, and social bonds
+  // 2. Approved Phase 1 mood/karma/social drops (zero arbitrary looks/non-violent health deductions)
   assert(
-    probRes.character.stats.happiness === 88 - 24 &&
-      probRes.character.stats.karma === 85 - 22 &&
-      probRes.character.stats.health === 92 - 8 &&
-      probRes.character.stats.looks === 75 - 4 &&
-      probRes.appliedStatDeltas?.happiness === -24 &&
-      probRes.appliedStatDeltas?.karma === -22 &&
-      probRes.appliedStatDeltas?.health === -8,
-    'Adult felony probation inflicts substantial drops across happiness, karma, health, and looks',
+    probRes.character.stats.happiness === 88 - 18 &&
+      probRes.character.stats.karma === 85 - 20 &&
+      probRes.character.stats.health === 92 &&
+      probRes.character.stats.looks === 75 &&
+      probRes.appliedStatDeltas?.happiness === -18 &&
+      probRes.appliedStatDeltas?.karma === -20 &&
+      probRes.appliedStatDeltas?.health === undefined &&
+      probRes.appliedStatDeltas?.looks === undefined,
+    'Adult felony probation inflicts Phase 1 mood/karma drops with zero unfounded looks or non-violent health deductions',
   );
   assert(
     probRes.character.relationships.find((r) => r.id === 'uni-friend-1')?.relationship === 78 - 14 &&
@@ -1202,6 +1213,305 @@ function testProbationJobLossStatsDropAndUniversityExpulsion() {
   );
 }
 
+function testTierCalibratedCourtOutcomeDistributions() {
+  const robberyCase = makePendingCase({
+    id: 'dist-robbery',
+    crimeId: 'robbery',
+    title: 'Armed Robbery',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    executionSucceeded: true,
+    attemptedPayout: 5000,
+    baseFine: 8000,
+    baseSentenceYears: 6,
+  });
+  const heistCase = makePendingCase({
+    id: 'dist-heist',
+    crimeId: 'bank_heist',
+    title: 'Bank Heist',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    executionSucceeded: true,
+    attemptedPayout: 40000,
+    baseFine: 30000,
+    baseSentenceYears: 12,
+  });
+
+  let robberyFined = 0;
+  let robberyImprisoned = 0;
+  let robberyCleared = 0;
+  let heistFined = 0;
+  let heistImprisoned = 0;
+  let heistCleared = 0;
+  const sampleSize = 200;
+
+  for (let i = 0; i < sampleSize; i++) {
+    const candidate = createLegalTestCharacter({
+      id: `tier-sample-${i}`,
+      age: 22,
+      stats: { health: 80, happiness: 70, smarts: 50, looks: 60, karma: 50 },
+    });
+    const robOut = determineCourtOutcome(candidate, robberyCase, 'public_defender');
+    if (robOut === 'fined') robberyFined++;
+    if (robOut === 'imprisoned') robberyImprisoned++;
+    if (robOut === 'dismissed' || robOut === 'acquitted') robberyCleared++;
+
+    const heistOut = determineCourtOutcome(candidate, heistCase, 'public_defender');
+    if (heistOut === 'fined') heistFined++;
+    if (heistOut === 'imprisoned') heistImprisoned++;
+    if (heistOut === 'dismissed' || heistOut === 'acquitted') heistCleared++;
+  }
+
+  assert(
+    robberyFined === 0 && heistFined === 0,
+    'Caught high-stakes violent felonies (Armed Robbery, Bank Heist) never resolve to fine-only sentences',
+  );
+  assert(
+    robberyImprisoned >= Math.floor(sampleSize * 0.72) &&
+      heistImprisoned >= Math.floor(sampleSize * 0.8),
+    `High-stakes violent felonies with public defender heavily favor prison (robbery=${robberyImprisoned}/${sampleSize}, heist=${heistImprisoned}/${sampleSize})`,
+  );
+  assert(
+    robberyCleared <= Math.ceil(sampleSize * 0.1) && heistCleared <= Math.ceil(sampleSize * 0.08),
+    `High-stakes red-handed violent felonies rarely walk free with public defender (robbery=${robberyCleared}/${sampleSize}, heist=${heistCleared}/${sampleSize})`,
+  );
+
+  // Even if armed robbery is dismissed, stolen $5,000 is NEVER returned as profit
+  const dismissedRobbery = applyCourtOutcome(
+    createLegalTestCharacter({ cash: 500 }),
+    robberyCase,
+    'public_defender',
+    'dismissed',
+  );
+  assert(
+    dismissedRobbery.ok &&
+      dismissedRobbery.releasedPayout === 0 &&
+      dismissedRobbery.character.cash === 500,
+    'Dismissed Armed Robbery returns $0 in seized loot to the defendant',
+  );
+}
+
+function testThreeTierRecordReliefSystem() {
+  // 1. Tier 2: Imprisoned Financial Scam (3-year sentence at age 20 -> released at 23 -> 8 clean years at age 31)
+  const scamPrisonRecord: CrimeRecordEntry = {
+    id: 'scam-prison-20',
+    crimeId: 'fraud_scam',
+    title: 'Financial Scam',
+    tier: 'mid',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    age: 20,
+    year: 2020,
+    executionSucceeded: true,
+    detected: true,
+    injured: false,
+    outcome: 'imprisoned',
+    attemptedPayout: 3000,
+    payout: 0,
+    fineImposed: 1000,
+    finePaid: 1000,
+    attorneyFeePaid: 0,
+    sentenceYears: 3,
+    sealed: false,
+    expunged: false,
+  };
+
+  const employedJob = {
+    jobId: 'ft_analyst',
+    title: 'Operations Analyst',
+    companyName: 'Civic Logistics',
+    field: 'business_finance' as const,
+    type: 'full_time' as const,
+    salary: 75000,
+    yearsInJob: 3,
+    performance: 80,
+    hiredAge: 28,
+    icon: '📊',
+  };
+
+  // At age 30 (7 clean years post-release): mortgage blocked + petition countdown shows 1 year left
+  const scamAt30 = createLegalTestCharacter({
+    age: 30,
+    cash: 25000,
+    bankBalance: 15000,
+    karma: 75,
+    career: { ...createInitialCareerState(), currentJob: employedJob },
+    crime: {
+      ...createEmptyCrimeState(),
+      unpaidRestitution: 1200,
+      records: [scamPrisonRecord],
+    },
+  });
+
+  const mortgageBlocked = evaluateFinancingEligibility(scamAt30, 'mortgage', 120000);
+  assert(
+    !mortgageBlocked.eligible && mortgageBlocked.criminalRecordRisk === 'fraud_blocked',
+    'Active imprisoned fraud conviction blocks residential mortgage',
+  );
+
+  const statusAt30 = evaluateRecordReliefStatus(scamAt30, scamPrisonRecord);
+  assert(
+    statusAt30 !== null &&
+      statusAt30.tier === 'court_petition' &&
+      !statusAt30.eligibleNow &&
+      statusAt30.yearsRemaining === 1 &&
+      statusAt30.unlockAge === 31 &&
+      statusAt30.unpaidLegalDebt === 1200,
+    'Tier 2 status accurately reports 1 remaining clean year and unpaid restitution debt',
+  );
+
+  // At age 31 (8 clean years): still blocked until unpaidRestitution is paid off
+  const scamAt31WithDebt = { ...scamAt30, age: 31 };
+  const statusAt31Debt = evaluateRecordReliefStatus(scamAt31WithDebt, scamPrisonRecord);
+  assert(
+    statusAt31Debt !== null &&
+      !statusAt31Debt.eligibleNow &&
+      statusAt31Debt.yearsRemaining === 0 &&
+      statusAt31Debt.unpaidLegalDebt === 1200,
+    'Unpaid restitution blocks Tier 2 court petition even after 8 clean years',
+  );
+  assert(
+    !petitionRecordRelief(scamAt31WithDebt, scamPrisonRecord.id, 'attorney', () => 0.01).ok,
+    'petitionRecordRelief rejects Tier 2 petition while legal debt remains unpaid',
+  );
+
+  // Pay off restitution -> Tier 2 petition becomes eligible with attorney > self_filed odds
+  const paidRestitution = payUnpaidRestitution(scamAt31WithDebt, 1200);
+  assert(
+    paidRestitution.ok && paidRestitution.remainingUnpaidRestitution === 0,
+    'Victim restitution paid off cleanly via payUnpaidRestitution',
+  );
+
+  const statusReady = evaluateRecordReliefStatus(paidRestitution.character, scamPrisonRecord);
+  assert(
+    statusReady !== null &&
+      statusReady.eligibleNow &&
+      statusReady.options.length === 2 &&
+      statusReady.options[1].id === 'attorney' &&
+      statusReady.options[1].approvalProbability > statusReady.options[0].approvalProbability,
+    'Attorney representation yields higher Tier 2 approval odds than self-filing',
+  );
+
+  // Denied petition charges fee from cash only, leaves bank untouched, sets 2-year cooldown
+  const deniedTier2 = petitionRecordRelief(
+    paidRestitution.character,
+    scamPrisonRecord.id,
+    'self_filed',
+    () => 0.99,
+  );
+  assert(
+    deniedTier2.ok &&
+      !deniedTier2.granted &&
+      deniedTier2.feePaid === 2000 &&
+      deniedTier2.character.cash === paidRestitution.character.cash - 2000 &&
+      deniedTier2.character.bankBalance === 15000 &&
+      hasFinancialFraudConviction(deniedTier2.character),
+    'Denied Tier 2 petition deducts fee from cash only and leaves conviction active',
+  );
+  const cooldownStatus = evaluateRecordReliefStatus(
+    { ...deniedTier2.character, age: 32 },
+    deniedTier2.updatedRecord!,
+  );
+  assert(
+    cooldownStatus !== null && !cooldownStatus.eligibleNow && cooldownStatus.cooldownYearsRemaining === 1,
+    'Denied Tier 2 petition enforces 2-year retry cooldown',
+  );
+
+  // After 2-year cooldown (age 33), granted attorney petition clears record and restores mortgage eligibility
+  const readyRetryChar = { ...deniedTier2.character, age: 33 };
+  const grantedTier2 = petitionRecordRelief(
+    readyRetryChar,
+    scamPrisonRecord.id,
+    'attorney',
+    () => 0.05,
+  );
+  assert(
+    grantedTier2.ok &&
+      grantedTier2.granted &&
+      grantedTier2.feePaid === 8000 &&
+      grantedTier2.updatedRecord?.expunged === true &&
+      grantedTier2.updatedRecord?.sealed === false &&
+      !hasFinancialFraudConviction(grantedTier2.character) &&
+      !hasActiveFelony(grantedTier2.character),
+    'Granted Tier 2 court petition expunges imprisoned fraud conviction',
+  );
+  const mortgageRestored = evaluateFinancingEligibility(grantedTier2.character, 'mortgage', 120000);
+  assert(
+    mortgageRestored.eligible && mortgageRestored.criminalRecordRisk === 'none',
+    'Mortgage eligibility is fully restored after Tier 2 court petition expungement',
+  );
+
+  // 2. Tier 3: Imprisoned Violent Felony (Armed Robbery, 4y at age 20 -> released at 24 -> 12 clean years at age 36)
+  const robberyPrisonRecord: CrimeRecordEntry = {
+    id: 'robbery-prison-20',
+    crimeId: 'robbery',
+    title: 'Armed Robbery',
+    tier: 'high_stakes',
+    offenseClass: 'felony',
+    jurisdiction: 'adult',
+    age: 20,
+    year: 2020,
+    executionSucceeded: true,
+    detected: true,
+    injured: false,
+    outcome: 'imprisoned',
+    attemptedPayout: 5000,
+    payout: 0,
+    fineImposed: 3000,
+    finePaid: 3000,
+    attorneyFeePaid: 0,
+    sentenceYears: 4,
+    sealed: false,
+    expunged: false,
+  };
+
+  const violentLowKarma = createLegalTestCharacter({
+    age: 36,
+    cash: 30000,
+    karma: 45,
+    career: { ...createInitialCareerState(), currentJob: employedJob },
+    crime: { ...createEmptyCrimeState(), records: [robberyPrisonRecord] },
+  });
+  const lowKarmaStatus = evaluateRecordReliefStatus(violentLowKarma, robberyPrisonRecord);
+  assert(
+    lowKarmaStatus !== null &&
+      lowKarmaStatus.tier === 'executive_pardon' &&
+      !lowKarmaStatus.eligibleNow &&
+      lowKarmaStatus.karmaShortfall === 15,
+    'Tier 3 Governor Pardon requires Karma >= 60',
+  );
+
+  const violentHighKarma = { ...violentLowKarma, karma: 80 };
+  const grantedPardon = petitionRecordRelief(
+    violentHighKarma,
+    robberyPrisonRecord.id,
+    'executive_pardon',
+    () => 0.05,
+  );
+  assert(
+    grantedPardon.ok &&
+      grantedPardon.granted &&
+      grantedPardon.feePaid === 15000 &&
+      grantedPardon.updatedRecord?.expunged === true &&
+      grantedPardon.updatedRecord?.pardoned === true &&
+      !hasViolentFelonyConviction(grantedPardon.character) &&
+      !hasActiveFelony(grantedPardon.character),
+    'Granted Tier 3 Governor Pardon sets expunged + pardoned and clears violent felony status',
+  );
+
+  // Verify sanitization preserves pardoned + lastPetitionDeniedAge and display classifies as Pardoned (Adult)
+  const sanitizedPardoned = getSanitizedCrimeState(grantedPardon.character);
+  const savedPardonEntry = sanitizedPardoned.records.find((r) => r.id === robberyPrisonRecord.id);
+  assert(savedPardonEntry?.pardoned === true, 'getSanitizedCrimeState preserves pardoned flag');
+  const classifiedPardon = classifyCrimeRecord(savedPardonEntry!, new Set(), grantedPardon.character);
+  assert(
+    classifiedPardon.badgeLabel === 'Pardoned (Adult)' && classifiedPardon.isClearedAdult,
+    'classifyCrimeRecord labels pardoned adult conviction as Pardoned (Adult)',
+  );
+}
+
 testJuvenileCourtOutcomesAndBoundaries();
 testCounselCashGuardProceedsAndEmploymentSeparately();
 testProbationMergeAndJuvenileJurisdictionPreservation();
@@ -1209,4 +1519,6 @@ testAdultExpungementWaitingPeriodsAndEligibility();
 testMalformedAndMissingCourtStateResilience();
 testPrisonLiquidationDivorceSocialPriorityAndIdempotency();
 testProbationJobLossStatsDropAndUniversityExpulsion();
+testTierCalibratedCourtOutcomeDistributions();
+testThreeTierRecordReliefSystem();
 console.log('courtLegal.test.ts passed all assertions');

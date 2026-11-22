@@ -116,8 +116,12 @@ export interface CrimeRecordEntry {
   sentenceYears: number;
   /** True when a juvenile adjudication has been automatically sealed at/after age 18. */
   sealed: boolean;
-  /** True when an eligible adult conviction has been formally expunged. */
+  /** True when an eligible adult conviction has been formally expunged or pardoned. */
   expunged: boolean;
+  /** True when an adult violent felony conviction was cleared via Governor's Executive Pardon. */
+  pardoned?: boolean;
+  /** Age at which the last court rehabilitation or pardon petition for this record was denied. */
+  lastPetitionDeniedAge?: number | null;
 }
 
 export interface PendingCourtCase {
@@ -204,6 +208,8 @@ export interface PlayerCrimeState {
   attemptCountLifetime: number;
   lastAttemptAge: number | null;
   lastProgressedAge: number | null;
+  /** Age at which a mid-year parole or appeal release occurred, preserving release-year probation freeze. */
+  lastMidYearReleaseAge?: number | null;
   pendingCase: PendingCourtCase | null;
   prison: PrisonState | null;
   probation: ProbationState | null;
@@ -390,6 +396,52 @@ export interface ExpungementResult {
   character: import('../../types/game').CharacterProfile;
   reason?: string;
   expungedRecord?: CrimeRecordEntry;
+  message: string;
+}
+
+export type RecordReliefTier = 'standard' | 'court_petition' | 'executive_pardon';
+
+export type RecordReliefOptionId =
+  | 'standard_free'
+  | 'self_filed'
+  | 'attorney'
+  | 'executive_pardon';
+
+export interface RecordReliefOption {
+  id: RecordReliefOptionId;
+  label: string;
+  description: string;
+  fee: number;
+  canAfford: boolean;
+  approvalProbability: number;
+}
+
+export interface RecordReliefStatus {
+  recordId: string;
+  tier: RecordReliefTier;
+  eligibleNow: boolean;
+  cleanYearsCompleted: number;
+  requiredCleanYears: number;
+  yearsRemaining: number;
+  unlockAge: number;
+  cooldownYearsRemaining: number;
+  unpaidLegalDebt: number;
+  karmaShortfall: number;
+  blockingReasons: string[];
+  summaryText: string;
+  options: RecordReliefOption[];
+}
+
+export interface RecordReliefPetitionResult {
+  ok: boolean;
+  granted: boolean;
+  character: import('../../types/game').CharacterProfile;
+  tier?: RecordReliefTier;
+  optionId?: RecordReliefOptionId;
+  feePaid: number;
+  approvalProbability?: number;
+  updatedRecord?: CrimeRecordEntry;
+  reason?: string;
   message: string;
 }
 
