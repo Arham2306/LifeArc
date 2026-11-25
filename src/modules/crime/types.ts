@@ -166,6 +166,8 @@ export interface PrisonState {
   behaviorScore: number;
   paroleEligibleAtServed: number;
   actionsTakenThisYear: number;
+  /** Individual prison actions already executed during `lastActionAge` (max 1 per action type per year). */
+  actionIdsThisYear?: PrisonActionId[];
   lastActionAge: number | null;
   lastProgressedAge: number | null;
   /** Originating CrimeRecordEntry.id for per-record sentence completion tracking. */
@@ -450,6 +452,7 @@ export type PrisonActionId =
   | 'study'
   | 'workout'
   | 'good_behavior'
+  | 'infirmary'
   | 'appeal'
   | 'parole';
 

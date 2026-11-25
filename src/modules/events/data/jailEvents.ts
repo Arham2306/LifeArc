@@ -1152,4 +1152,94 @@ export const JAIL_EVENTS: LifeEventTemplate[] = [
       },
     ],
   },
+  {
+    ...JAIL_BASE,
+    id: 'jail_infirmary_checkup',
+    title: 'Annual Medical Checkup',
+    icon: '🩺',
+    category: 'health',
+    repeatable: true,
+    description:
+      'A prison nurse rounds through your block offering routine physical checkups, vitamins, and basic cold medicine.',
+    choices: [
+      {
+        id: 'take_checkup',
+        label: 'Get examined and take the vitamins',
+        icon: '💊',
+        outcomes: [
+          {
+            message: 'The checkup caught minor fatigue early, and the vitamins helped you bounce back.',
+            effects: { health: 7, happiness: 2 },
+          },
+        ],
+      },
+      {
+        id: 'rest_infirmary',
+        label: 'Ask for a night of rest in the infirmary ward',
+        icon: '🛌',
+        outcomes: [
+          {
+            message: 'A quiet night away from the cellblock noise did wonders for your body.',
+            effects: { health: 9, happiness: 3 },
+          },
+        ],
+      },
+      {
+        id: 'give_spot',
+        label: 'Let an older sick inmate go ahead of you',
+        icon: '🤝',
+        outcomes: [
+          {
+            message: 'He thanked you sincerely. The block noticed the decency.',
+            effects: { karma: 4, happiness: 2 },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    ...JAIL_BASE,
+    id: 'jail_restful_weekend',
+    title: 'Quiet Weekend Recovery',
+    icon: '☀️',
+    category: 'health',
+    repeatable: true,
+    description:
+      'For once, the cellblock is calm all weekend. You have time to stretch, hydrate, and catch up on real sleep.',
+    choices: [
+      {
+        id: 'sleep_recover',
+        label: 'Stretch, hydrate, and sleep early',
+        icon: '🧘',
+        outcomes: [
+          {
+            message: 'Two solid nights of uninterrupted sleep left you feeling noticeably healthier.',
+            effects: { health: 7, happiness: 3 },
+          },
+        ],
+      },
+      {
+        id: 'calisthenics',
+        label: 'Do a light bodyweight routine',
+        icon: '🤸',
+        outcomes: [
+          {
+            message: 'Your energy came back and your posture felt stronger by Monday morning.',
+            effects: { health: 6, happiness: 2 },
+          },
+        ],
+      },
+      {
+        id: 'read_quietly',
+        label: 'Spend the weekend reading',
+        icon: '📖',
+        outcomes: [
+          {
+            message: 'A peaceful weekend with a good book refreshed your mind.',
+            effects: { smarts: 2, health: 2, happiness: 3 },
+          },
+        ],
+      },
+    ],
+  },
 ]

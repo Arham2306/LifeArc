@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CartoonButton } from './components/ui/CartoonButton'
+import { ActionOutcomeModal, type CustomStatDelta } from './components/ui/ActionOutcomeModal'
 import { Badge } from './components/ui/Badge'
 import { Modal } from './components/ui/Modal'
 import {
@@ -33,10 +34,16 @@ import { LifestyleScreen } from './modules/lifestyle/components/LifestyleScreen'
 import { PetsScreen } from './modules/pets/components/PetsScreen'
 import { RelationshipsScreen } from './modules/relationships/components/RelationshipsScreen'
 import { RomanceScreen } from './modules/romance/components/RomanceScreen'
+import { hasActiveRomanticPartner } from './modules/romance/services/romanceService'
 import { HealthcareScreen } from './modules/healthcare/components/HealthcareScreen'
 import { CrimeScreen } from './modules/crime/components/CrimeScreen'
 import { CourtDefenseModal } from './modules/crime/components/CourtDefenseModal'
-import { CRIME_MENU_MIN_AGE } from './modules/crime/components/crimeDisplay'
+import {
+  buildPrisonReleaseNotice,
+  CRIME_MENU_MIN_AGE,
+  formatCrimeMoney,
+  type PrisonReleaseNotice,
+} from './modules/crime/components/crimeDisplay'
 import {
   hasPendingCourtCase,
   isCurrentlyIncarcerated,
@@ -67,6 +74,7 @@ export default function App() {
   const [isProfessionalModalOpen, setIsProfessionalModalOpen] = useState(false)
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
+  const [pendingPrisonRelease, setPendingPrisonRelease] = useState<PrisonReleaseNotice | null>(null)
   const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare' | 'crime' | 'identity'>('hub')
   const [openedIdentityFromDeath, setOpenedIdentityFromDeath] = useState(false)
   const [isHoldingCourtForArrest, setIsHoldingCourtForArrest] = useState(false)
@@ -83,6 +91,7 @@ export default function App() {
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
     setPendingNewbornBirth(null)
+    setPendingPrisonRelease(null)
     setIsUniversityModalOpen(false)
     setIsProfessionalModalOpen(false)
     setActiveFiscalReport(null)
@@ -99,6 +108,7 @@ export default function App() {
   const activePostAgeUpStep = activeCharacter
     ? resolvePostAgeUpModalStep({
         isDeathOpen: isDeathModalOpen,
+        hasPrisonReleaseNotice: Boolean(pendingPrisonRelease),
         hasBabyNotice: Boolean(pendingNewbornBirth),
         hasSchoolNotice: Boolean(schoolMilestone),
         isAdmissionsOpen: isAdmissionsModalOpen,
@@ -109,6 +119,7 @@ export default function App() {
       })
     : null
 
+  const showPrisonReleaseModal = activePostAgeUpStep === 'prison_release'
   const showBabyModal = activePostAgeUpStep === 'baby'
   const showSchoolModal = activePostAgeUpStep === 'school'
   const showHousingModal = activePostAgeUpStep === 'housing'
@@ -126,6 +137,7 @@ export default function App() {
       pendingHousingNotice ||
       activeFiscalReport ||
       pendingNewbornBirth ||
+      pendingPrisonRelease ||
       hasPendingCourtCase(activeCharacter)
     ) {
       return
@@ -137,6 +149,7 @@ export default function App() {
     setSelectedStage(getLifeStageForAge(agedCharacter.age))
 
     if (!agedCharacter.isAlive) {
+      setPendingPrisonRelease(null)
       setPendingNewbornBirth(null)
       setSchoolMilestone(null)
       setActiveFiscalReport(null)
@@ -150,6 +163,7 @@ export default function App() {
 
     // Queue all triggered post-Age-Up notifications sequentially so closing one
     // modal never drops downstream milestones, housing notices, fiscal reports, or events.
+    setPendingPrisonRelease(buildPrisonReleaseNotice(activeCharacter, agedCharacter))
     setPendingNewbornBirth(agedCharacter.newbornAnnouncement ?? null)
     setSchoolMilestone(getSchoolMilestoneNotice(agedCharacter))
     setActiveFiscalReport(
@@ -216,6 +230,7 @@ export default function App() {
     setPendingEvent(null)
     setEventResult(null)
     if (diedDuringEvent) {
+      setPendingPrisonRelease(null)
       setPendingNewbornBirth(null)
       setSchoolMilestone(null)
       setActiveFiscalReport(null)
@@ -231,6 +246,7 @@ export default function App() {
     setEventResult(null)
     setSchoolMilestone(null)
     setPendingNewbornBirth(null)
+    setPendingPrisonRelease(null)
     setIsUniversityModalOpen(false)
     setIsProfessionalModalOpen(false)
     setActiveFiscalReport(null)
@@ -439,7 +455,9 @@ export default function App() {
                     onUpdateCharacter={setActiveCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
-                ) : menuView === 'romance' && activeCharacter.age >= 16 ? (
+                ) : menuView === 'romance' &&
+                  activeCharacter.age >= 16 &&
+                  (!isCurrentlyIncarcerated(activeCharacter) || hasActiveRomanticPartner(activeCharacter)) ? (
                   <RomanceScreen
                     character={activeCharacter}
                     onUpdateCharacter={setActiveCharacter}
@@ -483,7 +501,10 @@ export default function App() {
                     character={activeCharacter}
                     onOpenRelationships={() => setMenuView('relationships')}
                     onOpenRomance={() => {
-                      if (activeCharacter.age >= 16) {
+                      if (
+                        activeCharacter.age >= 16 &&
+                        (!isCurrentlyIncarcerated(activeCharacter) || hasActiveRomanticPartner(activeCharacter))
+                      ) {
                         setMenuView('romance');
                       }
                     }}
@@ -542,6 +563,84 @@ export default function App() {
 
         <div className="hidden lg:block" aria-hidden="true" />
       </div>
+
+      {/* Prison Sentence Completion Release Popup */}
+      {showPrisonReleaseModal && activeCharacter && pendingPrisonRelease && (() => {
+        const releaseDeltas: CustomStatDelta[] = [
+          {
+            label: 'Sentence Served',
+            delta: `${pendingPrisonRelease.yearsTotal} yr(s)`,
+            color: 'sky',
+          },
+          {
+            label: 'Status',
+            delta: `Free • ${pendingPrisonRelease.occupation}`,
+            color: 'emerald',
+          },
+        ]
+        if (pendingPrisonRelease.hasActiveProbation && pendingPrisonRelease.probationYearsRemaining > 0) {
+          releaseDeltas.push({
+            label: 'Probation',
+            delta: `${pendingPrisonRelease.probationYearsRemaining} yr(s)`,
+            color: 'amber',
+          })
+        }
+        if (pendingPrisonRelease.unpaidLegalDebt > 0) {
+          releaseDeltas.push({
+            label: 'Legal Debt',
+            delta: formatCrimeMoney(pendingPrisonRelease.unpaidLegalDebt),
+            color: 'rose',
+          })
+        }
+        if (pendingPrisonRelease.businessResumedName) {
+          releaseDeltas.push({
+            label: 'Business Resumed',
+            delta: pendingPrisonRelease.businessResumedName,
+            color: 'emerald',
+          })
+        }
+
+        const followUpParts: string[] = []
+        if (pendingPrisonRelease.hasActiveProbation && pendingPrisonRelease.probationYearsRemaining > 0) {
+          followUpParts.push(
+            `complete ${pendingPrisonRelease.probationYearsRemaining} year(s) of active probation`
+          )
+        }
+        if (pendingPrisonRelease.unpaidLegalDebt > 0) {
+          followUpParts.push(
+            `pay off ${formatCrimeMoney(pendingPrisonRelease.unpaidLegalDebt)} in remaining fines/restitution`
+          )
+        }
+
+        return (
+          <ActionOutcomeModal
+            isOpen={true}
+            onClose={() => setPendingPrisonRelease(null)}
+            title={pendingPrisonRelease.title}
+            subtitle={pendingPrisonRelease.subtitle}
+            icon="🔓"
+            message={pendingPrisonRelease.message}
+            statEffects={{ happiness: pendingPrisonRelease.happinessDelta }}
+            customDeltas={releaseDeltas}
+            alertCallout={
+              followUpParts.length > 0
+                ? {
+                    title: 'Post-Release Obligations',
+                    message: `Welcome back to society. Stay clean, ${followUpParts.join(' and ')}, and work toward clearing your criminal record in Crime & High Stakes.`,
+                    variant: 'amber',
+                  }
+                : {
+                    title: 'Fresh Start Unlocked',
+                    message:
+                      'Your sentence is finished. Free-world careers, housing, and dating are open again, and you can track future record relief eligibility in Crime & High Stakes.',
+                    variant: 'emerald',
+                  }
+            }
+            continueLabel="Step Into Freedom"
+            continueVariant="emerald"
+          />
+        )
+      })()}
 
       {/* School Enrollment & Graduation Milestone Modal */}
       {activeCharacter && (

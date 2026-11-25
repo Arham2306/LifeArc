@@ -1158,7 +1158,7 @@ export const CrimeScreen: React.FC<CrimeScreenProps> = ({
               </div>
               <div className="text-[11px] font-bold text-slate-600">
                 Clean Years: {reliefModalTarget.status.cleanYearsCompleted}y • Karma:{' '}
-                {Math.round(character.karma)}/100 •{' '}
+                {Math.round(character.stats.karma)}/100 •{' '}
                 {character.career?.currentJob || character.business
                   ? 'Steady Income Bonus Active'
                   : 'No Active Job/Business'}

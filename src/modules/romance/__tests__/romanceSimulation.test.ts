@@ -16,6 +16,7 @@ import { ageUpCharacter } from '../../aging/services/agingService';
 import { generateParents } from '../../character/services/familyService';
 import { createInitialEducation } from '../../education/services/educationService';
 import { createInitialCareerState } from '../../career/services/careerService';
+import { createEmptyCrimeState } from '../../crime/services/crimeSelectors';
 import { FLIRT_OPTIONS, DATE_VENUES, ROMANTIC_TALK_TOPICS, ROMANTIC_GIFTS, ENGAGEMENT_RINGS, PROPOSAL_VENUES, WEDDING_VENUES } from '../data/romanticInteractions';
 import type { CharacterProfile, PersonProfile, ChildProfile } from '../../../types/game';
 
@@ -969,5 +970,160 @@ const proposalResult = romanceService.executeProposal(
 assert(proposalResult.result.success === true, 'Proposal succeeded after 2 years of dating from 0% romance baseline!');
 assert(proposalResult.updatedTarget.romanticStage === 'engaged', 'Elena is now Fiancée at 28!');
 console.log(`✅ Realistic 2-Year Courtship Simulation: Started at 0% romance at age 26, dated for 2 years with 2x actions/yr, successfully engaged at age 28!`);
+
+// Test 12: Incarceration Restrictions (Single Prisoner Locked Out; Partnered Prisoner Calls & Breakup Only)
+{
+  const prisonState = {
+    facilityName: 'Ironwood Penitentiary',
+    securityLevel: 'maximum' as const,
+    chargeTitle: 'Armed Robbery',
+    yearsTotal: 5,
+    yearsServed: 0,
+    yearsRemaining: 5,
+    behaviorScore: 55,
+    paroleEligibleAtServed: 2,
+    actionsTakenThisYear: 0,
+    lastActionAge: null,
+    lastProgressedAge: null,
+  };
+
+  const singlePrisoner = createMockCharacter({
+    age: 25,
+    cash: 25000,
+    occupation: 'Incarcerated',
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: prisonState,
+    },
+  });
+
+  // 1. Dating app blocked
+  const prisonerCandidates = romanceService.generateDatingCandidates(singlePrisoner);
+  assert(prisonerCandidates.length === 0, 'Incarcerated character receives 0 dating candidates');
+
+  // 2. Single prisoner UI renders prison lock screen instead of ArcDate
+  const singlePrisonerHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: singlePrisoner,
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(
+    singlePrisonerHtml.includes('Romance Unavailable in Prison') &&
+      !singlePrisonerHtml.includes('ArcDate Dating App'),
+    'Single prisoner RomanceScreen renders prison lock screen and hides ArcDate'
+  );
+
+  // 3. Service guards block flirt, date, gift, askOut, proposal, wedding, intimacy, tryForBaby, IVF, adoption
+  const eligibleTarget = createMockFriend({
+    id: 'prison-target-1',
+    relationshipType: 'dating',
+    romanticStage: 'dating',
+    relationship: 90,
+    romanceMeter: 90,
+    partnerStats: {
+      craziness: 20,
+      generosity: 60,
+      looks: 80,
+      smarts: 80,
+      fertility: 80,
+      yearsTogether: 3,
+    },
+  });
+  const spouseTarget = {
+    ...eligibleTarget,
+    role: 'Wife',
+    relationshipType: 'spouse' as const,
+    romanticStage: 'married' as const,
+  };
+
+  const flirtBlocked = romanceService.executeFlirt(singlePrisoner, eligibleTarget, FLIRT_OPTIONS[0]);
+  const dateBlocked = romanceService.executeDate(singlePrisoner, eligibleTarget, DATE_VENUES[0]);
+  const giftBlocked = romanceService.executeRomanticGift(singlePrisoner, eligibleTarget, ROMANTIC_GIFTS[0]);
+  const askOutBlocked = romanceService.executeAskOut(singlePrisoner, eligibleTarget);
+  const proposalBlocked = romanceService.executeProposal(
+    singlePrisoner,
+    eligibleTarget,
+    ENGAGEMENT_RINGS[0],
+    PROPOSAL_VENUES[0]
+  );
+  const weddingBlocked = romanceService.executeWedding(singlePrisoner, eligibleTarget, WEDDING_VENUES[0], false);
+  const intimacyBlocked = reproductionService.executeIntimacy(singlePrisoner, spouseTarget, 'unprotected');
+  const tryBabyBlocked = reproductionService.executeTryForBaby(singlePrisoner, spouseTarget);
+  const ivfBlocked = reproductionService.executeIVF(singlePrisoner, spouseTarget);
+  const adoptBlocked = reproductionService.executeAdoption(singlePrisoner, 'infant');
+
+  assert(
+    !flirtBlocked.result.success &&
+      !dateBlocked.result.success &&
+      !giftBlocked.result.success &&
+      !askOutBlocked.result.success &&
+      !proposalBlocked.result.success &&
+      !weddingBlocked.result.success &&
+      !intimacyBlocked.success &&
+      !tryBabyBlocked.success &&
+      !ivfBlocked.success &&
+      !adoptBlocked.success,
+    'All outside/in-person romance and family planning actions fail safely while incarcerated'
+  );
+  assert(
+    dateBlocked.result.cashDelta === 0 &&
+      giftBlocked.result.cashDelta === 0 &&
+      proposalBlocked.result.cashDelta === 0 &&
+      weddingBlocked.result.cashDelta === 0 &&
+      ivfBlocked.cashDelta === 0 &&
+      adoptBlocked.cashDelta === 0,
+    'Blocked prison romance/family actions incur 0 cash deduction'
+  );
+
+  // 4. Partnered prisoner: Deep Talk + Break Up allowed; Family Planning & external milestones blocked
+  const partneredPrisoner = createMockCharacter({
+    age: 26,
+    gender: 'male',
+    cash: 25000,
+    occupation: 'Incarcerated',
+    partner: spouseTarget,
+    relationships: [spouseTarget],
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: prisonState,
+    },
+  });
+
+  const talkAllowed = romanceService.executeRomanticTalk(
+    partneredPrisoner,
+    spouseTarget,
+    ROMANTIC_TALK_TOPICS[0]
+  );
+  assert(talkAllowed.result.success, 'Partnered prisoner can still have Deep Talk (calls/letters)');
+
+  const fpCheckPrison = evaluateFamilyPlanningEligibility(spouseTarget, partneredPrisoner);
+  assert(!fpCheckPrison.eligible, 'evaluateFamilyPlanningEligibility blocks incarcerated spouses');
+
+  const partneredPrisonerHtml = renderToStaticMarkup(
+    React.createElement(RomanceScreen, {
+      character: partneredPrisoner,
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      onOpenRelationships: () => {},
+    })
+  );
+  assert(
+    partneredPrisonerHtml.includes('In Custody — Phone Calls &amp; Letters Only') &&
+      partneredPrisonerHtml.includes('Date (In Prison)') &&
+      partneredPrisonerHtml.includes('Family (In Prison)') &&
+      partneredPrisonerHtml.includes('File for Divorce'),
+    'Partnered prisoner RomanceScreen shows In Custody notice, disables external actions, and preserves calls/divorce'
+  );
+
+  const breakupAllowed = romanceService.executeBreakup(partneredPrisoner, spouseTarget);
+  assert(
+    breakupAllowed.result.success && breakupAllowed.updatedTarget.romanticStage === 'ex',
+    'Partnered prisoner can still break up while incarcerated'
+  );
+  console.log('✅ Incarceration Restrictions: Single prisoners locked out of dating; partnered prisoners limited to Deep Talk & Breakup/Divorce!');
+}
 
 console.log('--- ALL MODULE 7 ROMANCE & DATING TESTS PASSED PERFECTLY! ---\n');

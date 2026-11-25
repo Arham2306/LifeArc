@@ -72,6 +72,15 @@ const VALID_PROBATION_CONDITIONS: ReadonlySet<string> = new Set([
   'activity_restriction',
   'no_new_offenses',
 ]);
+const VALID_PRISON_ACTION_IDS: ReadonlySet<string> = new Set([
+  'work',
+  'study',
+  'workout',
+  'good_behavior',
+  'infirmary',
+  'appeal',
+  'parole',
+]);
 
 function toFiniteNonNegative(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
@@ -386,6 +395,13 @@ export function getSanitizedCrimeState(
       ? rawPrison.originCaseId.trim()
       : undefined;
 
+  const actionIdsThisYear = Array.isArray(rawPrison?.actionIdsThisYear)
+    ? rawPrison.actionIdsThisYear.filter(
+        (id): id is import('../types').PrisonActionId =>
+          typeof id === 'string' && VALID_PRISON_ACTION_IDS.has(id),
+      )
+    : undefined;
+
   const prison: PrisonState | null = isValidPrisonState(raw.prison)
     ? {
         facilityName: raw.prison.facilityName,
@@ -397,6 +413,7 @@ export function getSanitizedCrimeState(
         behaviorScore: clamp0to100(raw.prison.behaviorScore, 50),
         paroleEligibleAtServed: raw.prison.paroleEligibleAtServed,
         actionsTakenThisYear: raw.prison.actionsTakenThisYear,
+        ...(actionIdsThisYear !== undefined ? { actionIdsThisYear } : {}),
         lastActionAge: toNullableAge(raw.prison.lastActionAge),
         lastProgressedAge: toNullableAge(raw.prison.lastProgressedAge),
         ...(originCaseId !== undefined ? { originCaseId } : {}),
@@ -659,7 +676,7 @@ export function getExpungementEligibleRecords(
 export function evaluateRecordReliefStatus(
   character: Pick<
     CharacterProfile,
-    'isAlive' | 'age' | 'cash' | 'karma' | 'career' | 'business' | 'crime'
+    'isAlive' | 'age' | 'cash' | 'stats' | 'career' | 'business' | 'crime'
   >,
   entry: CrimeRecordEntry,
   referenceAge = character.age,
@@ -712,9 +729,10 @@ export function evaluateRecordReliefStatus(
   const unlockAge = cleanStartAge + requiredCleanYears;
 
   const unpaidLegalDebt = getUnpaidFines(character) + getUnpaidRestitution(character);
+  const rawKarma = character.stats?.karma;
   const currentKarma = Math.max(
     0,
-    Math.min(100, Math.round(Number.isFinite(character.karma) ? character.karma : 50)),
+    Math.min(100, Math.round(Number.isFinite(rawKarma) ? rawKarma : 50)),
   );
   const karmaShortfall =
     tier === 'executive_pardon' ? Math.max(0, EXECUTIVE_PARDON_MIN_KARMA - currentKarma) : 0;

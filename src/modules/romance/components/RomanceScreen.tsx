@@ -37,6 +37,7 @@ import {
 import { divorceService } from '../services/divorceService';
 import { createId } from '../../../utils/id';
 import { stampPlayerNetWorth } from '../../assets/services/assetService';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import { ShieldCheck, MessageCircleHeart } from 'lucide-react';
 import type { CharacterProfile, PersonProfile, ChildProfile, LifeEvent } from '../../../types/game';
 import type {
@@ -120,6 +121,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     (character.relationships || []).find(isPartnerProfile) ||
     null;
 
+  const isIncarcerated = isCurrentlyIncarcerated(character);
+
   React.useEffect(() => {
     if (character.age >= 16 && !character.partner && partner) {
       onUpdateCharacter({
@@ -149,6 +152,35 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           <h3 className="text-base font-black text-rose-950">Romance Unlocks at Age 16</h3>
           <p className="text-xs font-bold text-slate-600 max-w-xs leading-relaxed">
             Dating, partners, and romantic interactions are reserved for age 16 and older. Focus on school and friendships for now!
+          </p>
+          <CartoonButton variant="rose" onClick={onBackToMenu}>
+            Back to Activities
+          </CartoonButton>
+        </div>
+      </div>
+    );
+  }
+
+  if (isIncarcerated && !partner) {
+    return (
+      <div className="p-4 flex flex-col gap-4 bg-white min-h-[480px]">
+        <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
+          <button
+            type="button"
+            onClick={onBackToMenu}
+            className="flex items-center gap-1.5 text-xs font-black text-slate-700 hover:text-slate-950 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl border-2 border-slate-900 shadow-[1.5px_1.5px_0_#0f172a] transition-all cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 stroke-[3]" />
+            <span>Menu</span>
+          </button>
+          <span className="text-xs font-black text-slate-800">Romance & Dating</span>
+        </div>
+
+        <div className="p-6 rounded-2xl border-2 border-slate-900 bg-rose-50 text-center flex flex-col items-center gap-3 shadow-[2px_2.5px_0_#0f172a] my-auto">
+          <span className="text-4xl">🔒</span>
+          <h3 className="text-base font-black text-rose-950">Romance Unavailable in Prison</h3>
+          <p className="text-xs font-bold text-slate-600 max-w-xs leading-relaxed">
+            Dating apps, going out, and starting new relationships are blocked while serving a prison sentence. Complete your sentence or earn parole first.
           </p>
           <CartoonButton variant="rose" onClick={onBackToMenu}>
             Back to Activities
@@ -225,6 +257,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Open Dating App
   const handleOpenDatingApp = () => {
+    if (isIncarcerated) return;
     const candidates = romanceService.generateDatingCandidates(character, 5, datingPref);
     setDatingCandidates(candidates);
     setActiveModal('dating_app');
@@ -232,6 +265,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Match with candidate from Dating App
   const handleAskOutCandidate = (candidate: DatingCandidate) => {
+    if (isIncarcerated) return;
     const newPerson: PersonProfile = {
       id: candidate.id,
       firstName: candidate.firstName,
@@ -281,6 +315,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Meet Someone In Real Life
   const handleMeetIRL = () => {
+    if (isIncarcerated) return;
     if (character.cash < 40) {
       setReactionModal({
         title: 'Not Enough Cash',
@@ -340,6 +375,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Open Flirt Picker
   const handleOpenFlirtPicker = (targetPerson: PersonProfile) => {
+    if (isIncarcerated) return;
     setActionPicker({
       title: `Flirt with ${targetPerson.firstName}`,
       icon: '✨',
@@ -363,6 +399,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Open Date Picker
   const handleOpenDatePicker = (targetPerson: PersonProfile) => {
+    if (isIncarcerated) return;
     const currentRomance = targetPerson.romanceMeter ?? 0;
     setActionPicker({
       title: `Plan a Date with ${targetPerson.firstName}`,
@@ -436,6 +473,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Open Gift Picker
   const handleOpenGiftPicker = (targetPerson: PersonProfile) => {
+    if (isIncarcerated) return;
     const currentRomance = targetPerson.romanceMeter ?? 0;
     setActionPicker({
       title: `Give Gift to ${targetPerson.firstName}`,
@@ -472,6 +510,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
   // Open Intimacy Picker
   const handleOpenIntimacyPicker = (targetPerson: PersonProfile) => {
+    if (isIncarcerated) return;
     setActionPicker({
       title: `Make Love with ${targetPerson.firstName}`,
       icon: '💋',
@@ -529,7 +568,8 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           avatarEmoji: targetPartner?.avatarEmoji,
           message: notice.message,
         });
-      }
+      },
+      character
     );
     return allowed;
   };
@@ -1481,6 +1521,11 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
             {/* Interactive Romance Actions Grid */}
             <div className="flex flex-col gap-2">
+            {isIncarcerated && (
+              <div className="rounded-xl border-2 border-amber-700 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950">
+                🔒 <span className="font-black">In Custody — Phone Calls &amp; Letters Only:</span> Dates, flirting, gifts, intimacy, proposals, and family planning are unavailable while serving your sentence. You can still stay in touch via Deep Talk or end the relationship.
+              </div>
+            )}
             {(() => {
               const partnerYearlyActions = character.yearlySocialActions?.[partner.id] || [];
               const dateCount = partnerYearlyActions.filter((a) => a === 'romance_date').length;
@@ -1508,25 +1553,41 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
                   <div className="grid grid-cols-2 gap-2">
                     <CartoonButton
-                      variant={isDateMaxed ? 'slate' : 'white'}
+                      variant={isIncarcerated || isDateMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isDateMaxed}
+                      disabled={isIncarcerated || isDateMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenDatePicker(partner)}
                     >
                       <Wine className="w-4 h-4 text-rose-500 shrink-0" />
-                      <span>{isDateMaxed ? 'Date (2/2 Done)' : dateCount === 1 ? 'Date (1/2)' : 'Plan Date (0/2)'}</span>
+                      <span>
+                        {isIncarcerated
+                          ? 'Date (In Prison)'
+                          : isDateMaxed
+                          ? 'Date (2/2 Done)'
+                          : dateCount === 1
+                          ? 'Date (1/2)'
+                          : 'Plan Date (0/2)'}
+                      </span>
                     </CartoonButton>
 
                     <CartoonButton
-                      variant={isFlirtMaxed ? 'slate' : 'white'}
+                      variant={isIncarcerated || isFlirtMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isFlirtMaxed}
+                      disabled={isIncarcerated || isFlirtMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenFlirtPicker(partner)}
                     >
                       <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span>{isFlirtMaxed ? 'Flirt (2/2 Done)' : flirtCount === 1 ? 'Flirt (1/2)' : 'Flirt (0/2)'}</span>
+                      <span>
+                        {isIncarcerated
+                          ? 'Flirt (In Prison)'
+                          : isFlirtMaxed
+                          ? 'Flirt (2/2 Done)'
+                          : flirtCount === 1
+                          ? 'Flirt (1/2)'
+                          : 'Flirt (0/2)'}
+                      </span>
                     </CartoonButton>
 
                     <CartoonButton
@@ -1541,20 +1602,28 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                     </CartoonButton>
 
                     <CartoonButton
-                      variant={isGiftMaxed ? 'slate' : 'white'}
+                      variant={isIncarcerated || isGiftMaxed ? 'slate' : 'white'}
                       size="sm"
-                      disabled={isGiftMaxed}
+                      disabled={isIncarcerated || isGiftMaxed}
                       className="flex items-center justify-center gap-1.5"
                       onClick={() => handleOpenGiftPicker(partner)}
                     >
                       <Gift className="w-4 h-4 text-emerald-500 shrink-0" />
-                      <span>{isGiftMaxed ? 'Gift (2/2 Done)' : giftCount === 1 ? 'Give Gift (1/2)' : 'Give Gift (0/2)'}</span>
+                      <span>
+                        {isIncarcerated
+                          ? 'Gift (In Prison)'
+                          : isGiftMaxed
+                          ? 'Gift (2/2 Done)'
+                          : giftCount === 1
+                          ? 'Give Gift (1/2)'
+                          : 'Give Gift (0/2)'}
+                      </span>
                     </CartoonButton>
 
                     {/* Intimacy: Gated behind 60% Love & 70% Relationship, plus 2x annual limits */}
                     {(() => {
                       const meetsStats = (partner.romanceMeter ?? 0) >= 60 && partner.relationship >= 70;
-                      const canMakeLove = meetsStats && !isIntimacyMaxed;
+                      const canMakeLove = !isIncarcerated && meetsStats && !isIntimacyMaxed;
                       return (
                         <CartoonButton
                           variant={canMakeLove ? 'white' : 'slate'}
@@ -1567,7 +1636,9 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                         >
                           <Flame className={`w-4 h-4 shrink-0 ${canMakeLove ? 'text-rose-600' : 'text-slate-400'}`} />
                           <span>
-                            {isIntimacyMaxed
+                            {isIncarcerated
+                              ? 'Intimacy (In Prison)'
+                              : isIntimacyMaxed
                               ? 'Make Love (2/2 Done)'
                               : meetsStats
                               ? intimacyCount === 1
@@ -1579,12 +1650,14 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                       );
                     })()}
 
-                    {/* Family Planning: Strictly gated behind Marriage & Relationship Thresholds */}
+                    {/* Family Planning: Strictly gated behind Marriage, Relationship Thresholds, and non-incarceration */}
                     {(() => {
-                      const eligibility = evaluateFamilyPlanningEligibility(partner);
+                      const eligibility = evaluateFamilyPlanningEligibility(partner, character);
                       const isExpecting = character.isPregnant || !!partner.partnerStats?.isPregnant;
                       const canFamily = eligibility.eligible;
-                      const familyLabel = !eligibility.isMarried
+                      const familyLabel = isIncarcerated
+                        ? 'Family (In Prison)'
+                        : !eligibility.isMarried
                         ? 'Family (Married Only)'
                         : !eligibility.meetsBond
                         ? (partner.romanceMeter ?? 0) < FAMILY_PLANNING_MIN_ROMANCE
@@ -1616,13 +1689,16 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           <div className="flex flex-col gap-2 pt-2 border-t border-slate-200">
             {partner.romanticStage === 'flirting' && (
               <CartoonButton
-                variant="rose"
+                variant={isIncarcerated ? 'white' : 'rose'}
                 size="sm"
-                className="w-full flex items-center justify-center gap-2"
-                onClick={() => setAskOutTarget(partner)}
+                disabled={isIncarcerated}
+                className={`w-full flex items-center justify-center gap-2 ${isIncarcerated ? 'opacity-60 cursor-not-allowed' : ''}`}
+                onClick={() => {
+                  if (!isIncarcerated) setAskOutTarget(partner);
+                }}
               >
-                <Heart className="w-4 h-4 fill-white shrink-0" />
-                <span>Ask to Become Official Partners</span>
+                <Heart className={`w-4 h-4 shrink-0 ${isIncarcerated ? 'text-slate-400' : 'fill-white'}`} />
+                <span>{isIncarcerated ? 'Ask to Become Official Partners (In Prison)' : 'Ask to Become Official Partners'}</span>
               </CartoonButton>
             )}
 
@@ -1630,10 +1706,12 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
               const yearsDating = partner.partnerStats?.yearsTogether ?? 0;
               const meetsTenure = yearsDating >= 2;
               const meetsStats = (partner.romanceMeter ?? 0) >= 75 && partner.relationship >= 80;
-              const canPropose = meetsTenure && meetsStats;
+              const canPropose = !isIncarcerated && meetsTenure && meetsStats;
 
               let proposalLabel = '💍 Propose Marriage (Ring Shop)';
-              if (!meetsTenure) {
+              if (isIncarcerated) {
+                proposalLabel = '💍 Propose Marriage (Unavailable In Prison)';
+              } else if (!meetsTenure) {
                 proposalLabel = `💍 Propose (Requires 2 Yrs Dating: Currently ${yearsDating} ${yearsDating === 1 ? 'Yr' : 'Yrs'})`;
               } else if (!meetsStats) {
                 proposalLabel = `💍 Propose (Req. 75% Love [${partner.romanceMeter ?? 0}%] & 80% Rel [${Math.round(partner.relationship)}%])`;
@@ -1646,6 +1724,7 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
                   disabled={!canPropose}
                   className={`w-full flex items-center justify-center gap-2 ${!canPropose ? 'opacity-60 cursor-not-allowed' : ''}`}
                   onClick={() => {
+                    if (!canPropose) return;
                     setActiveTarget(partner);
                     setActiveModal('proposal');
                   }}
@@ -1657,13 +1736,16 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
 
               {partner.romanticStage === 'engaged' && (
                 <CartoonButton
-                  variant="rose"
+                  variant={isIncarcerated ? 'white' : 'rose'}
                   size="sm"
-                  className="w-full flex items-center justify-center gap-2"
-                  onClick={() => setActiveModal('wedding')}
+                  disabled={isIncarcerated}
+                  className={`w-full flex items-center justify-center gap-2 ${isIncarcerated ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  onClick={() => {
+                    if (!isIncarcerated) setActiveModal('wedding');
+                  }}
                 >
-                  <Church className="w-4 h-4 text-white shrink-0" />
-                  <span>Plan Wedding Ceremony 💒</span>
+                  <Church className={`w-4 h-4 shrink-0 ${isIncarcerated ? 'text-slate-400' : 'text-white'}`} />
+                  <span>{isIncarcerated ? 'Plan Wedding Ceremony (Unavailable In Prison)' : 'Plan Wedding Ceremony 💒'}</span>
                 </CartoonButton>
               )}
 

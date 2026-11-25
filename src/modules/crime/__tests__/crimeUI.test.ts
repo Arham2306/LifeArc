@@ -10,6 +10,7 @@ import {
   buildAttemptResultView,
   buildCourtVerdictView,
   buildCrimeDashboardSummary,
+  buildPrisonReleaseNotice,
   classifyCrimeRecord,
   CRIME_MENU_MIN_AGE,
   getCrimeCatalogPreviews,
@@ -26,6 +27,7 @@ import {
   resolveCourtCase,
 } from '../services/crimeService';
 import { performPrisonAction } from '../services/prisonService';
+import { ageUpCharacter } from '../../aging/services/agingService';
 import type {
   CourtResolutionResult,
   CrimeAttemptResult,
@@ -484,7 +486,7 @@ function makeRecord(overrides: Partial<CrimeRecordEntry> = {}): CrimeRecordEntry
   });
 
   const prisonViews = getPrisonActionViews(prisoner, prisoner.crime!.prison!);
-  assert(prisonViews.length === 6, 'Prison UI must expose all 6 prison actions');
+  assert(prisonViews.length === 7, 'Prison UI must expose all 7 prison actions (including infirmary)');
   const paroleView = prisonViews.find((a) => a.actionId === 'parole');
   assert(paroleView?.available === false, 'Parole must be locked before paroleEligibleAtServed');
 
@@ -492,8 +494,17 @@ function makeRecord(overrides: Partial<CrimeRecordEntry> = {}): CrimeRecordEntry
   assert(workRes.ok, 'First prison action at age 68 should succeed');
   const afterWorkViews = getPrisonActionViews(workRes.character, workRes.character.crime!.prison!);
   assert(
-    afterWorkViews.every((a) => !a.available),
-    'Taking 1 prison action must disable remaining actions until Age Up',
+    afterWorkViews.find((a) => a.actionId === 'work')?.available === false &&
+      afterWorkViews.find((a) => a.actionId === 'infirmary')?.available === true,
+    'After 1st prison action, same action is disabled while other distinct actions remain open (2/yr limit)',
+  );
+
+  const infRes = performPrisonAction(workRes.character, 'infirmary');
+  assert(infRes.ok, 'Second distinct prison action at age 68 should succeed');
+  const afterSecondViews = getPrisonActionViews(infRes.character, infRes.character.crime!.prison!);
+  assert(
+    afterSecondViews.every((a) => !a.available),
+    'Taking 2 prison actions must disable remaining actions until Age Up',
   );
 
   // Release via parole must restore 'Retired' occupation via prison.priorRetirementOccupation
@@ -730,6 +741,62 @@ function makeRecord(overrides: Partial<CrimeRecordEntry> = {}): CrimeRecordEntry
       'CourtDefenseModal service call resolveCourtCase must clear pendingCase',
     );
   }
+}
+
+// 7. Prison release popup builder (`buildPrisonReleaseNotice`)
+{
+  const prisonOneYearLeft = makeCharacter({
+    age: 26,
+    occupation: 'Incarcerated',
+    crime: {
+      ...createEmptyCrimeState(),
+      unpaidFines: 500,
+      prison: makePrison({
+        facilityName: 'Oakridge State Prison',
+        chargeTitle: 'Armed Robbery',
+        yearsTotal: 3,
+        yearsServed: 2,
+        yearsRemaining: 1,
+      }),
+    },
+  });
+
+  const stillServingPrev = makeCharacter({
+    age: 25,
+    occupation: 'Incarcerated',
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrison({ yearsTotal: 3, yearsServed: 1, yearsRemaining: 2 }),
+    },
+  });
+  const stillServingAged = ageUpCharacter(stillServingPrev);
+  assert(
+    buildPrisonReleaseNotice(stillServingPrev, stillServingAged) === null,
+    'buildPrisonReleaseNotice returns null while still serving sentence',
+  );
+
+  const releasedAged = ageUpCharacter(prisonOneYearLeft);
+  const releaseNotice = buildPrisonReleaseNotice(prisonOneYearLeft, releasedAged);
+  assert(
+    releaseNotice !== null &&
+      releaseNotice.title === 'Released From Prison!' &&
+      releaseNotice.facilityName === 'Oakridge State Prison' &&
+      releaseNotice.chargeTitle === 'Armed Robbery' &&
+      releaseNotice.yearsTotal === 3 &&
+      releaseNotice.happinessDelta === 8 &&
+      releaseNotice.unpaidLegalDebt === 500 &&
+      releaseNotice.occupation === releasedAged.occupation,
+    'buildPrisonReleaseNotice populates full popup details on sentence completion Age Up',
+  );
+
+  assert(
+    buildPrisonReleaseNotice(prisonOneYearLeft, { ...releasedAged, isAlive: false }) === null,
+    'buildPrisonReleaseNotice returns null if character did not survive Age Up',
+  );
+  assert(
+    buildPrisonReleaseNotice(makeCharacter({ age: 25 }), releasedAged) === null,
+    'buildPrisonReleaseNotice returns null when character was not incarcerated before Age Up',
+  );
 }
 
 console.log('crimeUI.test.ts: All assertions passed.');

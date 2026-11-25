@@ -131,7 +131,7 @@ export function isConditionEligible(id: ConditionId, health: number, age: number
   const listing = BY_ID.get(id);
   if (!listing || age < 6) return false;
   if (listing.healthBelow !== undefined) {
-    return age >= listing.minAge || health < listing.healthBelow;
+    return age >= listing.minAge || (age >= 35 && health < listing.healthBelow);
   }
   return age >= listing.minAge && health <= listing.maxHealth;
 }

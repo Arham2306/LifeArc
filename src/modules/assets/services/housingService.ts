@@ -296,6 +296,7 @@ export function getHousingSummary(character: CharacterProfile): HousingSummary {
 
 export type PostAgeUpModalStep =
   | 'death'
+  | 'prison_release'
   | 'baby'
   | 'school'
   | 'admissions'
@@ -305,6 +306,7 @@ export type PostAgeUpModalStep =
 
 export interface PostAgeUpQueueFlags {
   isDeathOpen: boolean;
+  hasPrisonReleaseNotice?: boolean;
   hasBabyNotice: boolean;
   hasSchoolNotice: boolean;
   isAdmissionsOpen: boolean;
@@ -322,6 +324,7 @@ export function resolvePostAgeUpModalStep(
   flags: PostAgeUpQueueFlags
 ): PostAgeUpModalStep | null {
   if (flags.isDeathOpen) return 'death';
+  if (flags.hasPrisonReleaseNotice) return 'prison_release';
   if (flags.hasBabyNotice) return 'baby';
   if (flags.hasSchoolNotice) return 'school';
   if (flags.isAdmissionsOpen) return 'admissions';

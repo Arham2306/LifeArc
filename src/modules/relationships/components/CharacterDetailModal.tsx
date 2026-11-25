@@ -19,6 +19,7 @@ import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
 import { ConfirmModal } from '../../../components/ui/ConfirmModal';
 import { FLIRT_OPTIONS, DATE_VENUES } from '../../romance/data/romanticInteractions';
 import { romanceService } from '../../romance/services/romanceService';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import type { FlirtOption, DateVenue } from '../../romance/types';
 import type { CharacterProfile, PersonProfile } from '../../../types/game';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
@@ -141,6 +142,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   if (!liveTarget) return null;
 
   const isPartner = character.partner?.id === liveTarget.id;
+  const isIncarcerated = isCurrentlyIncarcerated(character);
 
   const stage =
     character.age <= 12 ? 'childhood' : character.age <= 17 ? 'teens' : 'adulthood';
@@ -162,7 +164,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleSparkRomance = () => {
-    if (!friendTarget || character.age < 16) return;
+    if (!friendTarget || character.age < 16 || isIncarcerated) return;
     const sparked = romanceService.sparkRomance(friendTarget, character.age);
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === sparked.id ? sparked : r
@@ -183,7 +185,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleFlirt = (flirt: FlirtOption) => {
-    if (!friendTarget || character.age < 16) return;
+    if (!friendTarget || character.age < 16 || isIncarcerated) return;
     const { updatedTarget, result } = romanceService.executeFlirt(character, friendTarget, flirt);
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
@@ -217,7 +219,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleDate = (venue: DateVenue) => {
-    if (!friendTarget || character.age < 16) return;
+    if (!friendTarget || character.age < 16 || isIncarcerated) return;
     const { updatedTarget, result } = romanceService.executeDate(character, friendTarget, venue);
     if (!result.success && result.relationshipDelta === 0) {
       return;
@@ -255,7 +257,7 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
   };
 
   const handleAskOut = () => {
-    if (!friendTarget || character.age < 16) return;
+    if (!friendTarget || character.age < 16 || isIncarcerated) return;
     const { updatedTarget, result } = romanceService.executeAskOut(character, friendTarget);
     const updatedRel = (character.relationships || []).map((r) =>
       r.id === updatedTarget.id ? updatedTarget : r
@@ -714,7 +716,12 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
             </div>
 
             {/* Spark Romance Banner */}
-            {liveTarget.type === 'friend' && character.age >= 16 && liveTarget.relationship >= 50 && !liveTarget.romanceUnlocked && !isPartner && (
+            {liveTarget.type === 'friend' &&
+              character.age >= 16 &&
+              !isIncarcerated &&
+              liveTarget.relationship >= 50 &&
+              !liveTarget.romanceUnlocked &&
+              !isPartner && (
               <div className="p-3 bg-rose-50 border-2 border-slate-900 rounded-2xl flex items-center justify-between shadow-[2px_2px_0_#0f172a] mt-2">
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl">💖</span>
@@ -734,8 +741,8 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
               const pYearlyActions = character.yearlySocialActions?.[liveTarget.id] || [];
               const pFlirtCount = pYearlyActions.filter((a) => a === 'romance_flirt').length;
               const pDateCount = pYearlyActions.filter((a) => a === 'romance_date').length;
-              const pFlirtMaxed = pFlirtCount >= 2;
-              const pDateMaxed = pDateCount >= 2;
+              const pFlirtMaxed = isIncarcerated || pFlirtCount >= 2;
+              const pDateMaxed = isIncarcerated || pDateCount >= 2;
 
               return (
                 <div className="flex flex-col gap-2 pt-2 border-t-2 border-rose-200 mt-2">
@@ -745,15 +752,23 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                       <span>Romance Actions</span>
                     </span>
                     <span className="font-mono text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded text-[10px]">
-                      2x per action
+                      {isIncarcerated ? 'Locked in prison' : '2x per action'}
                     </span>
                   </div>
+
+                  {isIncarcerated && (
+                    <p className="text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-1.5">
+                      In-person romance actions (Flirt, Date, Ask Out) are unavailable while serving your sentence.
+                    </p>
+                  )}
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       disabled={pFlirtMaxed}
-                      onClick={handleOpenFlirtPicker}
+                      onClick={() => {
+                        if (!isIncarcerated) handleOpenFlirtPicker();
+                      }}
                       className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
                         pFlirtMaxed
                           ? 'bg-slate-100 opacity-60 cursor-not-allowed'
@@ -762,7 +777,13 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     >
                       <div className="flex flex-col">
                         <span className="text-xs font-black text-slate-950">
-                          {pFlirtMaxed ? 'Flirt (2/2 Done)' : pFlirtCount === 1 ? 'Flirt (1/2)' : 'Flirt (0/2)'}
+                          {isIncarcerated
+                            ? 'Flirt (In Prison)'
+                            : pFlirtMaxed
+                            ? 'Flirt (2/2 Done)'
+                            : pFlirtCount === 1
+                            ? 'Flirt (1/2)'
+                            : 'Flirt (0/2)'}
                         </span>
                         <span className="text-[10px] font-bold text-slate-500">Test chemistry</span>
                       </div>
@@ -772,7 +793,9 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     <button
                       type="button"
                       disabled={pDateMaxed}
-                      onClick={handleOpenDatePicker}
+                      onClick={() => {
+                        if (!isIncarcerated) handleOpenDatePicker();
+                      }}
                       className={`p-2.5 rounded-2xl border-2 border-slate-900 text-left transition-all shadow-[1.5px_2px_0_#0f172a] flex items-center justify-between ${
                         pDateMaxed
                           ? 'bg-slate-100 opacity-60 cursor-not-allowed'
@@ -781,7 +804,13 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                     >
                       <div className="flex flex-col">
                         <span className="text-xs font-black text-slate-950">
-                          {pDateMaxed ? 'Date (2/2 Done)' : pDateCount === 1 ? 'Plan Date (1/2)' : 'Plan Date (0/2)'}
+                          {isIncarcerated
+                            ? 'Date (In Prison)'
+                            : pDateMaxed
+                            ? 'Date (2/2 Done)'
+                            : pDateCount === 1
+                            ? 'Plan Date (1/2)'
+                            : 'Plan Date (0/2)'}
                         </span>
                         <span className="text-[10px] font-bold text-slate-500">Choose venue</span>
                       </div>
@@ -792,11 +821,13 @@ export const CharacterDetailModal: React.FC<CharacterDetailModalProps> = ({
                   {/* Milestone button: Ask Out (only if not yet an official couple) */}
                   {!isPartner && liveTarget.romanticStage !== 'dating' && liveTarget.romanticStage !== 'engaged' && liveTarget.romanticStage !== 'married' && (() => {
                     const romanceVal = liveTarget.romanceMeter ?? 0;
-                    const canAskOut = romanceVal >= 30 && liveTarget.relationship >= 45;
+                    const canAskOut = !isIncarcerated && romanceVal >= 30 && liveTarget.relationship >= 45;
                     return (
                       <button
                         type="button"
-                        onClick={() => setIsAskOutOpen(true)}
+                        onClick={() => {
+                          if (!isIncarcerated) setIsAskOutOpen(true);
+                        }}
                         disabled={!canAskOut}
                         className={`w-full p-2.5 rounded-2xl border-2 border-slate-900 font-black text-xs shadow-[2px_2.5px_0_#0f172a] transition-all flex flex-col items-center justify-center gap-0.5 ${
                           canAskOut

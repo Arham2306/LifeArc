@@ -25,7 +25,12 @@ import {
   isOnProbation,
   MAX_CRIME_ATTEMPTS_PER_YEAR,
 } from '../services/crimeSelectors';
-import { MAX_PRISON_ACTIONS_PER_YEAR, PRISON_WORK_PAY } from '../services/prisonService';
+import {
+  MAX_PRISON_ACTIONS_PER_YEAR,
+  PRISON_INFIRMARY_HEALTH,
+  PRISON_WORK_PAY,
+  PRISON_WORKOUT_HEALTH,
+} from '../services/prisonService';
 import type {
   CourtResolutionResult,
   CrimeAttemptResult,
@@ -305,14 +310,30 @@ export function getPrisonActionViews(
   character: Pick<CharacterProfile, 'age' | 'isAlive'>,
   prison: PrisonState,
 ): PrisonActionView[] {
-  const actionsUsed =
-    prison.lastActionAge === character.age ? prison.actionsTakenThisYear : 0;
+  const sameActionAge = prison.lastActionAge === character.age;
+  const actionsUsed = sameActionAge ? prison.actionsTakenThisYear : 0;
+  const usedActionIds = sameActionAge ? (prison.actionIdsThisYear ?? []) : [];
   const annualLimitReached = actionsUsed >= MAX_PRISON_ACTIONS_PER_YEAR;
   const paroleLocked = prison.yearsServed < prison.paroleEligibleAtServed;
 
   const cooldownReason = `Annual prison action limit reached for age ${character.age}. Age Up to act again.`;
 
   const baseActions: Omit<PrisonActionView, 'available' | 'blockedReason'>[] = [
+    {
+      actionId: 'infirmary',
+      label: 'Prison Infirmary',
+      icon: '🩺',
+      description:
+        'Visit institutional medical staff for free rest, checkups, and treatment of active ailments.',
+      effectSummary: `+${PRISON_INFIRMARY_HEALTH} Health • Treats temporary illnesses ($0)`,
+    },
+    {
+      actionId: 'workout',
+      label: 'Yard Workout',
+      icon: '🏋️',
+      description: 'Complete physical conditioning out in the prison yard.',
+      effectSummary: `+${PRISON_WORKOUT_HEALTH} Health • +1 Behavior • +2 Happiness`,
+    },
     {
       actionId: 'work',
       label: 'Prison Work Detail',
@@ -326,13 +347,6 @@ export function getPrisonActionViews(
       icon: '📚',
       description: 'Read legal and vocational texts in the prison library.',
       effectSummary: '+2 Smarts • +3 Behavior • +1 Happiness',
-    },
-    {
-      actionId: 'workout',
-      label: 'Yard Workout',
-      icon: '🏋️',
-      description: 'Complete physical conditioning out in the prison yard.',
-      effectSummary: '+3 Health • +1 Behavior • +2 Happiness',
     },
     {
       actionId: 'good_behavior',
@@ -370,6 +384,13 @@ export function getPrisonActionViews(
         ...item,
         available: false,
         blockedReason: cooldownReason,
+      };
+    }
+    if (usedActionIds.includes(item.actionId)) {
+      return {
+        ...item,
+        available: false,
+        blockedReason: `Already completed at age ${character.age}.`,
       };
     }
     if (item.actionId === 'parole' && paroleLocked) {
@@ -582,5 +603,78 @@ export function buildCrimeDashboardSummary(character: CharacterProfile): CrimeDa
     activeAdultConvictionCount,
     activeJuvenileAdjudicationCount,
     expungementEligibleIds,
+  };
+}
+
+export interface PrisonReleaseNotice {
+  facilityName: string;
+  chargeTitle: string;
+  yearsTotal: number;
+  title: string;
+  subtitle: string;
+  message: string;
+  occupation: string;
+  happinessDelta: number;
+  hasActiveProbation: boolean;
+  probationYearsRemaining: number;
+  unpaidLegalDebt: number;
+  businessResumedName: string | null;
+}
+
+/**
+ * Builds popup payload whenever an Age Up completes a prison sentence and returns
+ * a living character to society.
+ */
+export function buildPrisonReleaseNotice(
+  previousCharacter: CharacterProfile,
+  agedCharacter: CharacterProfile,
+): PrisonReleaseNotice | null {
+  if (
+    !isCurrentlyIncarcerated(previousCharacter) ||
+    isCurrentlyIncarcerated(agedCharacter) ||
+    !agedCharacter.isAlive
+  ) {
+    return null;
+  }
+
+  const prison = getSanitizedCrimeState(previousCharacter).prison;
+  if (!prison) {
+    return null;
+  }
+
+  const releaseEvent = [...agedCharacter.timeline]
+    .reverse()
+    .find(
+      (event) =>
+        event.age === agedCharacter.age && event.title === 'Released From Prison',
+    );
+
+  const message =
+    releaseEvent?.message ??
+    `After serving ${prison.yearsTotal} year(s) at ${prison.facilityName} for ${prison.chargeTitle}, you completed your sentence and returned to society.`;
+
+  const agedCrime = getSanitizedCrimeState(agedCharacter);
+  const hasActiveProbation = isOnProbation(agedCharacter);
+  const probationYearsRemaining = agedCrime.probation?.yearsRemaining ?? 0;
+  const unpaidLegalDebt = getUnpaidFines(agedCharacter) + getUnpaidRestitution(agedCharacter);
+  const businessResumedName =
+    previousCharacter.business?.operationalStatus === 'paused_incarceration' &&
+    agedCharacter.business?.operationalStatus === 'active'
+      ? agedCharacter.business.name
+      : null;
+
+  return {
+    facilityName: prison.facilityName,
+    chargeTitle: prison.chargeTitle,
+    yearsTotal: prison.yearsTotal,
+    title: 'Released From Prison!',
+    subtitle: `${prison.facilityName} • Sentence Completed`,
+    message,
+    occupation: agedCharacter.occupation,
+    happinessDelta: 8,
+    hasActiveProbation,
+    probationYearsRemaining,
+    unpaidLegalDebt,
+    businessResumedName,
   };
 }

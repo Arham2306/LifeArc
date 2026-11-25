@@ -20,6 +20,7 @@ import {
   isOnProbation,
 } from '../../modules/crime/services/crimeSelectors';
 import { getHousingSummary } from '../../modules/assets/services/housingService';
+import { hasActiveRomanticPartner } from '../../modules/romance/services/romanceService';
 
 interface MenuScreenProps {
   character: CharacterProfile;
@@ -65,6 +66,9 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   const isCrimeIncarcerated = isCurrentlyIncarcerated(character);
   const isCrimePendingCourt = hasPendingCourtCase(character);
   const isCrimeOnProbation = isOnProbation(character);
+  const hasPartner = hasActiveRomanticPartner(character);
+  const isRomanceLockedByPrison = isCrimeIncarcerated && !hasPartner;
+  const isRomanceAccessible = isRomanceUnlocked && !isRomanceLockedByPrison;
   const housingSummary = getHousingSummary(character);
 
   const assetsBadgeLabel = !isAssetsUnlocked
@@ -116,15 +120,31 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     {
       id: 'romance',
       title: 'Romance & Dating',
-      subtitle: isRomanceUnlocked
-        ? 'Dating apps, partners, proposals, marriage, and kids'
-        : 'Unlocks at age 16 (Dating, partners & romance)',
+      subtitle: !isRomanceUnlocked
+        ? 'Unlocks at age 16 (Dating, partners & romance)'
+        : isRomanceLockedByPrison
+          ? 'Unavailable while serving a prison sentence'
+          : isCrimeIncarcerated
+            ? 'In custody — phone calls, letters, or breakup/divorce only'
+            : 'Dating apps, partners, proposals, marriage, and kids',
       icon: <Heart className="w-5 h-5 stroke-[2.5] text-rose-950" />,
-      iconBg: isRomanceUnlocked ? 'bg-rose-400' : 'bg-rose-300',
-      badgeLabel: isRomanceUnlocked ? undefined : 'Age 16',
-      badgeVariant: isRomanceUnlocked ? undefined : 'slate',
-      isAvailable: isRomanceUnlocked,
-      onClick: isRomanceUnlocked ? onOpenRomance : undefined,
+      iconBg: isRomanceAccessible ? 'bg-rose-400' : 'bg-rose-300',
+      badgeLabel: !isRomanceUnlocked
+        ? 'Age 16'
+        : isRomanceLockedByPrison
+          ? 'In Prison'
+          : isCrimeIncarcerated
+            ? 'Calls Only'
+            : undefined,
+      badgeVariant: !isRomanceUnlocked
+        ? 'slate'
+        : isRomanceLockedByPrison
+          ? 'rose'
+          : isCrimeIncarcerated
+            ? 'amber'
+            : undefined,
+      isAvailable: isRomanceAccessible,
+      onClick: isRomanceAccessible ? onOpenRomance : undefined,
     },
     {
       id: 'assets',

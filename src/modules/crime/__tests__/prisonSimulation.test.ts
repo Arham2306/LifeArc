@@ -132,16 +132,34 @@ function testPrisonActionsAndAnnualCooldown() {
   assert(workRes.behaviorDelta === 3 && workRes.character.crime?.prison?.behaviorScore === 58, 'Behavior +3');
   assert(workRes.character.crime?.prison?.actionsTakenThisYear === 1, 'Tracks annual action count');
 
-  // Duplicate action in the same age must fail cleanly
-  const dupRes = performPrisonAction(workRes.character, 'study');
-  assert(!dupRes.ok && dupRes.character === workRes.character, 'Blocks 2nd action at same age');
+  // Repeating the same action at the same age must fail cleanly without consuming the 2nd slot
+  const sameRes = performPrisonAction(workRes.character, 'work');
+  assert(
+    !sameRes.ok &&
+      sameRes.character === workRes.character &&
+      sameRes.character.crime?.prison?.actionsTakenThisYear === 1,
+    'Blocks repeating the exact same prison action in the same year without consuming 2nd slot',
+  );
 
-  // Study, workout, good_behavior
+  // 2nd distinct action in the same age succeeds under the 2-action annual allowance
+  const secondRes = performPrisonAction(workRes.character, 'study');
+  assert(
+    secondRes.ok &&
+      secondRes.character.stats.smarts === 62 &&
+      secondRes.character.crime?.prison?.actionsTakenThisYear === 2,
+    'Allows 2nd distinct prison action in the same year',
+  );
+
+  // 3rd action at the same age must fail cleanly
+  const thirdRes = performPrisonAction(secondRes.character, 'workout');
+  assert(!thirdRes.ok && thirdRes.character === secondRes.character, 'Blocks 3rd action at same age');
+
+  // Study, workout (+6 Health), good_behavior
   const studyRes = performPrisonAction(createIncarceratedChar(), 'study');
   assert(studyRes.ok && studyRes.character.stats.smarts === 62, 'Study boosts Smarts +2');
 
   const workoutRes = performPrisonAction(createIncarceratedChar(), 'workout');
-  assert(workoutRes.ok && workoutRes.character.stats.health === 73, 'Workout boosts Health +3');
+  assert(workoutRes.ok && workoutRes.character.stats.health === 76, 'Workout boosts Health +6');
 
   const goodRes = performPrisonAction(createIncarceratedChar(), 'good_behavior');
   assert(
@@ -996,11 +1014,63 @@ function testMidYearReleaseFreezeOriginIdentityAndLegacyParoleLifecycle() {
   );
 }
 
+function testPrisonInfirmaryAndYoungInmateSurvival() {
+  // Broke inmate with open temporary illnesses + chronic condition gets free Prison Infirmary care
+  const sickInmate = createIncarceratedChar({
+    age: 22,
+    cash: 0,
+    stats: { health: 40, happiness: 40, smarts: 60, looks: 55, karma: 40 },
+    healthcare: {
+      conditions: [
+        {
+          id: 'chest-21',
+          catalogId: 'chest',
+          status: 'known',
+          acquiredAtAge: 21,
+          symptom: 'A cough has settled in your chest.',
+          untreatedYears: 1,
+        },
+        {
+          id: 'cold-21',
+          catalogId: 'cold',
+          status: 'undiagnosed',
+          acquiredAtAge: 21,
+          symptom: 'Your throat has been sore all week.',
+          untreatedYears: 0,
+        },
+      ],
+      visits: [],
+    },
+    crime: {
+      ...createEmptyCrimeState(),
+      prison: makePrisonState({ yearsTotal: 10, yearsServed: 0, yearsRemaining: 10 }),
+      records: [makePrisonRecord()],
+    },
+  });
+
+  const infRes = performPrisonAction(sickInmate, 'infirmary');
+  assert(
+    infRes.ok &&
+      infRes.character.cash === 0 &&
+      infRes.character.stats.health === 50 &&
+      (infRes.character.healthcare?.conditions ?? []).every((c: any) => c.status === 'closed'),
+    'Prison Infirmary restores +10 Health at $0 cost and closes open temporary illnesses',
+  );
+
+  // Can also pair Prison Infirmary with Rehabilitation or Workout in the same year (2 actions/yr)
+  const secondRes = performPrisonAction(infRes.character, 'workout');
+  assert(
+    secondRes.ok && secondRes.character.stats.health === 56,
+    'Inmate can pair Infirmary + Workout in same year for health recovery',
+  );
+}
+
 testPrisonActionsAndAnnualCooldown();
 testAppealAndParoleOutcomes();
 testSentenceProgressionCompletionAndDuplicateGuard();
 testMidYearAppealAndParoleOccupationRestoration();
 testAppealOriginCompletionAndParoleProbationPreservation();
 testMidYearReleaseFreezeOriginIdentityAndLegacyParoleLifecycle();
+testPrisonInfirmaryAndYoungInmateSurvival();
 console.log('prisonSimulation.test.ts passed all assertions');
 

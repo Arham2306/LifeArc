@@ -785,10 +785,16 @@ function ownedAustinStudio(id = 'home-1') {
   queueFlags.hasPendingEvent = false;
   assert.equal(resolvePostAgeUpModalStep(queueFlags), null);
 
-  // Death preempts all queued modals
+  // Death preempts all queued modals (including prison_release)
   assert.equal(
-    resolvePostAgeUpModalStep({ ...queueFlags, isDeathOpen: true, hasHousingNotice: true, hasPendingEvent: true }),
+    resolvePostAgeUpModalStep({ ...queueFlags, isDeathOpen: true, hasPrisonReleaseNotice: true, hasHousingNotice: true, hasPendingEvent: true }),
     'death'
+  );
+
+  // Prison release modal appears immediately after death check before baby/school/housing/event
+  assert.equal(
+    resolvePostAgeUpModalStep({ ...queueFlags, hasPrisonReleaseNotice: true, hasHousingNotice: true, hasPendingEvent: true }),
+    'prison_release'
   );
 }
 

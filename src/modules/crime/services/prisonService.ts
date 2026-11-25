@@ -2,6 +2,8 @@ import type { CharacterProfile, LifeEvent, StatEffects } from '../../../types/ga
 import { deterministicUUID, hashSeed, SeededPRNG } from '../../autonomy/services/seededPrngService';
 import { resolveCharacterOccupation } from '../../character/services/occupationService';
 import { applyEffects } from '../../character/services/statService';
+import { isValidCondition } from '../../healthcare/services/healthcareService';
+import type { ConditionRecord, PlayerHealthcare } from '../../healthcare/types';
 import type {
   PrisonActionId,
   PrisonActionResult,
@@ -12,14 +14,17 @@ import { CRIME_SIM_VERSION } from './crimeRiskService';
 import { getSanitizedCrimeState, isCurrentlyIncarcerated } from './crimeSelectors';
 import { mergeProbationState } from './crimeService';
 
-export const MAX_PRISON_ACTIONS_PER_YEAR = 1;
+export const MAX_PRISON_ACTIONS_PER_YEAR = 2;
 export const PRISON_WORK_PAY = 45;
+export const PRISON_WORKOUT_HEALTH = 6;
+export const PRISON_INFIRMARY_HEALTH = 10;
 
 const VALID_PRISON_ACTIONS: ReadonlySet<string> = new Set([
   'work',
   'study',
   'workout',
   'good_behavior',
+  'infirmary',
   'appeal',
   'parole',
 ]);
@@ -68,13 +73,24 @@ export function performPrisonAction(
     return failPrisonAction(character, actionId, 'Character is not currently incarcerated.');
   }
 
-  const actionsTaken =
-    prison.lastActionAge === character.age ? prison.actionsTakenThisYear : 0;
+  const sameActionAge = prison.lastActionAge === character.age;
+  const actionsTaken = sameActionAge ? prison.actionsTakenThisYear : 0;
+  const actionIdsThisYear: PrisonActionId[] = sameActionAge
+    ? (prison.actionIdsThisYear ?? [])
+    : [];
+
   if (actionsTaken >= MAX_PRISON_ACTIONS_PER_YEAR) {
     return failPrisonAction(
       character,
       actionId,
-      'You have already completed your annual prison action for this age.',
+      'You have already completed your annual prison actions for this age.',
+    );
+  }
+  if (actionIdsThisYear.includes(actionId)) {
+    return failPrisonAction(
+      character,
+      actionId,
+      `You have already completed this prison action at age ${character.age}.`,
     );
   }
 
@@ -95,6 +111,7 @@ export function performPrisonAction(
   let nextOccupation = character.occupation;
   let nextBusiness = character.business;
   let nextRecords = sanitized.records;
+  let nextHealthcare: PlayerHealthcare | undefined = character.healthcare;
   const statEffects: StatEffects = {};
   let eventTitle = '';
   let eventIcon = '🏛️';
@@ -127,12 +144,80 @@ export function performPrisonAction(
 
     case 'workout': {
       nextBehavior = clamp0to100(prison.behaviorScore + 1);
-      statEffects.health = 3;
+      statEffects.health = PRISON_WORKOUT_HEALTH;
       statEffects.happiness = 2;
       eventTitle = 'Prison Yard Workout';
       eventIcon = '🏋️';
       eventCategory = 'health';
-      message = 'Completed strength conditioning in the prison yard (+3 Health).';
+      message = `Completed strength conditioning in the prison yard (+${PRISON_WORKOUT_HEALTH} Health).`;
+      break;
+    }
+
+    case 'infirmary': {
+      statEffects.health = PRISON_INFIRMARY_HEALTH;
+      eventTitle = 'Prison Infirmary Care';
+      eventIcon = '🩺';
+      eventCategory = 'health';
+
+      let curedTempCount = 0;
+      let stabilizedChronicCount = 0;
+      const existingConditions = Array.isArray(character.healthcare?.conditions)
+        ? character.healthcare.conditions
+        : [];
+
+      if (existingConditions.length > 0) {
+        const updatedConditions = existingConditions.map((entry) => {
+          if (!isValidCondition(entry) || entry.status === 'closed') {
+            return entry;
+          }
+          if (
+            entry.catalogId === 'cold' ||
+            entry.catalogId === 'ankle' ||
+            entry.catalogId === 'chest'
+          ) {
+            curedTempCount += 1;
+            const closure: ConditionRecord['closure'] =
+              entry.catalogId === 'ankle' ? 'resolved' : 'recovered';
+            return {
+              ...entry,
+              status: 'closed' as const,
+              closedAtAge: character.age,
+              closure,
+            };
+          }
+          if (
+            (entry.catalogId === 'joints' || entry.catalogId === 'heart') &&
+            (entry.coverageThroughAge === undefined || entry.coverageThroughAge < character.age)
+          ) {
+            stabilizedChronicCount += 1;
+            return {
+              ...entry,
+              coverageThroughAge: character.age,
+            };
+          }
+          return entry;
+        });
+
+        if (curedTempCount > 0 || stabilizedChronicCount > 0) {
+          nextHealthcare = {
+            ...(character.healthcare ?? { conditions: [], visits: [] }),
+            conditions: updatedConditions,
+            visits: Array.isArray(character.healthcare?.visits)
+              ? character.healthcare.visits
+              : [],
+          };
+        }
+      }
+
+      if (curedTempCount > 0 && stabilizedChronicCount > 0) {
+        message = `Prison infirmary staff treated your active ailments, stabilized chronic symptoms for the year, and restored +${PRISON_INFIRMARY_HEALTH} Health ($0).`;
+      } else if (curedTempCount > 0) {
+        message = `Prison infirmary staff treated your active illness and restored +${PRISON_INFIRMARY_HEALTH} Health ($0).`;
+      } else if (stabilizedChronicCount > 0) {
+        message = `Prison infirmary staff provided institutional care for your chronic condition and restored +${PRISON_INFIRMARY_HEALTH} Health ($0).`;
+      } else {
+        message = `Visited the prison infirmary for rest and checkup care (+${PRISON_INFIRMARY_HEALTH} Health, $0).`;
+      }
       break;
     }
 
@@ -293,6 +378,7 @@ export function performPrisonAction(
         yearsRemaining: nextYearsRemaining,
         behaviorScore: nextBehavior,
         actionsTakenThisYear: actionsTaken + 1,
+        actionIdsThisYear: [...actionIdsThisYear, actionId],
         lastActionAge: character.age,
       };
 
@@ -317,6 +403,7 @@ export function performPrisonAction(
       ...character,
       occupation: nextOccupation,
       business: nextBusiness,
+      ...(nextHealthcare !== undefined ? { healthcare: nextHealthcare } : {}),
       crime: {
         ...sanitized,
         ...(released ? { lastMidYearReleaseAge: character.age } : {}),
@@ -398,6 +485,7 @@ export function progressPrisonForYear(
     yearsServed: nextYearsServed,
     yearsRemaining: nextYearsRemaining,
     actionsTakenThisYear: 0,
+    actionIdsThisYear: [],
     lastActionAge: null,
     lastProgressedAge: nextAge,
   };

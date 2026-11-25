@@ -21,7 +21,8 @@ export interface FamilyPlanningEligibility {
  * the romance meter (>= 40) and relationship (>= 50) thresholds.
  */
 export function evaluateFamilyPlanningEligibility(
-  partner: PersonProfile | null | undefined
+  partner: PersonProfile | null | undefined,
+  character?: Pick<CharacterProfile, 'crime'>
 ): FamilyPlanningEligibility {
   const isMarried = partner?.romanticStage === 'married';
   const romance = partner?.romanceMeter ?? 0;
@@ -29,6 +30,15 @@ export function evaluateFamilyPlanningEligibility(
   const meetsBond =
     romance >= FAMILY_PLANNING_MIN_ROMANCE &&
     relationship >= FAMILY_PLANNING_MIN_RELATIONSHIP;
+
+  if (character && isCurrentlyIncarcerated(character)) {
+    return {
+      eligible: false,
+      isMarried,
+      meetsBond,
+      reason: 'Family Planning is unavailable while incarcerated.',
+    };
+  }
 
   if (!partner || !isMarried) {
     return {
@@ -67,17 +77,23 @@ export interface FamilyPlanningBlockedNotice {
 export function runGuardedFamilyPlanningAction(
   partner: PersonProfile | null | undefined,
   onAllowed: (verifiedPartner: PersonProfile) => void,
-  onBlocked: (notice: FamilyPlanningBlockedNotice) => void
+  onBlocked: (notice: FamilyPlanningBlockedNotice) => void,
+  character?: Pick<CharacterProfile, 'crime'>
 ): boolean {
-  const eligibility = evaluateFamilyPlanningEligibility(partner);
+  const eligibility = evaluateFamilyPlanningEligibility(partner, character);
   if (eligibility.eligible && partner) {
     onAllowed(partner);
     return true;
   }
 
+  const incarcerated = Boolean(character && isCurrentlyIncarcerated(character));
   onBlocked({
-    title: eligibility.isMarried ? 'Bond Too Low 💔' : 'Marriage Required 💍',
-    icon: eligibility.isMarried ? '💔' : '💍',
+    title: incarcerated
+      ? 'Unavailable In Prison 🔒'
+      : eligibility.isMarried
+      ? 'Bond Too Low 💔'
+      : 'Marriage Required 💍',
+    icon: incarcerated ? '🔒' : eligibility.isMarried ? '💔' : '💍',
     message: eligibility.reason || 'Family Planning is only available after getting married.',
   });
   return false;
@@ -140,6 +156,17 @@ export class ReproductionService {
     character: CharacterProfile,
     partner: PersonProfile
   ): TryForBabyResult {
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        message: 'You cannot try for a baby while serving a prison sentence.',
+        relationshipDelta: 0,
+        romanceDelta: 0,
+        happinessDelta: 0,
+      };
+    }
+
     // 1. Check if already expecting
     const playerPregnant = !!character.isPregnant;
     const partnerPregnant = !!partner.partnerStats?.isPregnant;
@@ -265,6 +292,17 @@ export class ReproductionService {
     romanceDelta: number;
     happinessDelta: number;
   } {
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        success: false,
+        conceptionOccurred: false,
+        message: 'Private romantic intimacy is unavailable while incarcerated.',
+        relationshipDelta: 0,
+        romanceDelta: 0,
+        happinessDelta: 0,
+      };
+    }
+
     const relDelta = Math.floor(Math.random() * 3) + 5; // +5 to +7
     const romanceDelta = Math.floor(Math.random() * 3) + 5; // +5 to +7
     const happinessDelta = 12;
@@ -332,6 +370,14 @@ export class ReproductionService {
     character: CharacterProfile,
     partner: PersonProfile
   ): { success: boolean; message: string; cashDelta: number } {
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        success: false,
+        message: 'Fertility clinic IVF treatments are unavailable while incarcerated.',
+        cashDelta: 0,
+      };
+    }
+
     const cost = 15000;
     if (character.cash < cost) {
       return {
@@ -437,7 +483,7 @@ export class ReproductionService {
     character: CharacterProfile,
     partner: PersonProfile | null | undefined
   ): TryForBabyResult {
-    const eligibility = evaluateFamilyPlanningEligibility(partner);
+    const eligibility = evaluateFamilyPlanningEligibility(partner, character);
     if (!eligibility.eligible || !partner) {
       return {
         success: false,
@@ -459,7 +505,7 @@ export class ReproductionService {
     character: CharacterProfile,
     partner: PersonProfile | null | undefined
   ): { success: boolean; message: string; cashDelta: number } {
-    const eligibility = evaluateFamilyPlanningEligibility(partner);
+    const eligibility = evaluateFamilyPlanningEligibility(partner, character);
     if (!eligibility.eligible || !partner) {
       return {
         success: false,
@@ -480,7 +526,7 @@ export class ReproductionService {
     ageGroup: 'infant' | 'toddler' | 'child',
     customFirstName?: string
   ): { success: boolean; child?: ChildProfile; message: string; cashDelta: number } {
-    const eligibility = evaluateFamilyPlanningEligibility(partner);
+    const eligibility = evaluateFamilyPlanningEligibility(partner, character);
     if (!eligibility.eligible || !partner) {
       return {
         success: false,

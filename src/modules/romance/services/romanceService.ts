@@ -12,6 +12,31 @@ import type {
 } from '../types';
 import { createId } from '../../../utils/id';
 import { MALE_NAMES, FEMALE_NAMES, LAST_NAMES } from '../../character/data/names';
+import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
+
+function isCommittedPartnerProfile(person: PersonProfile): boolean {
+  return (
+    person.romanticStage === 'dating' ||
+    person.romanticStage === 'engaged' ||
+    person.romanticStage === 'married' ||
+    person.relationshipType === 'dating' ||
+    person.relationshipType === 'partner' ||
+    person.relationshipType === 'spouse' ||
+    ['Girlfriend', 'Boyfriend', 'Fiancé', 'Fiancée', 'Wife', 'Husband', 'Partner'].includes(person.role)
+  );
+}
+
+/**
+ * Returns true if the character currently has an active official romantic partner
+ * (`dating`, `engaged`, or `married`), whether stored in `character.partner` or `relationships`.
+ */
+export function hasActiveRomanticPartner(
+  character: Pick<CharacterProfile, 'partner' | 'relationships'>
+): boolean {
+  return Boolean(
+    character.partner || (character.relationships || []).some(isCommittedPartnerProfile)
+  );
+}
 
 export class RomanceService {
   /**
@@ -54,6 +79,18 @@ export class RomanceService {
         result: {
           success: false,
           message: 'You must be at least 16 years old to pursue romance.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+        },
+      };
+    }
+
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You cannot pursue flirting or physical romance while serving a prison sentence.',
           relationshipDelta: 0,
           romanceDelta: 0,
         },
@@ -129,6 +166,19 @@ export class RomanceService {
           message: 'You must be at least 16 years old to go on romantic dates.',
           relationshipDelta: 0,
           romanceDelta: 0,
+        },
+      };
+    }
+
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You cannot go out on dates while incarcerated.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+          cashDelta: 0,
         },
       };
     }
@@ -218,6 +268,19 @@ export class RomanceService {
     target: PersonProfile,
     gift: RomanticGift
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You cannot purchase or send romantic gifts while incarcerated.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+          cashDelta: 0,
+        },
+      };
+    }
+
     if (character.cash < gift.cost) {
       return {
         updatedTarget: target,
@@ -263,6 +326,18 @@ export class RomanceService {
         result: {
           success: false,
           message: 'You must be at least 16 years old to ask someone to be your romantic partner.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+        },
+      };
+    }
+
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You cannot start new official relationships while incarcerated.',
           relationshipDelta: 0,
           romanceDelta: 0,
         },
@@ -333,6 +408,19 @@ export class RomanceService {
     ring: EngagementRing,
     venue: ProposalVenue
   ): { updatedTarget: PersonProfile; result: RomanceActionResult } {
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You cannot purchase rings or propose at outside venues while incarcerated.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+          cashDelta: 0,
+        },
+      };
+    }
+
     const totalCost = ring.cost + venue.cost;
     if (character.cash < totalCost) {
       return {
@@ -467,6 +555,20 @@ export class RomanceService {
     venue: WeddingVenue,
     demandPrenup: boolean
   ): { updatedTarget: PersonProfile; result: RomanceActionResult; prenupSigned: boolean } {
+    if (isCurrentlyIncarcerated(character)) {
+      return {
+        updatedTarget: target,
+        result: {
+          success: false,
+          message: 'You cannot host wedding ceremonies while incarcerated.',
+          relationshipDelta: 0,
+          romanceDelta: 0,
+          cashDelta: 0,
+        },
+        prenupSigned: false,
+      };
+    }
+
     if (character.cash < venue.cost) {
       return {
         updatedTarget: target,
@@ -587,7 +689,7 @@ export class RomanceService {
     count: number = 3,
     preference?: 'women' | 'men' | 'everyone'
   ): DatingCandidate[] {
-    if (character.age < 16) {
+    if (character.age < 16 || isCurrentlyIncarcerated(character)) {
       return [];
     }
 

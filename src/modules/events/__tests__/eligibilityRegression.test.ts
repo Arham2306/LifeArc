@@ -182,7 +182,7 @@ function expectSameEligibility(name: string, character: CharacterProfile): void 
   }
 }
 
-assert(EVENT_POOL.length === 174, `Expected 174 templates, found ${EVENT_POOL.length}`);
+assert(EVENT_POOL.length === 176, `Expected 176 templates, found ${EVENT_POOL.length}`);
 assert(
   EVENT_POOL.every((event) => event.requires === undefined && event.excludes === undefined),
   'Existing templates must not define requires or excludes'

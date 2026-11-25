@@ -1336,7 +1336,7 @@ function testThreeTierRecordReliefSystem() {
     age: 30,
     cash: 25000,
     bankBalance: 15000,
-    karma: 75,
+    stats: { health: 80, happiness: 75, smarts: 70, looks: 60, karma: 75 },
     career: { ...createInitialCareerState(), currentJob: employedJob },
     crime: {
       ...createEmptyCrimeState(),
@@ -1470,7 +1470,7 @@ function testThreeTierRecordReliefSystem() {
   const violentLowKarma = createLegalTestCharacter({
     age: 36,
     cash: 30000,
-    karma: 45,
+    stats: { health: 80, happiness: 75, smarts: 70, looks: 60, karma: 45 },
     career: { ...createInitialCareerState(), currentJob: employedJob },
     crime: { ...createEmptyCrimeState(), records: [robberyPrisonRecord] },
   });
@@ -1483,7 +1483,10 @@ function testThreeTierRecordReliefSystem() {
     'Tier 3 Governor Pardon requires Karma >= 60',
   );
 
-  const violentHighKarma = { ...violentLowKarma, karma: 80 };
+  const violentHighKarma = {
+    ...violentLowKarma,
+    stats: { ...violentLowKarma.stats, karma: 80 },
+  };
   const grantedPardon = petitionRecordRelief(
     violentHighKarma,
     robberyPrisonRecord.id,
