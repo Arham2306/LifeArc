@@ -605,6 +605,7 @@ export interface HealthcareYearProgress {
   healthcare: PlayerHealthcare | undefined;
   cashSpent: number;
   healthDelta: number;
+  heartHealthDelta: number;
   happinessDelta: number;
   events: LifeEvent[];
   heartAloneCausesDeath: boolean;
@@ -620,6 +621,7 @@ export function progressHealthcareForYear(
       healthcare: character.healthcare,
       cashSpent: 0,
       healthDelta: 0,
+      heartHealthDelta: 0,
       happinessDelta: 0,
       events: [],
       heartAloneCausesDeath: false,
@@ -633,6 +635,7 @@ export function progressHealthcareForYear(
         healthcare: character.healthcare,
         cashSpent: 0,
         healthDelta: 0,
+        heartHealthDelta: 0,
         happinessDelta: 0,
         events: [],
         heartAloneCausesDeath: false,
@@ -648,6 +651,7 @@ export function progressHealthcareForYear(
       healthcare: character.healthcare,
       cashSpent: 0,
       healthDelta: 0,
+      heartHealthDelta: 0,
       happinessDelta: 0,
       events: [],
       heartAloneCausesDeath: false,
@@ -850,6 +854,7 @@ export function progressHealthcareForYear(
     healthcare: nextHealthcare,
     cashSpent,
     healthDelta: totalHealthDelta,
+    heartHealthDelta,
     happinessDelta: totalHappinessDelta,
     events: [],
     heartAloneCausesDeath,

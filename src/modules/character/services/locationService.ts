@@ -68,18 +68,40 @@ export function getFlagEmoji(countryCode: string): string {
   return String.fromCodePoint(...codePoints);
 }
 
+const COUNTRIES_NOW_TIMEOUT_MS = 5000;
+
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = COUNTRIES_NOW_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Fetch all ~250 countries with unicode flags from CountriesNow API
  */
-export async function fetchAllCountries(): Promise<CountryItem[]> {
+export async function fetchAllCountries(
+  timeoutMs = COUNTRIES_NOW_TIMEOUT_MS,
+): Promise<CountryItem[]> {
   if (countriesCache && countriesCache.length > 0) {
     return countriesCache;
   }
 
   try {
-    const res = await fetch('https://countriesnow.space/api/v0.1/countries/flag/unicode', {
-      headers: { Accept: 'application/json' },
-    });
+    const res = await fetchWithTimeout(
+      'https://countriesnow.space/api/v0.1/countries/flag/unicode',
+      {
+        headers: { Accept: 'application/json' },
+      },
+      timeoutMs,
+    );
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -119,7 +141,10 @@ function prioritizeMajorCities(countryName: string, apiCities: string[]): string
 /**
  * Fetch all cities for a specific country from CountriesNow API
  */
-export async function fetchCitiesForCountry(countryName: string): Promise<string[]> {
+export async function fetchCitiesForCountry(
+  countryName: string,
+  timeoutMs = COUNTRIES_NOW_TIMEOUT_MS,
+): Promise<string[]> {
   if (!countryName) return [];
 
   if (cityCache.has(countryName)) {
@@ -127,14 +152,18 @@ export async function fetchCitiesForCountry(countryName: string): Promise<string
   }
 
   try {
-    const res = await fetch('https://countriesnow.space/api/v0.1/countries/cities', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+    const res = await fetchWithTimeout(
+      'https://countriesnow.space/api/v0.1/countries/cities',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ country: countryName }),
       },
-      body: JSON.stringify({ country: countryName }),
-    });
+      timeoutMs,
+    );
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();

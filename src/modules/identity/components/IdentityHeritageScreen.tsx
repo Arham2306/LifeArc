@@ -245,12 +245,14 @@ export const IdentityHeritageScreen: React.FC<IdentityHeritageScreenProps> = ({
                   {formatIdentityMoney(financial.cash)}
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-300 bg-white p-2">
-                <div className="text-[10px] font-bold text-slate-500">Bank Balance</div>
-                <div className="font-black font-mono text-slate-950 break-all">
-                  {formatIdentityMoney(financial.bankBalance)}
+              {financial.bankBalance !== 0 && (
+                <div className="rounded-xl border border-slate-300 bg-white p-2">
+                  <div className="text-[10px] font-bold text-slate-500">Bank Balance</div>
+                  <div className="font-black font-mono text-slate-950 break-all">
+                    {formatIdentityMoney(financial.bankBalance)}
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="rounded-xl border border-slate-300 bg-white p-2">
                 <div className="text-[10px] font-bold text-slate-500">
                   Real Estate ({financial.realEstateCount})

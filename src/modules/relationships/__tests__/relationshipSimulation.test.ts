@@ -7,6 +7,8 @@ import {
   executeSocialAction,
   findNewFriend,
   hasPerformedActionThisYear,
+  isPartnerProfile,
+  performChildParentingAction,
 } from '../services/relationshipService';
 import { GIFT_CATALOG } from '../data/socialInteractions';
 
@@ -367,5 +369,59 @@ const agedParent = ageUpCharacter(charWithChildren);
 assert(agedParent.children !== undefined, 'Children preserved after age-up');
 assert(agedParent.children![0].age === 5, 'Child aged from 4 to 5');
 console.log(`✅ Children in Family: Oliver properly tracked, aged, and recognized in family relationships!`);
+
+// Test 12: Shared partner detection and child parenting service actions (#6, #13)
+assert(isPartnerProfile(partnerProfile) === true, 'isPartnerProfile detects active dating/married partners');
+assert(
+  isPartnerProfile({ ...partnerProfile, romanticStage: 'none', relationshipType: 'friend', role: 'Friend' }) === false,
+  'isPartnerProfile returns false for platonic friends'
+);
+
+const parentingBase = createMockCharacter({
+  age: 34,
+  cash: 20000,
+  stats: { health: 90, happiness: 50, smarts: 75, looks: 80, karma: 95 },
+  children: [{ ...testChild, age: 18, relationship: 70, happiness: 60, smarts: 70 }],
+});
+
+const spent = performChildParentingAction(parentingBase, testChild.id, 'spend_time');
+assert(
+  spent.succeeded &&
+    spent.character.children![0].relationship === 82 &&
+    spent.character.children![0].happiness === 70 &&
+    spent.character.stats.happiness === 55,
+  'performChildParentingAction spend_time boosts child relationship/happiness and parent happiness'
+);
+
+const praised = performChildParentingAction(parentingBase, testChild.id, 'praise');
+assert(
+  praised.succeeded &&
+    praised.character.children![0].relationship === 78 &&
+    praised.character.children![0].smarts === 74,
+  'performChildParentingAction praise boosts child relationship and smarts'
+);
+
+const allowanceFail = performChildParentingAction({ ...parentingBase, cash: 10 }, testChild.id, 'allowance', 50);
+assert(!allowanceFail.succeeded && allowanceFail.character.cash === 10, 'allowance rejects insufficient cash');
+
+const allowanceOk = performChildParentingAction(parentingBase, testChild.id, 'allowance', 100);
+assert(
+  allowanceOk.succeeded &&
+    allowanceOk.character.cash === 19900 &&
+    allowanceOk.character.stats.happiness === 55 &&
+    allowanceOk.character.children![0].relationship === 80 &&
+    allowanceOk.character.children![0].happiness === 75,
+  'performChildParentingAction allowance deducts cash and applies +5 parent happiness'
+);
+
+const tuitionOk = performChildParentingAction(parentingBase, testChild.id, 'pay_tuition');
+assert(
+  tuitionOk.succeeded &&
+    tuitionOk.character.cash === 5000 &&
+    tuitionOk.character.stats.happiness === 70 &&
+    tuitionOk.character.children![0].relationship === 100 &&
+    tuitionOk.character.children![0].occupation === 'College Graduate',
+  'performChildParentingAction pay_tuition deducts $15k, graduates child, and grants +20 parent happiness'
+);
 
 console.log('--- ALL MODULE 6 RELATIONSHIPS & SOCIAL HUB TESTS PASSED PERFECTLY! ---');

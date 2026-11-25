@@ -578,6 +578,18 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     ? 'Unemployed'
     : character.occupation;
 
+  const healthWithoutHeart = Math.round(
+    character.stats.health +
+      externalHealthDelta +
+      activitiesYear.healthDelta +
+      (healthcareYear.healthDelta - healthcareYear.heartHealthDelta)
+  );
+  const healthWithHeart = healthWithoutHeart + healthcareYear.heartHealthDelta;
+  const heartDecisive =
+    healthcareYear.heartHealthDelta < 0 &&
+    healthWithoutHeart > 0 &&
+    healthWithHeart <= 0;
+
   const { character: aged } = applyEffects(
     {
       ...character,
@@ -607,7 +619,6 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       },
       career: careerProgress.career,
       business: updatedBusiness,
-      ...(healthcareYear.heartAloneCausesDeath ? { causeOfDeath: 'A tired heart' } : {}),
       ...(healthcareYear.healthcare !== undefined
         ? { healthcare: healthcareYear.healthcare }
         : character.healthcare
@@ -659,15 +670,17 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     const homelessnessDecisiveDeath =
       !aged.isAlive &&
       !diedOfOldAge &&
-      !healthcareYear.heartAloneCausesDeath &&
+      !heartDecisive &&
       housingYear.healthDelta < 0 &&
       survivedWithoutHousingLoss;
 
     const cause = diedOfOldAge
       ? 'Passed away peacefully in sleep of old age'
-      : homelessnessDecisiveDeath
-        ? HOMELESSNESS_DEATH_CAUSE
-        : aged.causeOfDeath || 'Succumbed to poor health';
+      : heartDecisive
+        ? 'A tired heart'
+        : homelessnessDecisiveDeath
+          ? HOMELESSNESS_DEATH_CAUSE
+          : aged.causeOfDeath || 'Succumbed to poor health';
 
     const deathEvent: LifeEvent = {
       id: createId(),

@@ -86,10 +86,17 @@ export const BusinessScreen: React.FC<BusinessScreenProps> = ({
     customInvestmentAmount?: number;
     angelEquityDilutionPct?: number;
   }) => {
-    const result = foundBusiness(character, params);
-    onUpdateCharacter(result.character);
-    setIsModalOpen(false);
-    setStatusMessage(`Successfully founded ${result.business.name}!`);
+    try {
+      const result = foundBusiness(character, params);
+      onUpdateCharacter(result.character);
+      setIsModalOpen(false);
+      setStatusMessage(`Successfully founded ${result.business.name}!`);
+    } catch (err) {
+      setStatusMessage(
+        err instanceof Error ? err.message : 'Unable to incorporate business with selected funding.'
+      );
+      setIsModalOpen(false);
+    }
   };
 
   const handleUpdateLevers = (
@@ -1331,6 +1338,18 @@ export const BusinessScreen: React.FC<BusinessScreenProps> = ({
   // ==========================================================================
   return (
     <div className="p-4 flex flex-col items-center justify-center text-center gap-4 bg-white min-h-[480px]">
+      {statusMessage && (
+        <div className="w-full max-w-sm rounded-2xl bg-rose-100 border-2 border-slate-900 px-3.5 py-2 text-xs font-black text-slate-900 flex items-center justify-between text-left shadow-[2px_2px_0_#0f172a]">
+          <span>{statusMessage}</span>
+          <button
+            onClick={() => setStatusMessage(null)}
+            className="text-slate-600 hover:text-slate-950 font-black cursor-pointer ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="w-20 h-20 rounded-3xl bg-amber-300 border-[3px] border-slate-900 flex items-center justify-center text-4xl shadow-[3px_4px_0_#0f172a]">
         🚀
       </div>

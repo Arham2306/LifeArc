@@ -2,15 +2,18 @@ import React, { useState } from 'react';
 import { ArrowLeft, UserPlus, ChevronRight, Heart } from 'lucide-react';
 import { Badge } from '../../../components/ui/Badge';
 import { ProgressBar } from '../../../components/ui/ProgressBar';
-import type { CharacterProfile, PersonProfile, SiblingProfile, ChildProfile, LifeEvent } from '../../../types/game';
+import type { CharacterProfile, PersonProfile, SiblingProfile, ChildProfile } from '../../../types/game';
 import { CharacterDetailModal } from './CharacterDetailModal';
 import { FindFriendModal } from './FindFriendModal';
 import { ChildDetailModal } from '../../romance/components/ChildDetailModal';
 import { ActionOutcomeModal } from '../../../components/ui/ActionOutcomeModal';
-import type { TargetPersonRef } from '../services/relationshipService';
+import {
+  isPartnerProfile,
+  performChildParentingAction,
+  type ChildParentingAction,
+  type TargetPersonRef,
+} from '../services/relationshipService';
 import { ARCHETYPE_LABELS } from '../services/cohortService';
-import { createId } from '../../../utils/id';
-import { stampPlayerNetWorth } from '../../assets/services/assetService';
 
 interface RelationshipsScreenProps {
   character: CharacterProfile;
@@ -37,16 +40,6 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
   const siblings = character.siblings || [];
   const friends = character.relationships || [];
   const children = character.children || [];
-
-  // Check if a person profile represents an active romantic partner/dating/spouse
-  const isPartnerProfile = (p: PersonProfile) =>
-    p.romanticStage === 'dating' ||
-    p.romanticStage === 'engaged' ||
-    p.romanticStage === 'married' ||
-    p.relationshipType === 'dating' ||
-    p.relationshipType === 'partner' ||
-    p.relationshipType === 'spouse' ||
-    ['Girlfriend', 'Boyfriend', 'Fiancé', 'Fiancée', 'Wife', 'Husband', 'Partner'].includes(p.role);
 
   // Resolve active partner: check character.partner first, fallback to relationships match
   const partner =
@@ -148,185 +141,71 @@ export const RelationshipsScreen: React.FC<RelationshipsScreenProps> = ({
   };
 
   // Child Parenting Actions
-  const handleChildSpendTime = (child: ChildProfile) => {
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id
-        ? {
-            ...c,
-            relationship: Math.min(100, c.relationship + 12),
-            happiness: Math.min(100, c.happiness + 10),
-          }
-        : c
-    );
-    const journalEntry: LifeEvent = {
-      id: createId(),
-      age: character.age,
-      year: character.birthYear + character.age,
-      title: `Quality Time with ${child.firstName}`,
-      message: `You spent memorable quality time with ${child.firstName}! Your bond and their happiness blossomed.`,
-      category: 'relationship',
-      icon: '🧸',
-    };
-    const updatedChar: CharacterProfile = {
-      ...character,
-      children: updatedChildren,
-      timeline: [...(character.timeline || []), journalEntry],
-      stats: {
-        ...character.stats,
-        happiness: Math.min(100, character.stats.happiness + 5),
-      },
-    };
-    onUpdateCharacter(updatedChar);
-    setSelectedChild(null);
-    setChildOutcome({
-      title: `Quality Time with ${child.firstName}`,
-      message: `You spent quality time with ${child.firstName}. They smiled and laughed, feeling loved and supported!`,
-      icon: '🧸',
-      deltas: [
-        { label: 'Relationship', delta: '+12%', color: 'emerald' },
-        { label: 'Happiness', delta: '+5%', color: 'amber' },
-      ],
-    });
-  };
-
-  const handleChildPraise = (child: ChildProfile) => {
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id
-        ? {
-            ...c,
-            relationship: Math.min(100, c.relationship + 8),
-            smarts: Math.min(100, c.smarts + 4),
-          }
-        : c
-    );
-    const journalEntry: LifeEvent = {
-      id: createId(),
-      age: character.age,
-      year: character.birthYear + character.age,
-      title: `Praised ${child.firstName}`,
-      message: `You praised ${child.firstName} for their efforts! Their confidence and smarts soared.`,
-      category: 'relationship',
-      icon: '⭐',
-    };
-    const updatedChar: CharacterProfile = {
-      ...character,
-      children: updatedChildren,
-      timeline: [...(character.timeline || []), journalEntry],
-    };
-    onUpdateCharacter(updatedChar);
-    setSelectedChild(null);
-    setChildOutcome({
-      title: `Praised ${child.firstName}`,
-      message: `You praised ${child.firstName}. Their face lit up with pride!`,
-      icon: '⭐',
-      deltas: [
-        { label: 'Relationship', delta: '+8%', color: 'emerald' },
-        { label: 'Smarts', delta: '+4%', color: 'sky' },
-      ],
-    });
-  };
-
-  const handleChildAllowance = (child: ChildProfile, amount: number) => {
-    if (character.cash < amount) {
+  const handleChildAction = (
+    child: ChildProfile,
+    action: ChildParentingAction,
+    amount = 0,
+  ) => {
+    const res = performChildParentingAction(character, child.id, action, amount);
+    if (!res.succeeded) {
       setChildOutcome({
-        title: 'Insufficient Cash',
-        message: `You need at least $${amount} to give an allowance.`,
-        icon: '💵',
+        title: res.title,
+        message: res.message,
+        icon: res.icon,
       });
       return;
     }
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id
-        ? {
-            ...c,
-            relationship: Math.min(100, c.relationship + 10),
-            happiness: Math.min(100, c.happiness + 15),
-          }
-        : c
-    );
-    const journalEntry: LifeEvent = {
-      id: createId(),
-      age: character.age,
-      year: character.birthYear + character.age,
-      title: `Allowance for ${child.firstName}`,
-      message: `You gave ${child.firstName} a $${amount} allowance!`,
-      category: 'relationship',
-      icon: '💵',
-    };
-    const updatedChar = stampPlayerNetWorth({
-      ...character,
-      cash: character.cash - amount,
-      children: updatedChildren,
-      timeline: [...(character.timeline || []), journalEntry],
-      stats: {
-        ...character.stats,
-        happiness: Math.min(100, character.stats.happiness + 5),
-      },
-    });
-    onUpdateCharacter(updatedChar);
+
+    onUpdateCharacter(res.character);
     setSelectedChild(null);
+
+    const outcomeDeltas: Array<{
+      label: string;
+      delta: string | number;
+      color?: 'emerald' | 'rose' | 'amber' | 'sky' | 'slate';
+    }> = [];
+    if (res.deltas.cashDelta) {
+      outcomeDeltas.push({
+        label: 'Cash',
+        delta: `-$${Math.abs(res.deltas.cashDelta).toLocaleString()}`,
+        color: 'slate',
+      });
+    }
+    if (res.deltas.relationshipLabel || res.deltas.relationshipDelta) {
+      outcomeDeltas.push({
+        label: 'Relationship',
+        delta: res.deltas.relationshipLabel ?? `+${res.deltas.relationshipDelta}%`,
+        color: 'emerald',
+      });
+    }
+    if (res.deltas.smartsDelta) {
+      outcomeDeltas.push({
+        label: 'Smarts',
+        delta: `+${res.deltas.smartsDelta}%`,
+        color: 'sky',
+      });
+    }
+    if (res.deltas.happinessDelta) {
+      outcomeDeltas.push({
+        label: 'Happiness',
+        delta: `+${res.deltas.happinessDelta}%`,
+        color: 'amber',
+      });
+    }
+
     setChildOutcome({
-      title: `Allowance Given`,
-      message: `You gave ${child.firstName} $${amount}! They beamed with joy and thanked you warmly.`,
-      icon: '💵',
-      deltas: [
-        { label: 'Cash', delta: `-$${amount}`, color: 'slate' },
-        { label: 'Relationship', delta: '+10%', color: 'emerald' },
-        { label: 'Happiness', delta: '+5%', color: 'amber' },
-      ],
+      title: res.title,
+      message: res.message,
+      icon: res.icon,
+      deltas: outcomeDeltas,
     });
   };
 
-  const handleChildPayTuition = (child: ChildProfile) => {
-    if (character.cash < 15000) {
-      setChildOutcome({
-        title: 'Insufficient Cash',
-        message: 'You need at least $15,000 for college tuition.',
-        icon: '🎓',
-      });
-      return;
-    }
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id
-        ? {
-            ...c,
-            relationship: 100,
-            occupation: 'College Graduate',
-          }
-        : c
-    );
-    const journalEntry: LifeEvent = {
-      id: createId(),
-      age: character.age,
-      year: character.birthYear + character.age,
-      title: `College Tuition for ${child.firstName}`,
-      message: `You paid $15,000 for ${child.firstName}'s college tuition! They graduated and are deeply grateful!`,
-      category: 'milestone',
-      icon: '🎓',
-    };
-    const updatedChar = stampPlayerNetWorth({
-      ...character,
-      cash: character.cash - 15000,
-      children: updatedChildren,
-      timeline: [...(character.timeline || []), journalEntry],
-      stats: {
-        ...character.stats,
-        happiness: Math.min(100, character.stats.happiness + 20),
-      },
-    });
-    onUpdateCharacter(updatedChar);
-    setSelectedChild(null);
-    setChildOutcome({
-      title: `College Tuition Paid! 🎓`,
-      message: `You paid $15,000 for ${child.firstName}'s college degree! They graduated with honors and will never forget your generosity.`,
-      icon: '🎓',
-      deltas: [
-        { label: 'Cash', delta: '-$15,000', color: 'slate' },
-        { label: 'Relationship', delta: 'Max 100%', color: 'emerald' },
-        { label: 'Happiness', delta: '+20%', color: 'amber' },
-      ],
-    });
-  };
+  const handleChildSpendTime = (child: ChildProfile) => handleChildAction(child, 'spend_time');
+  const handleChildPraise = (child: ChildProfile) => handleChildAction(child, 'praise');
+  const handleChildAllowance = (child: ChildProfile, amount: number) =>
+    handleChildAction(child, 'allowance', amount);
+  const handleChildPayTuition = (child: ChildProfile) => handleChildAction(child, 'pay_tuition');
 
   const getStageTag = (stageMet: string) => {
     switch (stageMet) {

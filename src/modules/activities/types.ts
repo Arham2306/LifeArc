@@ -1,4 +1,4 @@
-import type { LifeEvent } from '../../types/game';
+import type { LifeEvent, StatEffects } from '../../types/game';
 
 export type DietId =
   | 'standard'
@@ -120,6 +120,7 @@ export interface ActivityActionResult {
   title: string;
   summary: string;
   costPaid: number;
+  appliedEffects?: StatEffects;
 }
 
 export interface ActivitiesYearProgress {

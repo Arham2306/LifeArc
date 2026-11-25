@@ -173,7 +173,7 @@ export const ConditionDetailModal: React.FC<ConditionDetailModalProps> = ({
               <div className="rounded-xl border-2 border-rose-900 bg-rose-50 p-2.5 flex items-start gap-2 text-xs font-bold text-rose-950">
                 <AlertCircle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
                 <div>
-                  Insufficient cash: Remedy costs {formatMoney(remedyPrice)}. You have {formatMoney(cash)}. Bank balance is not used for medical care.
+                  Insufficient wallet cash: Remedy costs {formatMoney(remedyPrice)}. You have {formatMoney(cash)}.
                 </div>
               </div>
             )}
@@ -181,7 +181,7 @@ export const ConditionDetailModal: React.FC<ConditionDetailModalProps> = ({
               <div className="rounded-xl border-2 border-rose-900 bg-rose-50 p-2.5 flex items-start gap-2 text-xs font-bold text-rose-950">
                 <AlertCircle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
                 <div>
-                  Insufficient cash: Surgical procedure costs {formatMoney(procedurePrice)}. You have {formatMoney(cash)}. Bank balance is not used.
+                  Insufficient wallet cash: Surgical procedure costs {formatMoney(procedurePrice)}. You have {formatMoney(cash)}.
                 </div>
               </div>
             )}
@@ -189,7 +189,7 @@ export const ConditionDetailModal: React.FC<ConditionDetailModalProps> = ({
               <div className="rounded-xl border-2 border-rose-900 bg-rose-50 p-2.5 flex items-start gap-2 text-xs font-bold text-rose-950">
                 <AlertCircle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
                 <div>
-                  Insufficient cash: Annual care costs {formatMoney(enrollPrice)}. You have {formatMoney(cash)}. Bank balance is not used.
+                  Insufficient wallet cash: Annual care costs {formatMoney(enrollPrice)}. You have {formatMoney(cash)}.
                 </div>
               </div>
             )}

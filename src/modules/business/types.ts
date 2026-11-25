@@ -144,6 +144,8 @@ export interface FundingEligibility {
   angelValuation: number;
   angelOfferedEquityPct: number;
   reason?: string;
+  bankLoanReason?: string;
+  angelReason?: string;
 }
 
 export interface BusinessFiscalReport {

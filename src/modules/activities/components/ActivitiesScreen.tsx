@@ -108,36 +108,23 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
   };
 
   const handleRoutineClick = (actionId: MindBodyActionId) => {
-    const template = MIND_BODY_ACTIONS.find((a) => a.id === actionId);
     const res = performMindBodyAction(character, actionId);
     handleOutcomeResult(
       res,
-      template
-        ? {
-            ...template.effects,
-            ...(res.costPaid > 0 ? { cash: -res.costPaid } : {}),
-          }
-        : undefined
+      res.appliedEffects ?? (res.costPaid > 0 ? { cash: -res.costPaid } : undefined)
     );
   };
 
   const handleToggleGymPass = () => {
     const res = toggleGymMembership(character, !activities.gymMembershipActive);
-    handleOutcomeResult(res, res.costPaid > 0 ? { cash: -res.costPaid } : undefined);
+    handleOutcomeResult(res, res.appliedEffects ?? (res.costPaid > 0 ? { cash: -res.costPaid } : undefined));
   };
 
   const handleTrainMartialArt = (discipline: MartialArtId) => {
     const res = trainMartialArt(character, discipline);
     handleOutcomeResult(
       res,
-      res.succeeded
-        ? {
-            health: 4,
-            happiness: 2,
-            smarts: 1,
-            ...(res.costPaid > 0 ? { cash: -res.costPaid } : {}),
-          }
-        : undefined
+      res.appliedEffects ?? (res.costPaid > 0 ? { cash: -res.costPaid } : undefined)
     );
   };
 

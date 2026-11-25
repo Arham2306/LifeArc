@@ -1,5 +1,6 @@
-import type { CharacterProfile, StatEffects, StatKey } from '../../../types/game'
+import type { CharacterProfile, LifeEvent, StatEffects, StatKey } from '../../../types/game'
 import { stampPlayerNetWorth } from '../../assets/services/assetService'
+import { createId } from '../../../utils/id'
 
 const STAT_KEYS: StatKey[] = ['health', 'happiness', 'smarts', 'looks', 'karma'];
 
@@ -161,5 +162,39 @@ export function applyEffects(character: CharacterProfile, effects: StatEffects):
         : character.causeOfDeath,
     }),
     applied,
+  };
+}
+
+/**
+ * Ensures any sub-screen action that drops health to 0 produces a consistent death state:
+ * clamps health to 0, stamps a default cause of death if unset, and appends one "Rest in Peace"
+ * timeline entry without duplicating an existing entry at the same age.
+ */
+export function finalizeCharacterDeath(character: CharacterProfile): CharacterProfile {
+  if (character.isAlive) return character;
+
+  const cause = character.causeOfDeath || 'Succumbed to poor health';
+  const lastEvent = character.timeline[character.timeline.length - 1];
+  const hasDeathEventAtTail =
+    lastEvent?.title === 'Rest in Peace' && lastEvent?.age === character.age;
+
+  const deathEvent: LifeEvent | null = hasDeathEventAtTail
+    ? null
+    : {
+        id: createId(),
+        age: character.age,
+        year: character.birthYear + character.age,
+        title: 'Rest in Peace',
+        message: `You died at age ${character.age}. Cause of death: ${cause}.`,
+        category: 'misfortune',
+        icon: '🪦',
+      };
+
+  return {
+    ...character,
+    isAlive: false,
+    causeOfDeath: cause,
+    stats: { ...character.stats, health: 0 },
+    timeline: deathEvent ? [...character.timeline, deathEvent] : character.timeline,
   };
 }

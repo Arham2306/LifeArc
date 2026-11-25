@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Globe, MapPin, User, Dices, Rocket } from 'lucide-react'
 import { CartoonButton } from '../../../components/ui/CartoonButton'
 import { CartoonInput } from '../../../components/ui/CartoonInput'
@@ -37,6 +37,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
   const [isLoadingCountries, setIsLoadingCountries] = useState(true)
   const [isLoadingCities, setIsLoadingCities] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const pendingRandomCityRef = useRef(false)
 
   // 1. Fetch all 250 countries on initial mount
   useEffect(() => {
@@ -73,8 +74,14 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
 
       // First item in cityList is now guaranteed to be a major city (e.g. New York, Karachi, Tokyo)
       if (cityList.length > 0) {
-        setSelectedCityName(cityList[0]);
+        if (pendingRandomCityRef.current) {
+          pendingRandomCityRef.current = false;
+          setSelectedCityName(pickRandomCity(selectedCountryName, cityList));
+        } else {
+          setSelectedCityName(cityList[0]);
+        }
       } else {
+        pendingRandomCityRef.current = false;
         setSelectedCityName(selectedCountryName);
       }
     }
@@ -87,6 +94,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
 
   const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newCountry = e.target.value;
+    pendingRandomCityRef.current = false;
     setSelectedCountryName(newCountry);
     setValidationError('');
   };
@@ -103,7 +111,7 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
   };
 
   // Surprise Me (Full Randomize)
-  const randomizeAll = async () => {
+  const randomizeAll = () => {
     const genders: ('male' | 'female' | 'non-binary')[] = ['male', 'female', 'non-binary'];
     const randomGender = genders[Math.floor(Math.random() * genders.length)];
     setGender(randomGender);
@@ -114,14 +122,15 @@ export const NewLifeScreen: React.FC<NewLifeScreenProps> = ({ onStartLife }) => 
 
     if (countries.length > 0) {
       const randomCountry = countries[Math.floor(Math.random() * countries.length)];
-      setSelectedCountryName(randomCountry.name);
-
-      setIsLoadingCities(true);
-      const cityList = await fetchCitiesForCountry(randomCountry.name);
-      setCities(cityList);
-      setIsLoadingCities(false);
-
-      setSelectedCityName(pickRandomCity(randomCountry.name, cityList));
+      if (randomCountry.name === selectedCountryName) {
+        pendingRandomCityRef.current = false;
+        if (cities.length > 0) {
+          setSelectedCityName(pickRandomCity(randomCountry.name, cities));
+        }
+      } else {
+        pendingRandomCityRef.current = true;
+        setSelectedCountryName(randomCountry.name);
+      }
     }
     setValidationError('');
   };

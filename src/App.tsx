@@ -55,6 +55,7 @@ import type { BusinessFiscalReport } from './modules/business/types'
 import { getSchoolMilestoneNotice } from './modules/education/services/educationService'
 import type { SchoolMilestoneNotice } from './modules/education/types'
 import { ageUpCharacter } from './modules/aging/services/agingService'
+import { finalizeCharacterDeath } from './modules/character/services/statService'
 import { rollEventForCharacter, resolveEventChoice } from './modules/events/services/eventService'
 import { EventModal, type EventResult } from './modules/events/components/EventModal'
 import type { EventChoice, LifeEventTemplate } from './modules/events/types'
@@ -128,6 +129,31 @@ export default function App() {
   const showFiscalModal = activePostAgeUpStep === 'fiscal'
   const showEventModal = activePostAgeUpStep === 'event'
 
+  const clearPostAgeUpQueues = () => {
+    setPendingPrisonRelease(null)
+    setPendingNewbornBirth(null)
+    setSchoolMilestone(null)
+    setActiveFiscalReport(null)
+    setPendingEvent(null)
+    setEventResult(null)
+    setIsUniversityModalOpen(false)
+    setIsProfessionalModalOpen(false)
+  }
+
+  const handleUpdateCharacter = (next: CharacterProfile) => {
+    if (activeCharacter?.isAlive && !next.isAlive) {
+      const finalized = finalizeCharacterDeath(next)
+      setActiveCharacter(finalized)
+      setIsHoldingCourtForArrest(false)
+      setCurrentTab('life')
+      setMenuView('hub')
+      clearPostAgeUpQueues()
+      setIsDeathModalOpen(true)
+      return
+    }
+    setActiveCharacter(next)
+  }
+
   const handleAgeUp = () => {
     if (
       !activeCharacter ||
@@ -151,14 +177,7 @@ export default function App() {
     setSelectedStage(getLifeStageForAge(agedCharacter.age))
 
     if (!agedCharacter.isAlive) {
-      setPendingPrisonRelease(null)
-      setPendingNewbornBirth(null)
-      setSchoolMilestone(null)
-      setActiveFiscalReport(null)
-      setPendingEvent(null)
-      setEventResult(null)
-      setIsUniversityModalOpen(false)
-      setIsProfessionalModalOpen(false)
+      clearPostAgeUpQueues()
       setIsDeathModalOpen(true)
       return
     }
@@ -232,12 +251,7 @@ export default function App() {
     setPendingEvent(null)
     setEventResult(null)
     if (diedDuringEvent) {
-      setPendingPrisonRelease(null)
-      setPendingNewbornBirth(null)
-      setSchoolMilestone(null)
-      setActiveFiscalReport(null)
-      setIsUniversityModalOpen(false)
-      setIsProfessionalModalOpen(false)
+      clearPostAgeUpQueues()
       setIsDeathModalOpen(true)
     }
   }
@@ -400,7 +414,7 @@ export default function App() {
               <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
                 <SchoolScreen
                   character={activeCharacter}
-                  onUpdateCharacter={setActiveCharacter}
+                  onUpdateCharacter={handleUpdateCharacter}
                   isUniversityModalOpen={isUniversityModalOpen}
                   onSetUniversityModalOpen={setIsUniversityModalOpen}
                   isProfessionalModalOpen={isProfessionalModalOpen}
@@ -414,7 +428,7 @@ export default function App() {
               <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
                 <CareerScreen
                   character={activeCharacter}
-                  onUpdateCharacter={setActiveCharacter}
+                  onUpdateCharacter={handleUpdateCharacter}
                   onOpenSchoolTab={() => setCurrentTab('school')}
                 />
               </div>
@@ -425,7 +439,7 @@ export default function App() {
               <div className="flex-1 min-h-0 overflow-y-auto cartoon-scrollbar bg-white">
                 <BusinessScreen
                   character={activeCharacter}
-                  onUpdateCharacter={setActiveCharacter}
+                  onUpdateCharacter={handleUpdateCharacter}
                 />
               </div>
             )}
@@ -436,13 +450,13 @@ export default function App() {
                 {menuView === 'relationships' ? (
                   <RelationshipsScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
                 ) : menuView === 'lifestyle' && activeCharacter.age >= 16 ? (
                   <LifestyleScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
                 ) : menuView === 'activities' &&
@@ -450,19 +464,19 @@ export default function App() {
                   !isCurrentlyIncarcerated(activeCharacter) ? (
                   <ActivitiesScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
                 ) : menuView === 'pets' && activeCharacter.age >= 16 ? (
                   <PetsScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
                 ) : menuView === 'assets' && activeCharacter.age >= 18 ? (
                   <AssetsScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
                 ) : menuView === 'romance' &&
@@ -470,20 +484,20 @@ export default function App() {
                   (!isCurrentlyIncarcerated(activeCharacter) || hasActiveRomanticPartner(activeCharacter)) ? (
                   <RomanceScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                     onOpenRelationships={() => setMenuView('relationships')}
                   />
                 ) : menuView === 'healthcare' && activeCharacter.age >= 6 ? (
                   <HealthcareScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
                 ) : menuView === 'crime' && activeCharacter.age >= CRIME_MENU_MIN_AGE ? (
                   <CrimeScreen
                     character={activeCharacter}
-                    onUpdateCharacter={setActiveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onBackToMenu={() => {
                       setIsHoldingCourtForArrest(false);
                       setMenuView('hub');
@@ -744,7 +758,7 @@ export default function App() {
         <CourtDefenseModal
           character={activeCharacter}
           pendingCase={activeCharacter.isAlive ? (activeCharacter.crime?.pendingCase ?? null) : null}
-          onUpdateCharacter={setActiveCharacter}
+          onUpdateCharacter={handleUpdateCharacter}
           holdOpenForArrestSummary={isHoldingCourtForArrest}
         />
       )}

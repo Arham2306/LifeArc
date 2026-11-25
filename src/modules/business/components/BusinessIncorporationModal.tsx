@@ -52,21 +52,7 @@ export const BusinessIncorporationModal: React.FC<
   const [selectedFunding, setSelectedFunding] =
     useState<FundingMethod>('bootstrapped');
 
-  // Reset or initialize when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      if (initialTemplate) {
-        handleSelectTemplate(initialTemplate);
-      } else {
-        setStep('select_template');
-        setSelectedTemplate(null);
-      }
-    }
-  }, [isOpen, initialTemplate]);
-
-  if (!isOpen) return null;
-
-  const handleSelectTemplate = (tmpl: BusinessTemplate) => {
+  const applyTemplateSelection = React.useCallback((tmpl: BusinessTemplate) => {
     setSelectedTemplate(tmpl);
     const suggested = generateSuggestedBusinessName(
       character.city,
@@ -88,6 +74,23 @@ export const BusinessIncorporationModal: React.FC<
     }
 
     setStep('configure');
+  }, [character]);
+
+  // Reset or initialize when modal opens
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialTemplate) {
+      applyTemplateSelection(initialTemplate);
+    } else {
+      setStep('select_template');
+      setSelectedTemplate(null);
+    }
+  }, [isOpen, initialTemplate, applyTemplateSelection]);
+
+  if (!isOpen) return null;
+
+  const handleSelectTemplate = (tmpl: BusinessTemplate) => {
+    applyTemplateSelection(tmpl);
   };
 
   const handleRandomizeName = () => {
@@ -106,20 +109,15 @@ export const BusinessIncorporationModal: React.FC<
   const sliderStep = minSlider >= 100000 ? 10000 : minSlider >= 50000 ? 5000 : 2500;
 
   const funding = selectedTemplate
-    ? evaluateFundingEligibility(character, selectedTemplate)
+    ? evaluateFundingEligibility(character, selectedTemplate, investmentAmount)
     : null;
 
-  // Real-time financial calculations based on the interactive investment amount
-  const downPayment = Math.round(investmentAmount * 0.25);
-  const loanBalance = investmentAmount - downPayment;
-  const annualLoanService = Math.round(loanBalance * 0.145);
+  const downPayment = funding?.bankLoanDownPayment ?? Math.round(investmentAmount * 0.25);
+  const loanBalance = funding?.bankLoanAmount ?? investmentAmount - downPayment;
+  const annualLoanService = funding?.annualLoanPayment ?? Math.round(loanBalance * 0.145);
 
-  const netWorth = character.cash + (character.bankBalance || 0);
-  const hasCreditWorthiness =
-    character.stats.karma >= 40 && netWorth >= downPayment * 1.5;
-
-  const canAffordBootstrapped = character.cash >= investmentAmount;
-  const canAffordBankLoan = character.cash >= downPayment && hasCreditWorthiness;
+  const canAffordBootstrapped = funding?.canBootstrapped ?? false;
+  const canAffordBankLoan = funding?.canBankLoan ?? false;
   const canPitchAngels = funding?.canPitchAngels ?? false;
 
   const angelEquityPct = funding?.angelOfferedEquityPct || 70;
@@ -424,11 +422,11 @@ export const BusinessIncorporationModal: React.FC<
               <button
                 type="button"
                 onClick={() => setSelectedFunding('bootstrapped')}
-                disabled={character.cash < selectedTemplate.minSeedCapital}
+                disabled={!canAffordBootstrapped}
                 className={`py-2 px-1.5 rounded-xl border-2 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
                   selectedFunding === 'bootstrapped'
                     ? 'bg-emerald-400 text-slate-950 border-slate-900 shadow-[2px_2px_0_#0f172a]'
-                    : character.cash >= selectedTemplate.minSeedCapital
+                    : canAffordBootstrapped
                     ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-900 shadow-[1px_1.5px_0_#0f172a]'
                     : 'bg-slate-100 text-slate-400 border-slate-300 opacity-60 cursor-not-allowed'
                 }`}
@@ -442,11 +440,11 @@ export const BusinessIncorporationModal: React.FC<
               <button
                 type="button"
                 onClick={() => setSelectedFunding('bank_loan')}
-                disabled={!funding?.canBankLoan}
+                disabled={!canAffordBankLoan}
                 className={`py-2 px-1.5 rounded-xl border-2 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
                   selectedFunding === 'bank_loan'
                     ? 'bg-sky-400 text-slate-950 border-slate-900 shadow-[2px_2px_0_#0f172a]'
-                    : funding?.canBankLoan
+                    : canAffordBankLoan
                     ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-900 shadow-[1px_1.5px_0_#0f172a]'
                     : 'bg-slate-100 text-slate-400 border-slate-300 opacity-60 cursor-not-allowed'
                 }`}
@@ -487,7 +485,7 @@ export const BusinessIncorporationModal: React.FC<
             )}
 
             {selectedFunding === 'bank_loan' && !canAffordBankLoan && (
-              <div className="rounded-xl bg-amber-100 border border-amber-900/30 p-2 text-[11px] font-extrabold text-amber-950 flex items-center justify-between">
+              <div className="rounded-xl bg-amber-100 border border-amber-900/30 p-2 text-[11px] font-extrabold text-amber-950 flex items-center justify-between gap-2">
                 {character.cash < downPayment ? (
                   <>
                     <span>⚠️ Need ${downPayment.toLocaleString()} for 25% down payment</span>
@@ -496,14 +494,20 @@ export const BusinessIncorporationModal: React.FC<
                     </span>
                   </>
                 ) : (
-                  <span>⚠️ Bank requires higher Karma (min 40) or greater net worth to issue commercial loan.</span>
+                  <span>
+                    ⚠️{' '}
+                    {funding?.bankLoanReason ||
+                      'Not eligible for commercial loan underwriting at this funding amount.'}
+                  </span>
                 )}
               </div>
             )}
 
             {selectedFunding === 'angel_investors' && !canPitchAngels && (
               <div className="rounded-xl bg-amber-100 border border-amber-900/30 p-2 text-[11px] font-extrabold text-amber-950">
-                ⚠️ Angel investors require at least 55 Smarts or a relevant degree to accept a pitch.
+                ⚠️{' '}
+                {funding?.angelReason ||
+                  'Angel investors require at least 55 Smarts or a relevant degree to accept a pitch.'}
               </div>
             )}
 

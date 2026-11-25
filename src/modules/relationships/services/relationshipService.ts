@@ -20,6 +20,7 @@ import {
   INSULT_OPTIONS,
 } from '../data/socialInteractions';
 import { validPossessions } from '../../lifestyle/services/lifestyleService';
+import { stampPlayerNetWorth } from '../../assets/services/assetService';
 import type { GiftOption, SocialActionOutcome, SocialActionType } from '../types';
 
 export interface TargetPersonRef {
@@ -51,6 +52,15 @@ const COMMITTED_ROLES = new Set([
   'Husband',
   'Partner',
 ]);
+
+/** Returns true if a person profile represents an active romantic partner, fiancé(e), or spouse. */
+export function isPartnerProfile(person: PersonProfile): boolean {
+  return (
+    (person.romanticStage !== undefined && COMMITTED_STAGES.has(person.romanticStage)) ||
+    (person.relationshipType !== undefined && COMMITTED_TYPES.has(person.relationshipType)) ||
+    COMMITTED_ROLES.has(person.role)
+  );
+}
 
 interface ResolvedOutingPerson {
   relationship: number;
@@ -563,5 +573,244 @@ export function findNewFriend(character: CharacterProfile): {
       timeline: [...character.timeline, journalEntry],
     },
     friend: newFriend,
+  };
+}
+
+export type ChildParentingAction = 'spend_time' | 'praise' | 'allowance' | 'pay_tuition';
+
+export interface ChildParentingResult {
+  succeeded: boolean;
+  character: CharacterProfile;
+  title: string;
+  message: string;
+  icon: string;
+  deltas: {
+    cashDelta?: number;
+    relationshipDelta?: number;
+    relationshipLabel?: string;
+    happinessDelta?: number;
+    smartsDelta?: number;
+  };
+}
+
+const COLLEGE_TUITION_COST = 15000;
+
+/**
+ * Applies a child parenting interaction (`spend_time`, `praise`, `allowance`, `pay_tuition`)
+ * consistently for both RelationshipsScreen and RomanceScreen.
+ */
+export function performChildParentingAction(
+  character: CharacterProfile,
+  childId: string,
+  action: ChildParentingAction,
+  amount = 0,
+): ChildParentingResult {
+  const children = character.children || [];
+  const child = children.find((c) => c.id === childId);
+  if (!child) {
+    return {
+      succeeded: false,
+      character,
+      title: 'Unavailable',
+      message: 'Child profile could not be found.',
+      icon: '👶',
+      deltas: {},
+    };
+  }
+
+  const year = character.birthYear + character.age;
+
+  if (action === 'spend_time') {
+    const updatedChildren = children.map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: clamp(c.relationship + 12),
+            happiness: clamp(c.happiness + 10),
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year,
+      title: `Quality Time with ${child.firstName}`,
+      message: `You spent memorable quality time with ${child.firstName}! Your bond and their happiness blossomed.`,
+      category: 'relationship',
+      icon: '🧸',
+    };
+    const nextChar: CharacterProfile = {
+      ...character,
+      children: updatedChildren,
+      timeline: [...(character.timeline || []), journalEntry],
+      stats: {
+        ...character.stats,
+        happiness: clamp(character.stats.happiness + 5),
+      },
+    };
+    return {
+      succeeded: true,
+      character: nextChar,
+      title: `Quality Time with ${child.firstName}`,
+      message: `You spent quality time with ${child.firstName}. They smiled and laughed, feeling loved and supported!`,
+      icon: '🧸',
+      deltas: {
+        relationshipDelta: 12,
+        happinessDelta: 5,
+      },
+    };
+  }
+
+  if (action === 'praise') {
+    const updatedChildren = children.map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: clamp(c.relationship + 8),
+            smarts: clamp(c.smarts + 4),
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year,
+      title: `Praised ${child.firstName}`,
+      message: `You praised ${child.firstName} for their efforts! Their confidence and smarts soared.`,
+      category: 'relationship',
+      icon: '⭐',
+    };
+    return {
+      succeeded: true,
+      character: {
+        ...character,
+        children: updatedChildren,
+        timeline: [...(character.timeline || []), journalEntry],
+      },
+      title: `Praised ${child.firstName}`,
+      message: `You praised ${child.firstName}. Their face lit up with pride!`,
+      icon: '⭐',
+      deltas: {
+        relationshipDelta: 8,
+        smartsDelta: 4,
+      },
+    };
+  }
+
+  if (action === 'allowance') {
+    const normalizedAmount = Math.max(0, Math.round(amount));
+    if (normalizedAmount <= 0) {
+      return {
+        succeeded: false,
+        character,
+        title: 'Invalid Allowance',
+        message: 'Allowance amount must be positive.',
+        icon: '💵',
+        deltas: {},
+      };
+    }
+    if (character.cash < normalizedAmount) {
+      return {
+        succeeded: false,
+        character,
+        title: 'Insufficient Cash',
+        message: `You need at least $${normalizedAmount.toLocaleString()} to give an allowance.`,
+        icon: '💵',
+        deltas: {},
+      };
+    }
+    const updatedChildren = children.map((c) =>
+      c.id === child.id
+        ? {
+            ...c,
+            relationship: clamp(c.relationship + 10),
+            happiness: clamp(c.happiness + 15),
+          }
+        : c
+    );
+    const journalEntry: LifeEvent = {
+      id: createId(),
+      age: character.age,
+      year,
+      title: `Allowance for ${child.firstName}`,
+      message: `You gave ${child.firstName} a $${normalizedAmount.toLocaleString()} allowance!`,
+      category: 'relationship',
+      icon: '💵',
+    };
+    const nextChar = stampPlayerNetWorth({
+      ...character,
+      cash: character.cash - normalizedAmount,
+      children: updatedChildren,
+      timeline: [...(character.timeline || []), journalEntry],
+      stats: {
+        ...character.stats,
+        happiness: clamp(character.stats.happiness + 5),
+      },
+    });
+    return {
+      succeeded: true,
+      character: nextChar,
+      title: 'Allowance Given',
+      message: `You gave ${child.firstName} $${normalizedAmount.toLocaleString()}! They beamed with joy and thanked you warmly.`,
+      icon: '💵',
+      deltas: {
+        cashDelta: -normalizedAmount,
+        relationshipDelta: 10,
+        happinessDelta: 5,
+      },
+    };
+  }
+
+  // pay_tuition
+  if (character.cash < COLLEGE_TUITION_COST) {
+    return {
+      succeeded: false,
+      character,
+      title: 'Insufficient Cash',
+      message: 'You need at least $15,000 for college tuition.',
+      icon: '🎓',
+      deltas: {},
+    };
+  }
+  const updatedChildren = children.map((c) =>
+    c.id === child.id
+      ? {
+          ...c,
+          relationship: 100,
+          occupation: 'College Graduate',
+        }
+      : c
+  );
+  const journalEntry: LifeEvent = {
+    id: createId(),
+    age: character.age,
+    year,
+    title: `College Tuition for ${child.firstName}`,
+    message: `You paid $15,000 for ${child.firstName}'s college tuition! They graduated and are deeply grateful!`,
+    category: 'milestone',
+    icon: '🎓',
+  };
+  const nextChar = stampPlayerNetWorth({
+    ...character,
+    cash: character.cash - COLLEGE_TUITION_COST,
+    children: updatedChildren,
+    timeline: [...(character.timeline || []), journalEntry],
+    stats: {
+      ...character.stats,
+      happiness: clamp(character.stats.happiness + 20),
+    },
+  });
+  return {
+    succeeded: true,
+    character: nextChar,
+    title: 'College Tuition Paid! 🎓',
+    message: `You paid $15,000 for ${child.firstName}'s college degree! They graduated with honors and will never forget your generosity.`,
+    icon: '🎓',
+    deltas: {
+      cashDelta: -COLLEGE_TUITION_COST,
+      relationshipDelta: Math.max(0, 100 - child.relationship),
+      relationshipLabel: 'Max 100%',
+      happinessDelta: 20,
+    },
   };
 }

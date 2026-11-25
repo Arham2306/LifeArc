@@ -24,6 +24,11 @@ import { ChildDetailModal } from './ChildDetailModal';
 import { DatingAppModal } from './DatingAppModal';
 import { romanceService } from '../services/romanceService';
 import {
+  isPartnerProfile,
+  performChildParentingAction,
+  type ChildParentingAction,
+} from '../../relationships/services/relationshipService';
+import {
   evaluateFamilyPlanningEligibility,
   FAMILY_PLANNING_MIN_RELATIONSHIP,
   FAMILY_PLANNING_MIN_ROMANCE,
@@ -106,15 +111,6 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
     message: string;
     deltas?: RomanceReactionDeltas;
   } | null>(null);
-
-  const isPartnerProfile = (p: PersonProfile) =>
-    p.romanticStage === 'dating' ||
-    p.romanticStage === 'engaged' ||
-    p.romanticStage === 'married' ||
-    p.relationshipType === 'dating' ||
-    p.relationshipType === 'partner' ||
-    p.relationshipType === 'spouse' ||
-    ['Girlfriend', 'Boyfriend', 'Fiancé', 'Fiancée', 'Wife', 'Husband', 'Partner'].includes(p.role);
 
   const partner =
     character.partner ||
@@ -1341,75 +1337,33 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
   };
 
   // Child Parenting Actions
-  const handleChildSpendTime = (child: ChildProfile) => {
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 12), happiness: Math.min(100, c.happiness + 10) } : c
-    );
-    const updatedChar: CharacterProfile = {
-      ...character,
-      children: updatedChildren,
-      stats: { ...character.stats, happiness: Math.min(100, character.stats.happiness + 5) },
-    };
-    setActiveModal(null);
-    triggerRomanceReaction(updatedChar, {
-      title: `Quality Time with ${child.firstName}`,
-      icon: '🧸',
-      partnerName: child.firstName,
-      message: `You spent memorable quality time with ${child.firstName}! Their relationship and happiness blossomed.`,
-      deltas: {
-        relationshipDelta: 12,
-        happinessDelta: 5,
-      },
-    });
-  };
-
-  const handleChildPraise = (child: ChildProfile) => {
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 8), smarts: Math.min(100, c.smarts + 4) } : c
-    );
-    const updatedChar: CharacterProfile = {
-      ...character,
-      children: updatedChildren,
-    };
-    setActiveModal(null);
-    triggerRomanceReaction(updatedChar, {
-      title: `Praised ${child.firstName}`,
-      icon: '⭐',
-      partnerName: child.firstName,
-      message: `You praised ${child.firstName} for their efforts! Their confidence and smarts soared.`,
-      deltas: {
-        relationshipDelta: 8,
-      },
-    });
-  };
-
-  const handleChildAllowance = (child: ChildProfile, amount: number) => {
-    if (character.cash < amount) {
+  const handleChildAction = (
+    child: ChildProfile,
+    action: ChildParentingAction,
+    amount = 0,
+  ) => {
+    const res = performChildParentingAction(character, child.id, action, amount);
+    if (!res.succeeded) {
       setReactionModal({
-        title: 'Not Enough Cash',
-        icon: '💵',
-        message: 'You do not have enough cash.',
+        title: res.title,
+        icon: res.icon,
+        message: res.message,
       });
       return;
     }
-    const updatedChildren = (character.children || []).map((c) =>
-      c.id === child.id ? { ...c, relationship: Math.min(100, c.relationship + 10), happiness: Math.min(100, c.happiness + 15) } : c
-    );
-    const updatedChar = stampPlayerNetWorth({
-      ...character,
-      cash: character.cash - amount,
-      children: updatedChildren,
-    });
+
     setActiveModal(null);
-    triggerRomanceReaction(updatedChar, {
-      title: `Allowance for ${child.firstName}`,
-      icon: '💵',
+    setSelectedChild(null);
+    triggerRomanceReaction(res.character, {
+      title: res.title,
+      icon: res.icon,
       partnerName: child.firstName,
-      message: `You gave ${child.firstName} a $${amount} allowance!`,
+      message: res.message,
+      skipJournal: true,
       deltas: {
-        cashDelta: -amount,
-        relationshipDelta: 10,
-        happinessDelta: 5,
+        cashDelta: res.deltas.cashDelta,
+        relationshipDelta: res.deltas.relationshipDelta,
+        happinessDelta: res.deltas.happinessDelta,
       },
     });
   };
@@ -2187,38 +2141,10 @@ export const RomanceScreen: React.FC<RomanceScreenProps> = ({
           }}
           child={selectedChild}
           playerCash={character.cash}
-          onSpendTime={() => handleChildSpendTime(selectedChild)}
-          onPraise={() => handleChildPraise(selectedChild)}
-          onGiveAllowance={(amt) => handleChildAllowance(selectedChild, amt)}
-          onPayTuition={() => {
-            if (character.cash < 15000) {
-              setReactionModal({
-                title: 'Insufficient Cash',
-                icon: '🎓',
-                message: 'Insufficient cash for college tuition ($15,000).',
-              });
-              return;
-            }
-            const updatedChildren = (character.children || []).map((c) =>
-              c.id === selectedChild.id ? { ...c, relationship: 100, occupation: 'College Graduate' } : c
-            );
-            const updatedChar = stampPlayerNetWorth({
-              ...character,
-              cash: character.cash - 15000,
-              children: updatedChildren,
-            });
-            setActiveModal(null);
-            triggerRomanceReaction(updatedChar, {
-              title: `College Tuition for ${selectedChild.firstName}`,
-              icon: '🎓',
-              partnerName: selectedChild.firstName,
-              message: `You paid $15,000 for ${selectedChild.firstName}'s college tuition! They graduated and are deeply grateful!`,
-              deltas: {
-                cashDelta: -15000,
-                relationshipDelta: 20,
-              },
-            });
-          }}
+          onSpendTime={() => handleChildAction(selectedChild, 'spend_time')}
+          onPraise={() => handleChildAction(selectedChild, 'praise')}
+          onGiveAllowance={(amt) => handleChildAction(selectedChild, 'allowance', amt)}
+          onPayTuition={() => handleChildAction(selectedChild, 'pay_tuition')}
         />
       )}
 

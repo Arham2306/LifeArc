@@ -186,7 +186,7 @@ export function performMindBodyAction(
     timeline: [...character.timeline, event],
   };
 
-  const { character: nextCharacter } = applyEffects(preStatChar, {
+  const { character: nextCharacter, applied } = applyEffects(preStatChar, {
     ...statEffects,
     ...(fee > 0 ? { cash: -fee } : {}),
   });
@@ -197,6 +197,7 @@ export function performMindBodyAction(
     title: strained ? 'Gym Workout (Mild Strain)' : action.name,
     summary,
     costPaid: fee,
+    appliedEffects: applied,
   };
 }
 
@@ -297,7 +298,7 @@ export function toggleGymMembership(
     timeline: [...character.timeline, event],
   };
 
-  const { character: nextCharacter } = applyEffects(
+  const { character: nextCharacter, applied } = applyEffects(
     preEffectChar,
     cost > 0 ? { cash: -cost } : {}
   );
@@ -308,6 +309,7 @@ export function toggleGymMembership(
     title: 'Gym Membership Active',
     summary,
     costPaid: cost,
+    appliedEffects: applied,
   };
 }
 
@@ -413,7 +415,7 @@ export function trainMartialArt(
     timeline: [...character.timeline, event],
   };
 
-  const { character: nextCharacter } = applyEffects(preEffectChar, {
+  const { character: nextCharacter, applied } = applyEffects(preEffectChar, {
     health: 4,
     happiness: reachedBlackBelt ? 5 : 2,
     smarts: 1,
@@ -428,6 +430,7 @@ export function trainMartialArt(
       : `${template.name}: ${beltLabel}`,
     summary,
     costPaid: fee,
+    appliedEffects: applied,
   };
 }
 

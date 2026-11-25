@@ -283,7 +283,7 @@ console.log('--- STARTING MODULE 5: BUSINESS & ENTREPRENEURSHIP SIMULATION TESTS
 
 // 9. Corporate Exit Strategies (Acquisition & IPO)
 {
-  const char = createMockCharacter({ cash: 50000 });
+  const char = createMockCharacter({ cash: 200000 });
   const { character: foundedChar, business } = foundBusiness(char, {
     templateId: 'biz_saas_platform',
     customName: 'Apex Cloud Systems',
@@ -302,7 +302,7 @@ console.log('--- STARTING MODULE 5: BUSINESS & ENTREPRENEURSHIP SIMULATION TESTS
   console.log(`✅ Private Acquisition: Sold company for $4,000,000 valuation, pocketing $${acqResult.payoutAmount.toLocaleString()} cash!`);
 
   // IPO
-  const ipoChar = createMockCharacter({ cash: 50000 });
+  const ipoChar = createMockCharacter({ cash: 200000 });
   const { character: ipoSetupChar, business: bigBiz } = foundBusiness(ipoChar, {
     templateId: 'biz_saas_platform',
     customName: 'NovaCloud Global',
@@ -823,6 +823,77 @@ console.log('--- STARTING MODULE 5: BUSINESS & ENTREPRENEURSHIP SIMULATION TESTS
   assert(
     evaluateFundingEligibility(cleanLowKarmaFounder, saasTemplate).canBankLoan,
     'Clean creditworthy borrower qualifies for bank loan based on real financials rather than karma proxy',
+  );
+
+  // E. Custom seed capital scales funding eligibility and foundBusiness enforces underwriting + cash (#2, #8)
+  const coffeeTemplate = getBusinessTemplateById('biz_coffee_shop')!; // minSeedCapital: $20,000
+  const borderlineBorrower = createMockCharacter({
+    cash: 15000,
+    bankBalance: 0,
+    stats: { health: 90, happiness: 85, smarts: 40, looks: 75, karma: 80 },
+    education: createInitialEducation(),
+  });
+  const baseElig = evaluateFundingEligibility(borderlineBorrower, coffeeTemplate, 20000);
+  const scaledElig = evaluateFundingEligibility(borderlineBorrower, coffeeTemplate, 80000);
+  assert(
+    baseElig.canBankLoan && !scaledElig.canBankLoan && scaledElig.bankLoanDownPayment === 20000,
+    'evaluateFundingEligibility scales down payment and rejects bank loan when custom seed exceeds liquid cash',
+  );
+
+  let selfThrew = false;
+  try {
+    foundBusiness(borderlineBorrower, {
+      templateId: 'biz_coffee_shop',
+      customName: 'Underfunded Cafe',
+      icon: '☕',
+      fundingMethod: 'bootstrapped',
+      customInvestmentAmount: 50000,
+    });
+  } catch {
+    selfThrew = true;
+  }
+  assert(selfThrew, 'foundBusiness rejects bootstrapped incorporation when cash < seed capital');
+
+  let loanThrew = false;
+  try {
+    foundBusiness(richFraudster, {
+      templateId: 'biz_saas_platform',
+      customName: 'Fraudulent SaaS',
+      icon: '💻',
+      fundingMethod: 'bank_loan',
+    });
+  } catch {
+    loanThrew = true;
+  }
+  assert(loanThrew, 'foundBusiness rejects commercial bank loan when underwriting denies fraudster');
+
+  let angelThrew = false;
+  try {
+    foundBusiness(borderlineBorrower, {
+      templateId: 'biz_coffee_shop',
+      customName: 'Low Smarts Pitch',
+      icon: '☕',
+      fundingMethod: 'angel_investors',
+    });
+  } catch {
+    angelThrew = true;
+  }
+  assert(angelThrew, 'foundBusiness rejects angel pitch when applicant fails smarts/degree/crime underwriting');
+
+  const customSeedFounder = foundBusiness(createMockCharacter({ cash: 100000 }), {
+    templateId: 'biz_coffee_shop',
+    customName: 'Custom Roast Co.',
+    icon: '☕',
+    fundingMethod: 'bootstrapped',
+    customInvestmentAmount: 50000,
+  });
+  const foundEvt = customSeedFounder.character.timeline[customSeedFounder.character.timeline.length - 1];
+  assert(
+    customSeedFounder.business.treasury === 50000 &&
+      customSeedFounder.character.cash === 50000 &&
+      foundEvt.message.includes('$50,000') &&
+      !foundEvt.message.includes('$20,000'),
+    'foundBusiness timeline event records actual custom seed capital rather than minSeedCapital (#8)',
   );
 }
 

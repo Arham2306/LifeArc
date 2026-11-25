@@ -69,14 +69,20 @@ export interface FoundBusinessParams {
 /** Evaluates the player's qualification and pricing for all 3 funding routes. */
 export function evaluateFundingEligibility(
   character: CharacterProfile,
-  template: BusinessTemplate
+  template: BusinessTemplate,
+  customSeedCapital?: number
 ): FundingEligibility {
-  const bankLoanDownPayment = Math.round(template.minSeedCapital * 0.25);
-  const bankLoanAmount = template.minSeedCapital - bankLoanDownPayment;
+  const effectiveSeedCapital =
+    customSeedCapital !== undefined && Number.isFinite(customSeedCapital)
+      ? Math.max(template.minSeedCapital, Math.round(customSeedCapital))
+      : template.minSeedCapital;
+  const bankLoanDownPayment = Math.round(effectiveSeedCapital * 0.25);
+  const bankLoanAmount = effectiveSeedCapital - bankLoanDownPayment;
   // Standard 10-year amortized annual payment (~14.5% of principal per year)
   const annualLoanPayment = Math.round(bankLoanAmount * 0.145);
 
   if (isCurrentlyIncarcerated(character)) {
+    const incarceratedReason = 'Cannot incorporate or fund a business while incarcerated.';
     return {
       canBootstrapped: false,
       canBankLoan: false,
@@ -86,7 +92,9 @@ export function evaluateFundingEligibility(
       canPitchAngels: false,
       angelValuation: 0,
       angelOfferedEquityPct: 0,
-      reason: 'Cannot incorporate or fund a business while incarcerated.',
+      reason: incarceratedReason,
+      bankLoanReason: incarceratedReason,
+      angelReason: incarceratedReason,
     };
   }
 
@@ -95,7 +103,7 @@ export function evaluateFundingEligibility(
   const smarts = character.stats.smarts;
 
   // 1. Bootstrapped
-  const canBootstrapped = cash >= template.minSeedCapital;
+  const canBootstrapped = cash >= effectiveSeedCapital;
 
   // 2. Commercial Bank Loan (25% down, 10-year term at 7.5% annual interest)
   const loanUnderwriting = evaluateFinancingEligibility(
@@ -106,6 +114,13 @@ export function evaluateFundingEligibility(
   const hasDownPaymentAndNetWorth =
     cash >= bankLoanDownPayment && netWorth >= bankLoanDownPayment * 1.5;
   const canBankLoan = hasDownPaymentAndNetWorth && loanUnderwriting.eligible;
+  const bankLoanReason = !loanUnderwriting.eligible
+    ? loanUnderwriting.reason
+    : !hasDownPaymentAndNetWorth
+    ? cash < bankLoanDownPayment
+      ? `Requires $${bankLoanDownPayment.toLocaleString()} cash for the 25% down payment.`
+      : `Requires at least $${Math.round(bankLoanDownPayment * 1.5).toLocaleString()} net worth to back a commercial loan.`
+    : undefined;
 
   // 3. Angel Investors Pitch
   const diplomas = character.education?.diplomas || [];
@@ -116,8 +131,13 @@ export function evaluateFundingEligibility(
     (d) => d.includes('Business') || d.includes('M.B.A.') || d.includes('Finance')
   );
   const angelUnderwriting = evaluateFinancingEligibility(character, 'angel_equity');
-  const canPitchAngels =
-    (smarts >= 55 || hasMatchingDegree || hasBusinessDegree) && angelUnderwriting.eligible;
+  const meetsAngelProfile = smarts >= 55 || hasMatchingDegree || hasBusinessDegree;
+  const canPitchAngels = meetsAngelProfile && angelUnderwriting.eligible;
+  const angelReason = !angelUnderwriting.eligible
+    ? angelUnderwriting.reason
+    : !meetsAngelProfile
+    ? 'Angel investors require at least 55 Smarts or a relevant degree to accept a pitch.'
+    : undefined;
 
   // Angel valuation bonus: better smarts & degrees = less equity given away
   let baselineInvestorTake = 30; // 30% to investors, 70% to player
@@ -127,7 +147,7 @@ export function evaluateFundingEligibility(
   baselineInvestorTake = Math.max(15, Math.min(45, baselineInvestorTake));
 
   const angelOfferedEquityPct = 100 - baselineInvestorTake;
-  const angelValuation = Math.round(template.minSeedCapital / (baselineInvestorTake / 100));
+  const angelValuation = Math.round(effectiveSeedCapital / (baselineInvestorTake / 100));
 
   let reason = '';
   if (!canBootstrapped && !canBankLoan && !canPitchAngels) {
@@ -150,6 +170,8 @@ export function evaluateFundingEligibility(
     angelValuation,
     angelOfferedEquityPct,
     reason,
+    bankLoanReason,
+    angelReason,
   };
 }
 
@@ -178,22 +200,45 @@ export function foundBusiness(
       ? Math.round(params.customInvestmentAmount)
       : template.minSeedCapital;
 
+  const funding = evaluateFundingEligibility(character, template, seedCapital);
+
   let playerCashPaid = 0;
   let outstandingLoan = 0;
   let annualLoanPayment = 0;
   let equityPct = 100;
 
   if (params.fundingMethod === 'bootstrapped') {
+    if (!funding.canBootstrapped || character.cash < seedCapital) {
+      throw new Error(
+        `Insufficient cash ($${seedCapital.toLocaleString()} required) to self-fund ${template.title}.`
+      );
+    }
     playerCashPaid = seedCapital;
     equityPct = 100;
   } else if (params.fundingMethod === 'bank_loan') {
-    playerCashPaid = Math.round(seedCapital * 0.25);
-    outstandingLoan = seedCapital - playerCashPaid;
-    annualLoanPayment = Math.round(outstandingLoan * 0.145);
+    if (!funding.canBankLoan || character.cash < funding.bankLoanDownPayment) {
+      throw new Error(
+        funding.bankLoanReason ||
+          `Not eligible for a commercial bank loan to fund ${template.title}.`
+      );
+    }
+    playerCashPaid = funding.bankLoanDownPayment;
+    outstandingLoan = funding.bankLoanAmount;
+    annualLoanPayment = funding.annualLoanPayment;
     equityPct = 100;
   } else if (params.fundingMethod === 'angel_investors') {
+    if (!funding.canPitchAngels) {
+      throw new Error(
+        funding.angelReason ||
+          `Not eligible for angel investor financing to fund ${template.title}.`
+      );
+    }
     playerCashPaid = 0; // funded entirely by venture/angel syndicates
-    equityPct = params.angelEquityDilutionPct || 70;
+    equityPct = params.angelEquityDilutionPct || funding.angelOfferedEquityPct || 70;
+  }
+
+  if (character.cash < playerCashPaid) {
+    throw new Error('Insufficient cash to complete business incorporation.');
   }
 
   const initialValuation = Math.round(
@@ -260,14 +305,14 @@ export function foundBusiness(
     isPubliclyTraded: false,
   };
 
-  const remainingCash = Math.max(0, character.cash - playerCashPaid);
+  const remainingCash = character.cash - playerCashPaid;
 
   const foundEvent: LifeEvent = {
     id: createId(),
     age,
     year: birthYear + age,
     title: `Founded ${business.name}`,
-    message: `You officially registered ${business.name} in the ${template.title} sector! With $${template.minSeedCapital.toLocaleString()} in initial seed treasury, you are now the Founder & CEO with ${equityPct}% equity.`,
+    message: `You officially registered ${business.name} in the ${template.title} sector! With $${seedCapital.toLocaleString()} in initial seed treasury, you are now the Founder & CEO with ${equityPct}% equity.`,
     category: 'business',
     icon: business.icon,
   };

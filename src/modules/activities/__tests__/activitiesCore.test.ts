@@ -463,4 +463,131 @@ function makeIncarceratedCharacter(age = 24): CharacterProfile {
   );
 }
 
+// 7. Actual appliedEffects telemetry on gym strain (#7) & heart death attribution with diet delta (#5)
+{
+  const gymBase = makeCharacter({ age: 23, cash: 500, stats: { health: 60, happiness: 70, smarts: 70, looks: 70, karma: 80 } });
+  const firstSession = performMindBodyAction(gymBase, 'gym_workout');
+  assert(
+    firstSession.succeeded && firstSession.appliedEffects?.health === 6,
+    'First gym session reports exact appliedEffects.health === 6'
+  );
+  const strainedSecond = performMindBodyAction(firstSession.character, 'gym_workout', () => 0);
+  assert(
+    strainedSecond.succeeded && strainedSecond.appliedEffects?.health === 3,
+    'Strained second gym session reports actual +3 Health (not static +6) on appliedEffects (#7)'
+  );
+
+  const crashDietHeartChar = setCharacterDiet(
+    makeCharacter({
+      age: 25,
+      cash: 250,
+      stats: { health: 4, happiness: 80, smarts: 70, looks: 70, karma: 80 },
+      healthcare: {
+        conditions: [
+          {
+            id: 'heart-test-non-decisive',
+            catalogId: 'heart',
+            status: 'known',
+            acquiredAtAge: 24,
+            symptom: 'Chest tightness',
+            diagnosedAtAge: 24,
+            untreatedYears: 1,
+            enrolled: false,
+            procedureCompleted: false,
+          },
+        ],
+        visits: [],
+      },
+    }),
+    'crash_diet'
+  ).character;
+  const diedCombined = ageUpCharacter(crashDietHeartChar);
+  assert(
+    !diedCombined.isAlive && diedCombined.causeOfDeath !== 'A tired heart',
+    'When diet health loss already drops health to 0, death is not solely attributed to A tired heart (#5)'
+  );
+
+  const decisiveHeartChar = {
+    ...crashDietHeartChar,
+    stats: { ...crashDietHeartChar.stats, health: 12 },
+    healthcare: {
+      conditions: [
+        {
+          id: 'heart-test-decisive',
+          catalogId: 'heart',
+          status: 'known' as const,
+          acquiredAtAge: 24,
+          symptom: 'Chest tightness',
+          diagnosedAtAge: 24,
+          untreatedYears: 1,
+          enrolled: false,
+          procedureCompleted: false,
+        },
+      ],
+      visits: [],
+    },
+  };
+  const diedFromHeart = ageUpCharacter(decisiveHeartChar);
+  assert(
+    !diedFromHeart.isAlive && diedFromHeart.causeOfDeath === 'A tired heart',
+    'When character survives diet loss (>0) and heart condition drops health to 0, causeOfDeath is A tired heart (#5)'
+  );
+
+  const crashDietTippedHeartChar = {
+    ...crashDietHeartChar,
+    stats: { ...crashDietHeartChar.stats, health: 18 },
+    healthcare: {
+      conditions: [
+        {
+          id: 'heart-test-crash-tipped',
+          catalogId: 'heart',
+          status: 'known' as const,
+          acquiredAtAge: 24,
+          symptom: 'Chest tightness',
+          diagnosedAtAge: 24,
+          untreatedYears: 1,
+          enrolled: false,
+          procedureCompleted: false,
+        },
+      ],
+      visits: [],
+    },
+  };
+  const diedWithCrashPlusHeart = ageUpCharacter(crashDietTippedHeartChar);
+  assert(
+    !diedWithCrashPlusHeart.isAlive && diedWithCrashPlusHeart.causeOfDeath === 'A tired heart',
+    'When crash diet leaves positive health (>0) and heart drops health to <=0, causeOfDeath is still A tired heart'
+  );
+
+  const medDietHeartSurvivor = setCharacterDiet(
+    makeCharacter({
+      age: 25,
+      cash: 500,
+      stats: { health: 14, happiness: 80, smarts: 70, looks: 70, karma: 80 },
+      healthcare: {
+        conditions: [
+          {
+            id: 'heart-test-med-saved',
+            catalogId: 'heart',
+            status: 'known',
+            acquiredAtAge: 24,
+            symptom: 'Chest tightness',
+            diagnosedAtAge: 24,
+            untreatedYears: 1,
+            enrolled: false,
+            procedureCompleted: false,
+          },
+        ],
+        visits: [],
+      },
+    }),
+    'mediterranean'
+  ).character;
+  const survivedHeart = ageUpCharacter(medDietHeartSurvivor);
+  assert(
+    survivedHeart.isAlive && survivedHeart.causeOfDeath === undefined,
+    'Living character saved by Mediterranean diet (+4 Health) never receives a stale causeOfDeath'
+  );
+}
+
 console.log('activitiesCore.test.ts: All assertions passed.');

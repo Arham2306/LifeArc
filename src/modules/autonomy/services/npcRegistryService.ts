@@ -323,7 +323,7 @@ export function getChildrenForParticipantSelector(
 }
 
 /**
- * Derived compatibility view for `ParentsInfo` (used by `ParentsCard` and `RelationshipsScreen`).
+ * Derived compatibility view for `ParentsInfo` (used by `RelationshipsScreen`).
  * Prefers biological/adoptive primary parents for the `father` and `mother` slots.
  */
 export function getParentsView(character: CharacterProfile): ParentsInfo {
