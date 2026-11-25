@@ -14,6 +14,7 @@ import {
 } from '../../assets/services/housingService'
 import { progressPetsForYear } from '../../pets/services/petService'
 import { progressHealthcareForYear } from '../../healthcare/services/healthcareService'
+import { progressActivitiesForYear } from '../../activities/services/activitiesService'
 import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors'
 import { progressCrimeForYear } from '../../crime/services/crimeYearService'
 import { progressEducationForYear } from '../../education/services/educationService'
@@ -511,13 +512,23 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     healthcareSpendable,
     externalHealthDelta
   );
-  const postExpenseSpendableCash = Math.max(
+  const activitiesSpendable = Math.max(
     0,
     cashOnHand +
       incomingPool -
       propertyYear.cashSpent -
       petYear.cashSpent -
       healthcareYear.cashSpent
+  );
+  const activitiesYear = progressActivitiesForYear(
+    character,
+    nextAge,
+    activitiesSpendable,
+    { isIncarceratedForYear: incarceratedAtStart }
+  );
+  const postExpenseSpendableCash = Math.max(
+    0,
+    activitiesSpendable - activitiesYear.cashSpent
   );
   const crimeYear = progressCrimeForYear(character, nextAge, {
     incomingCash: incomingPool,
@@ -535,20 +546,29 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
       petYear.happinessDelta +
       housingYear.happinessDelta +
       healthcareYear.happinessDelta +
+      activitiesYear.happinessDelta +
       crimeYear.happinessDelta,
     health:
       (yearlyChanges.health ?? 0) +
       (eduEffects.health ?? 0) +
       housingYear.healthDelta +
-      healthcareYear.healthDelta,
+      healthcareYear.healthDelta +
+      activitiesYear.healthDelta,
     smarts: (yearlyChanges.smarts ?? 0) + (eduEffects.smarts ?? 0),
-    looks: (yearlyChanges.looks ?? 0) + (eduEffects.looks ?? 0),
+    looks:
+      (yearlyChanges.looks ?? 0) +
+      (eduEffects.looks ?? 0) +
+      activitiesYear.looksDelta,
+    ...(activitiesYear.karmaDelta !== 0 || yearlyChanges.karma !== undefined
+      ? { karma: (yearlyChanges.karma ?? 0) + activitiesYear.karmaDelta }
+      : {}),
     parents: eduEffects.parents,
     cash:
       incomingCash -
       propertyYear.cashSpent -
       petYear.cashSpent -
       healthcareYear.cashSpent -
+      activitiesYear.cashSpent -
       crimeYear.cashSpent,
   };
 
@@ -600,6 +620,11 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         : {}),
       ...(character.assets ? { assets: { properties: propertyYear.properties } } : {}),
       housing: housingYear.housing,
+      ...(activitiesYear.activities !== undefined
+        ? { activities: activitiesYear.activities }
+        : character.activities
+        ? { activities: character.activities }
+        : {}),
       ...(Array.isArray(character.pets?.animals) ? { pets: { animals: petYear.animals } } : {}),
       timeline: [
         ...character.timeline,
@@ -614,6 +639,7 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
         ...petYear.events,
         ...housingYear.events,
         ...healthcareYear.events,
+        ...activitiesYear.events,
         ...crimeYear.events,
       ],
     },
@@ -626,7 +652,8 @@ export function ageUpCharacter(character: CharacterProfile): CharacterProfile {
     const nonHousingHealthDelta =
       (yearlyChanges.health ?? 0) +
       (eduEffects.health ?? 0) +
-      healthcareYear.healthDelta;
+      healthcareYear.healthDelta +
+      activitiesYear.healthDelta;
     const survivedWithoutHousingLoss =
       Math.round(character.stats.health + nonHousingHealthDelta) > 0;
     const homelessnessDecisiveDeath =

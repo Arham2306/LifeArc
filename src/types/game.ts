@@ -7,6 +7,7 @@ import type { PlayerPets } from '../modules/pets/types'
 import type { PlayerHealthcare } from '../modules/healthcare/types'
 import type { PlayerCrimeState } from '../modules/crime/types'
 import type { WorldSimulationState } from '../modules/autonomy/types'
+import type { PlayerActivitiesState } from '../modules/activities/types'
 
 export interface CharacterStats {
   health: number;      // 0 - 100
@@ -200,6 +201,8 @@ export interface CharacterProfile {
   healthcare?: PlayerHealthcare;
   /** Criminal activity, legal records, probation, and incarceration state. Absent until crime interaction. */
   crime?: PlayerCrimeState;
+  /** Everyday activities, Mind & Body routines, martial arts, diet, licenses, travel, vices, and civil claims. Absent until first interaction. */
+  activities?: PlayerActivitiesState;
   relationships: PersonProfile[];
   /** Active primary romantic partner (dating / engaged / married) */
   partner?: PersonProfile | null;

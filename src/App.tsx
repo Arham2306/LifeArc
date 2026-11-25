@@ -36,6 +36,8 @@ import { RelationshipsScreen } from './modules/relationships/components/Relation
 import { RomanceScreen } from './modules/romance/components/RomanceScreen'
 import { hasActiveRomanticPartner } from './modules/romance/services/romanceService'
 import { HealthcareScreen } from './modules/healthcare/components/HealthcareScreen'
+import { ActivitiesScreen } from './modules/activities/components/ActivitiesScreen'
+import { ACTIVITIES_MIN_AGE } from './modules/activities/data/activitiesCatalog'
 import { CrimeScreen } from './modules/crime/components/CrimeScreen'
 import { CourtDefenseModal } from './modules/crime/components/CourtDefenseModal'
 import {
@@ -75,7 +77,7 @@ export default function App() {
   const [activeFiscalReport, setActiveFiscalReport] = useState<BusinessFiscalReport | null>(null)
   const [pendingNewbornBirth, setPendingNewbornBirth] = useState<ChildProfile | null>(null)
   const [pendingPrisonRelease, setPendingPrisonRelease] = useState<PrisonReleaseNotice | null>(null)
-  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare' | 'crime' | 'identity'>('hub')
+  const [menuView, setMenuView] = useState<'hub' | 'relationships' | 'romance' | 'assets' | 'lifestyle' | 'pets' | 'healthcare' | 'activities' | 'crime' | 'identity'>('hub')
   const [openedIdentityFromDeath, setOpenedIdentityFromDeath] = useState(false)
   const [isHoldingCourtForArrest, setIsHoldingCourtForArrest] = useState(false)
 
@@ -443,6 +445,14 @@ export default function App() {
                     onUpdateCharacter={setActiveCharacter}
                     onBackToMenu={() => setMenuView('hub')}
                   />
+                ) : menuView === 'activities' &&
+                  activeCharacter.age >= ACTIVITIES_MIN_AGE &&
+                  !isCurrentlyIncarcerated(activeCharacter) ? (
+                  <ActivitiesScreen
+                    character={activeCharacter}
+                    onUpdateCharacter={setActiveCharacter}
+                    onBackToMenu={() => setMenuView('hub')}
+                  />
                 ) : menuView === 'pets' && activeCharacter.age >= 16 ? (
                   <PetsScreen
                     character={activeCharacter}
@@ -516,6 +526,14 @@ export default function App() {
                     onOpenLifestyle={() => {
                       if (activeCharacter.age >= 16) {
                         setMenuView('lifestyle');
+                      }
+                    }}
+                    onOpenActivities={() => {
+                      if (
+                        activeCharacter.age >= ACTIVITIES_MIN_AGE &&
+                        !isCurrentlyIncarcerated(activeCharacter)
+                      ) {
+                        setMenuView('activities');
                       }
                     }}
                     onOpenPets={() => {

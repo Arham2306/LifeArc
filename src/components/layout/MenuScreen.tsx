@@ -10,9 +10,11 @@ import {
   Award,
   ChevronRight,
   Sparkles,
+  HeartPulse,
 } from 'lucide-react';
 import { Badge } from '../ui/Badge';
 import type { CharacterProfile } from '../../types/game';
+import { ACTIVITIES_MIN_AGE } from '../../modules/activities/data/activitiesCatalog';
 import { CRIME_MENU_MIN_AGE } from '../../modules/crime/components/crimeDisplay';
 import {
   hasPendingCourtCase,
@@ -30,6 +32,7 @@ interface MenuScreenProps {
   onOpenLifestyle?: () => void;
   onOpenPets?: () => void;
   onOpenHealthcare?: () => void;
+  onOpenActivities?: () => void;
   onOpenCrime?: () => void;
   onOpenIdentity?: () => void;
 }
@@ -54,6 +57,7 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   onOpenLifestyle,
   onOpenPets,
   onOpenHealthcare,
+  onOpenActivities,
   onOpenCrime,
   onOpenIdentity,
 }) => {
@@ -64,6 +68,8 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
   const isHealthcareUnlocked = character.age >= 6;
   const isCrimeUnlocked = character.age >= CRIME_MENU_MIN_AGE;
   const isCrimeIncarcerated = isCurrentlyIncarcerated(character);
+  const isActivitiesUnlocked = character.age >= ACTIVITIES_MIN_AGE;
+  const isActivitiesAccessible = isActivitiesUnlocked && !isCrimeIncarcerated;
   const isCrimePendingCourt = hasPendingCourtCase(character);
   const isCrimeOnProbation = isOnProbation(character);
   const hasPartner = hasActiveRomanticPartner(character);
@@ -197,6 +203,29 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
       badgeVariant: isHealthcareUnlocked ? undefined : 'slate',
       isAvailable: isHealthcareUnlocked,
       onClick: isHealthcareUnlocked ? onOpenHealthcare : undefined,
+    },
+    {
+      id: 'activities',
+      title: 'Mind & Body',
+      subtitle: !isActivitiesUnlocked
+        ? `Unlocks at age ${ACTIVITIES_MIN_AGE} (Fitness, meditation, martial arts, and diet)`
+        : isCrimeIncarcerated
+          ? 'Unavailable while serving a prison sentence'
+          : 'Gym workouts, martial arts dojo, meditation, salon, spa, and diets',
+      icon: <HeartPulse className="w-5 h-5 stroke-[2.5] text-teal-950" />,
+      iconBg: isActivitiesAccessible ? 'bg-teal-400' : 'bg-teal-300',
+      badgeLabel: !isActivitiesUnlocked
+        ? `Age ${ACTIVITIES_MIN_AGE}`
+        : isCrimeIncarcerated
+          ? 'In Prison'
+          : undefined,
+      badgeVariant: !isActivitiesUnlocked
+        ? 'slate'
+        : isCrimeIncarcerated
+          ? 'rose'
+          : undefined,
+      isAvailable: isActivitiesAccessible,
+      onClick: isActivitiesAccessible ? onOpenActivities : undefined,
     },
     {
       id: 'crime',
