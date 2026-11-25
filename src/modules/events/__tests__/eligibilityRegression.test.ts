@@ -6,6 +6,8 @@ import type { SchoolStage } from '../../education/types';
 import type { CharacterProfile } from '../../../types/game';
 import type { LifeEventTemplate } from '../types';
 import { EVENT_POOL } from '../data';
+import { ADULT_LIFE_EVENTS } from '../data/adultLifeEvents';
+import { CHILDREN_EVENTS } from '../data/childrenEvents';
 import { gameEventContextRegistry } from '../../../composition/eventContextRegistry';
 import { buildEventContext, createEventContextRegistry } from '../services/eventContext';
 import { isEventEligible } from '../services/eventEligibility';
@@ -166,11 +168,20 @@ function compareIds(left: string, right: string): number {
   return 0;
 }
 
+const childEventIds = new Set(CHILDREN_EVENTS.map((event) => event.id));
+const contextualPackIds = new Set([
+  ...CHILDREN_EVENTS.map((event) => event.id),
+  ...ADULT_LIFE_EVENTS.map((event) => event.id),
+]);
+
 function expectSameEligibility(name: string, character: CharacterProfile): void {
-  const expected = EVENT_POOL.filter((event) => legacyStructuralEligible(event, character))
+  const expected = EVENT_POOL.filter(
+    (event) => !contextualPackIds.has(event.id) && legacyStructuralEligible(event, character)
+  )
     .map((event) => event.id)
     .sort(compareIds);
   const actual = getEligibleEvents(character)
+    .filter((event) => !contextualPackIds.has(event.id))
     .map((event) => event.id)
     .sort(compareIds);
   if (expected.join('|') !== actual.join('|')) {
@@ -182,10 +193,27 @@ function expectSameEligibility(name: string, character: CharacterProfile): void 
   }
 }
 
-assert(EVENT_POOL.length === 176, `Expected 176 templates, found ${EVENT_POOL.length}`);
+assert(CHILDREN_EVENTS.length === 36, `Expected 36 children events, found ${CHILDREN_EVENTS.length}`);
+assert(ADULT_LIFE_EVENTS.length === 12, `Expected 12 adult life events, found ${ADULT_LIFE_EVENTS.length}`);
 assert(
-  EVENT_POOL.every((event) => event.requires === undefined && event.excludes === undefined),
-  'Existing templates must not define requires or excludes'
+  EVENT_POOL.length === 176 + CHILDREN_EVENTS.length + ADULT_LIFE_EVENTS.length,
+  `Expected ${176 + CHILDREN_EVENTS.length + ADULT_LIFE_EVENTS.length} templates, found ${EVENT_POOL.length}`
+);
+assert(
+  EVENT_POOL.filter((event) => !contextualPackIds.has(event.id)).every(
+    (event) => event.requires === undefined && event.excludes === undefined
+  ),
+  'Legacy 176 templates must not define requires or excludes'
+);
+assert(
+  CHILDREN_EVENTS.every(
+    (event) =>
+      childEventIds.has(event.id) &&
+      (event.requires?.minChildren ?? 0) >= 1 &&
+      event.category === 'relationship' &&
+      !event.title.includes('{')
+  ),
+  'Every CHILDREN_EVENTS template requires at least 1 living child, uses relationship category, and keeps a static title'
 );
 
 const fixtures: Array<[string, CharacterProfile]> = [

@@ -37,6 +37,10 @@ export interface EventRequirements {
   minChildren?: number;
   maxChildren?: number;
   requiresSchoolAgeChild?: boolean;
+  /** Requires at least one living child aged >= childMinAge (evaluated per child with childMaxAge). */
+  childMinAge?: number;
+  /** Requires at least one living child aged <= childMaxAge (evaluated per child with childMinAge). */
+  childMaxAge?: number;
   requiresUnemployed?: boolean;
   minYearsInJob?: number;
   extensionAll?: EventExtensionFact[];
@@ -55,6 +59,15 @@ export interface EventExclusions {
   hasSpouse?: boolean;
   hasBusiness?: boolean;
   isEmployed?: boolean;
+}
+
+/** Deltas applied to a bound living child from a child-interaction event outcome. */
+export interface ChildStatEffects {
+  relationship?: number;
+  happiness?: number;
+  smarts?: number;
+  health?: number;
+  looks?: number;
 }
 
 /** One possible result of picking a choice. Multiple outcomes = random result. */
@@ -77,6 +90,8 @@ export interface EventOutcome {
     delta: number;
     newType?: RelationshipType;
   };
+  /** Optional stat & bond changes applied to the targeted living child. */
+  childDelta?: ChildStatEffects;
 }
 
 export interface EventChoice {
@@ -123,4 +138,10 @@ export interface LifeEventTemplate {
   /** Contextual rejections. Absent means no extra rejection. */
   excludes?: EventExclusions;
   choices: EventChoice[];
+}
+
+/** One queued interactive event rolled for the current Age Up, with optional bound child. */
+export interface QueuedLifeEvent {
+  template: LifeEventTemplate;
+  boundChildId?: string;
 }

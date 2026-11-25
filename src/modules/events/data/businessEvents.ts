@@ -16,6 +16,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.2,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'A new wholesale supplier approaches {companyName} offering a 40% discount on core inventory and materials, but their manufacturing facility lacks certified safety and quality standards.',
@@ -75,6 +76,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.1,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'An aggressive local competitor has launched a smear campaign on social media, posting manipulated comparison videos claiming {companyName} rips off customers.',
@@ -134,6 +136,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.0,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'A sweet grandmother asks {companyName} for an eccentric custom order to celebrate her golden anniversary, but it requires hours of custom overtime work.',
@@ -186,6 +189,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.1,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'A well-funded corporate rival has made a lucrative compensation offer to your most talented team leader at {companyName}, threatening to drain institutional knowledge.',
@@ -245,6 +249,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.0,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'A regional enterprise consortium opens bidding for a prestigious 3-year commercial contract. Bidding requires a non-refundable application audit fee.',
@@ -304,6 +309,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.0,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'Late on a Friday evening, your QA manager detects a flaw in a large inventory batch that could cause minor malfunctions in about 8% of units sold.',
@@ -462,6 +468,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 1.0,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'Your employees at {companyName} present a petition requesting upgraded health coverage, ergonomic workstations, and paid parental leave.',
@@ -514,6 +521,7 @@ export const BUSINESS_EVENTS: LifeEventTemplate[] = [
     minAge: 18,
     maxAge: 85,
     weight: 0.9,
+    repeatable: true,
     requiresBusiness: true,
     description:
       'Seeing {companyName}’s growing success, your commercial landlord demands an extortionate 30% rent increase upon annual lease renewal.',

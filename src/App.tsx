@@ -56,9 +56,13 @@ import { getSchoolMilestoneNotice } from './modules/education/services/education
 import type { SchoolMilestoneNotice } from './modules/education/types'
 import { ageUpCharacter } from './modules/aging/services/agingService'
 import { finalizeCharacterDeath } from './modules/character/services/statService'
-import { rollEventForCharacter, resolveEventChoice } from './modules/events/services/eventService'
+import {
+  isQueuedEventStillValid,
+  resolveEventChoice,
+  rollYearlyEventsForCharacter,
+} from './modules/events/services/eventService'
 import { EventModal, type EventResult } from './modules/events/components/EventModal'
-import type { EventChoice, LifeEventTemplate } from './modules/events/types'
+import type { EventChoice, QueuedLifeEvent } from './modules/events/types'
 import { BabyNamingModal } from './modules/romance/components/BabyNamingModal'
 import type { CharacterProfile, PersonProfile, ChildProfile } from './types/game'
 
@@ -70,7 +74,9 @@ export default function App() {
   const [isDeathModalOpen, setIsDeathModalOpen] = useState(false)
 
   // Interactive event & school milestone state
-  const [pendingEvent, setPendingEvent] = useState<LifeEventTemplate | null>(null)
+  const [pendingEventQueue, setPendingEventQueue] = useState<QueuedLifeEvent[]>([])
+  const [yearlyEventTotal, setYearlyEventTotal] = useState(0)
+  const [yearlyEventIncarcerated, setYearlyEventIncarcerated] = useState(false)
   const [eventResult, setEventResult] = useState<EventResult | null>(null)
   const [schoolMilestone, setSchoolMilestone] = useState<SchoolMilestoneNotice | null>(null)
   const [isUniversityModalOpen, setIsUniversityModalOpen] = useState(false)
@@ -89,7 +95,9 @@ export default function App() {
     setMenuView('hub')
     setOpenedIdentityFromDeath(false)
     setIsHoldingCourtForArrest(false)
-    setPendingEvent(null)
+    setPendingEventQueue([])
+    setYearlyEventTotal(0)
+    setYearlyEventIncarcerated(false)
     setEventResult(null)
     setIsDeathModalOpen(false)
     setSchoolMilestone(null)
@@ -108,6 +116,23 @@ export default function App() {
     Boolean(activeCharacter && activeCharacter.isAlive && hasPendingCourtCase(activeCharacter)) ||
     isHoldingCourtForArrest
 
+  const currentQueuedEvent = pendingEventQueue[0] ?? null
+  const currentEventIndex =
+    yearlyEventTotal > 0 ? yearlyEventTotal - pendingEventQueue.length + 1 : 0
+  const currentBoundChild = currentQueuedEvent?.boundChildId
+    ? (activeCharacter?.children ?? []).find((c) => c.id === currentQueuedEvent.boundChildId)
+    : undefined
+  const hasMoreValidEvents = Boolean(
+    activeCharacter?.isAlive &&
+      pendingEventQueue
+        .slice(1)
+        .some((queued) =>
+          isQueuedEventStillValid(activeCharacter, queued, {
+            incarceratedThisYear: yearlyEventIncarcerated,
+          })
+        )
+  )
+
   const activePostAgeUpStep = activeCharacter
     ? resolvePostAgeUpModalStep({
         isDeathOpen: isDeathModalOpen,
@@ -117,7 +142,7 @@ export default function App() {
         isAdmissionsOpen: isAdmissionsModalOpen,
         hasHousingNotice: Boolean(pendingHousingNotice),
         hasFiscalReport: Boolean(activeFiscalReport),
-        hasPendingEvent: Boolean(pendingEvent),
+        hasPendingEvent: Boolean(currentQueuedEvent),
         isCourtBlocking: isCourtBlockingPostAgeUp,
       })
     : null
@@ -134,7 +159,9 @@ export default function App() {
     setPendingNewbornBirth(null)
     setSchoolMilestone(null)
     setActiveFiscalReport(null)
-    setPendingEvent(null)
+    setPendingEventQueue([])
+    setYearlyEventTotal(0)
+    setYearlyEventIncarcerated(false)
     setEventResult(null)
     setIsUniversityModalOpen(false)
     setIsProfessionalModalOpen(false)
@@ -159,7 +186,7 @@ export default function App() {
       !activeCharacter ||
       !activeCharacter.isAlive ||
       isDeathModalOpen ||
-      pendingEvent ||
+      pendingEventQueue.length > 0 ||
       schoolMilestone ||
       isAdmissionsModalOpen ||
       pendingHousingNotice ||
@@ -192,9 +219,10 @@ export default function App() {
         ? null
         : (agedCharacter.business?.lastFiscalReport ?? null)
     )
-    setPendingEvent(
-      rollEventForCharacter(agedCharacter, undefined, { incarceratedThisYear })
-    )
+    const rolledEvents = rollYearlyEventsForCharacter(agedCharacter, { incarceratedThisYear })
+    setPendingEventQueue(rolledEvents)
+    setYearlyEventTotal(rolledEvents.length)
+    setYearlyEventIncarcerated(incarceratedThisYear)
   }
 
   const handleConfirmBabyNaming = (firstName: string, lastName: string) => {
@@ -233,32 +261,61 @@ export default function App() {
     afterAcknowledge?.()
   }
 
-  const handleChooseOption = (choice: EventChoice, boundPerson?: PersonProfile) => {
-    if (!activeCharacter || !pendingEvent) return
+  const handleChooseOption = (
+    choice: EventChoice,
+    boundPerson?: PersonProfile,
+    boundChild?: ChildProfile,
+  ) => {
+    if (!activeCharacter || !currentQueuedEvent) return
 
-    const resolution = resolveEventChoice(activeCharacter, pendingEvent, choice, boundPerson)
+    const resolution = resolveEventChoice(
+      activeCharacter,
+      currentQueuedEvent.template,
+      choice,
+      boundPerson,
+      boundChild ?? currentBoundChild,
+    )
     setActiveCharacter(resolution.character)
     setEventResult({
       choice,
       message: resolution.message,
       applied: resolution.applied,
       personIntroduced: resolution.personIntroduced,
+      childDeltaApplied: resolution.childDeltaApplied,
     })
   }
 
   const handleCloseEvent = () => {
     const diedDuringEvent = activeCharacter && !activeCharacter.isAlive
-    setPendingEvent(null)
     setEventResult(null)
-    if (diedDuringEvent) {
+    if (diedDuringEvent || !activeCharacter) {
       clearPostAgeUpQueues()
       setIsDeathModalOpen(true)
+      return
+    }
+
+    const remaining = pendingEventQueue
+      .slice(1)
+      .filter((queued) =>
+        isQueuedEventStillValid(activeCharacter, queued, {
+          incarceratedThisYear: yearlyEventIncarcerated,
+        })
+      )
+
+    if (remaining.length === 0) {
+      setPendingEventQueue([])
+      setYearlyEventTotal(0)
+      setYearlyEventIncarcerated(false)
+    } else {
+      setPendingEventQueue(remaining)
     }
   }
 
   const handleRestart = () => {
     setActiveCharacter(null)
-    setPendingEvent(null)
+    setPendingEventQueue([])
+    setYearlyEventTotal(0)
+    setYearlyEventIncarcerated(false)
     setEventResult(null)
     setSchoolMilestone(null)
     setPendingNewbornBirth(null)
@@ -381,7 +438,7 @@ export default function App() {
                       fullWidth
                       onClick={handleAgeUp}
                       disabled={
-                        !!pendingEvent ||
+                        pendingEventQueue.length > 0 ||
                         !!schoolMilestone ||
                         isAdmissionsModalOpen ||
                         !!pendingHousingNotice ||
@@ -735,8 +792,13 @@ export default function App() {
       {/* Interactive Life Event */}
       {activeCharacter && (
         <EventModal
-          event={showEventModal ? pendingEvent : null}
+          key={currentQueuedEvent?.template.id ?? 'none'}
+          event={showEventModal ? (currentQueuedEvent?.template ?? null) : null}
           character={activeCharacter}
+          boundChild={currentBoundChild}
+          eventIndex={currentEventIndex}
+          eventTotal={yearlyEventTotal}
+          hasMoreEvents={hasMoreValidEvents}
           result={eventResult}
           onChoose={handleChooseOption}
           onContinue={handleCloseEvent}

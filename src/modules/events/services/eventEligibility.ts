@@ -3,6 +3,8 @@ import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
 import type { EventContext } from './eventContext';
 import type { EventExclusions, EventRequirements, LifeEventTemplate } from '../types';
 
+export const REPEATABLE_EVENT_COOLDOWN_YEARS = 3;
+
 export interface EventEligibilityOptions {
   /** Overrides live prison status when a character just completed their final prison year during this Age Up. */
   incarceratedThisYear?: boolean;
@@ -81,7 +83,26 @@ function isStructurallyEligible(
     return false;
   }
 
-  return event.repeatable || !character.seenEventIds.includes(event.id);
+  if (!event.repeatable) {
+    return !character.seenEventIds.includes(event.id);
+  }
+
+  // Enforce a hard multi-year cooldown on repeatable events using the full
+  // character timeline so small pools never loop consecutively.
+  const eventTitle = event.title.trim();
+  const minCooldownAge = character.age - REPEATABLE_EVENT_COOLDOWN_YEARS;
+  const recentlyTriggered =
+    Array.isArray(character.timeline) &&
+    character.timeline.some(
+      (entry) =>
+        typeof entry?.age === 'number' &&
+        Number.isFinite(entry.age) &&
+        entry.age >= minCooldownAge &&
+        entry.age <= character.age &&
+        entry.title?.trim() === eventTitle
+    );
+
+  return !recentlyTriggered;
 }
 
 function hasContradiction(requires: EventRequirements | undefined): boolean {
@@ -99,6 +120,19 @@ function hasContradiction(requires: EventRequirements | undefined): boolean {
     requires.minChildren !== undefined &&
     requires.maxChildren !== undefined &&
     requires.minChildren > requires.maxChildren
+  ) {
+    return true;
+  }
+  if (
+    requires.childMinAge !== undefined &&
+    requires.childMaxAge !== undefined &&
+    requires.childMinAge > requires.childMaxAge
+  ) {
+    return true;
+  }
+  if (
+    requires.maxChildren === 0 &&
+    (requires.childMinAge !== undefined || requires.childMaxAge !== undefined)
   ) {
     return true;
   }
@@ -129,7 +163,9 @@ function needsRelationshipFacts(requires: EventRequirements | undefined): boolea
     (requires.partnerStages !== undefined && requires.partnerStages.length > 0) ||
     requires.minChildren !== undefined ||
     requires.maxChildren !== undefined ||
-    requires.requiresSchoolAgeChild === true
+    requires.requiresSchoolAgeChild === true ||
+    requires.childMinAge !== undefined ||
+    requires.childMaxAge !== undefined
   );
 }
 
@@ -191,6 +227,15 @@ function requirementsPass(requires: EventRequirements | undefined, context: Even
   }
   if (requires.maxChildren !== undefined) {
     if (context.livingChildren === null || context.livingChildren > requires.maxChildren) return false;
+  }
+  if (requires.childMinAge !== undefined || requires.childMaxAge !== undefined) {
+    if (context.livingChildAges === null || context.livingChildAges.length === 0) return false;
+    const hasMatchingChild = context.livingChildAges.some(
+      (childAge) =>
+        (requires.childMinAge === undefined || childAge >= requires.childMinAge) &&
+        (requires.childMaxAge === undefined || childAge <= requires.childMaxAge)
+    );
+    if (!hasMatchingChild) return false;
   }
   if (requires.minYearsInJob !== undefined) {
     if (context.yearsInJob === null || context.yearsInJob < requires.minYearsInJob) return false;

@@ -60,6 +60,7 @@ function context(overrides: Partial<EventContext> = {}): EventContext {
     hasSpouse: false,
     livingChildren: 0,
     schoolAgeChildren: 0,
+    livingChildAges: [],
     livingParents: 2,
     livingSiblings: 0,
     seenEventIds: [],
@@ -216,6 +217,7 @@ near(
 near(score('relationship', { schoolAgeChildren: 2 }), 1.2, 'School-age children boost relationship');
 near(score('relationship', { schoolAgeChildren: null }), 1, 'A null school-age count skips that modifier');
 near(score('relationship', { schoolAgeChildren: 0 }), 1, 'Zero school-age children skips that modifier');
+near(score('relationship', { livingChildren: 1, schoolAgeChildren: 0 }), 1.15, 'Non-school-age living children gently lift relationship');
 near(score('social', { schoolAgeChildren: 2, hasSpouse: true, hasPartner: true }), 1, 'Relationship modifiers stay on relationship');
 
 near(score('health', { health: 39 }, { weight: 2 }), 2.8, 'Health below 40 boosts a health template');

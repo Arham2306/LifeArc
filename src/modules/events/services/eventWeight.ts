@@ -24,6 +24,7 @@ export const EVENT_RELEVANCE_MULTIPLIERS = {
   spouseRelationship: 1.3,
   partnerRelationship: 1.15,
   schoolAgeRelationship: 1.2,
+  livingChildrenRelationship: 1.15,
   lowHealth: 1.4,
   lowKarmaMisfortune: 1.25,
   highKarmaMisfortune: 0.85,
@@ -93,6 +94,8 @@ function relevanceMultiplier(event: LifeEventTemplate, context: EventContext): n
   }
   if (finiteNumber(context.schoolAgeChildren) && context.schoolAgeChildren > 0) {
     product = multiplyCategory(product, category, 'relationship', rates.schoolAgeRelationship);
+  } else if (finiteNumber(context.livingChildren) && context.livingChildren > 0) {
+    product = multiplyCategory(product, category, 'relationship', rates.livingChildrenRelationship);
   }
 
   if (finiteNumber(context.health) && context.health < 40) {

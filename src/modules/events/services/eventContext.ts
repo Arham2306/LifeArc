@@ -57,6 +57,7 @@ export interface EventContext {
   hasSpouse: boolean | null;
   livingChildren: number | null;
   schoolAgeChildren: number | null;
+  livingChildAges: readonly number[] | null;
   livingParents: number | null;
   livingSiblings: number | null;
   seenEventIds: readonly string[];
@@ -174,6 +175,7 @@ interface RelationshipFacts {
   hasSpouse: boolean | null;
   livingChildren: number | null;
   schoolAgeChildren: number | null;
+  livingChildAges: readonly number[] | null;
   livingParents: number | null;
   livingSiblings: number | null;
 }
@@ -185,6 +187,7 @@ function emptyRelationshipFacts(): RelationshipFacts {
     hasSpouse: null,
     livingChildren: null,
     schoolAgeChildren: null,
+    livingChildAges: null,
     livingParents: null,
     livingSiblings: null,
   };
@@ -198,6 +201,10 @@ function legacyRelationshipFacts(character: CharacterProfile): RelationshipFacts
   const partner = character.partner ?? null;
   const partnerStage = partner?.romanticStage ?? 'none';
   const livingChildren = (character.children ?? []).filter((child) => child.isAlive);
+  const livingChildAges = livingChildren
+    .map((child) => child.age)
+    .filter((age) => typeof age === 'number' && Number.isFinite(age))
+    .sort((left, right) => left - right);
   const livingParents =
     (character.parents?.father?.isAlive ? 1 : 0) + (character.parents?.mother?.isAlive ? 1 : 0);
   const livingSiblings = (character.siblings ?? []).filter((sibling) => sibling.isAlive).length;
@@ -208,7 +215,8 @@ function legacyRelationshipFacts(character: CharacterProfile): RelationshipFacts
       partner !== null &&
       (partner.romanticStage === 'married' || partner.relationshipType === 'spouse'),
     livingChildren: livingChildren.length,
-    schoolAgeChildren: countSchoolAge(livingChildren.map((child) => child.age)),
+    schoolAgeChildren: countSchoolAge(livingChildAges),
+    livingChildAges,
     livingParents,
     livingSiblings,
   };
@@ -223,6 +231,10 @@ function canonicalRelationshipFacts(character: CharacterProfile): RelationshipFa
       ? partner.romanticStage
       : 'none';
   const livingChildren = getChildrenSelector(character).filter((child) => child.isAlive);
+  const livingChildAges = livingChildren
+    .map((child) => child.age)
+    .filter((age) => typeof age === 'number' && Number.isFinite(age))
+    .sort((left, right) => left - right);
   const livingParents = getParentsSelector(character, { viewerId: character.id }).filter(
     (parent) => parent.npc.isAlive
   ).length;
@@ -232,7 +244,8 @@ function canonicalRelationshipFacts(character: CharacterProfile): RelationshipFa
     hasPartner: partner !== null,
     hasSpouse: partnerStage === 'married',
     livingChildren: livingChildren.length,
-    schoolAgeChildren: countSchoolAge(livingChildren.map((child) => child.age)),
+    schoolAgeChildren: countSchoolAge(livingChildAges),
+    livingChildAges,
     livingParents,
     livingSiblings,
   };
