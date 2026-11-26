@@ -450,11 +450,45 @@ function makeIncarceratedCharacter(age = 24): CharacterProfile {
   );
   assert(
     screenAdultHtml.includes('Back to Activities') &&
+      screenAdultHtml.includes('Routines') &&
+      screenAdultHtml.includes('Dojo') &&
+      screenAdultHtml.includes('Diets') &&
       screenAdultHtml.includes('Mind &amp; Body Routines') &&
-      screenAdultHtml.includes('Martial Arts Dojo') &&
-      screenAdultHtml.includes('Diet &amp; Nutrition') &&
-      screenAdultHtml.includes('Mediterranean'),
-    'ActivitiesScreen mind_body drill-down renders Back to Activities, routines, dojo, and diets cleanly'
+      !screenAdultHtml.includes('Martial Arts Dojo') &&
+      !screenAdultHtml.includes('sm:grid-cols-'),
+    'ActivitiesScreen mind_body defaults to Routines list view with Dojo/Diets sub-tabs'
+  );
+
+  const screenDojoHtml = renderToStaticMarkup(
+    React.createElement(ActivitiesScreen, {
+      character: makeCharacter({ age: 24, cash: 1200 }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      initialTab: 'mind_body',
+      initialMindBodySubTab: 'dojo',
+    })
+  );
+  assert(
+    screenDojoHtml.includes('Martial Arts Dojo') &&
+      screenDojoHtml.includes('Karate') &&
+      !screenDojoHtml.includes('sm:grid-cols-'),
+    'ActivitiesScreen mind_body dojo sub-tab renders Martial Arts Dojo list cleanly'
+  );
+
+  const screenDietsHtml = renderToStaticMarkup(
+    React.createElement(ActivitiesScreen, {
+      character: makeCharacter({ age: 24, cash: 1200 }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      initialTab: 'mind_body',
+      initialMindBodySubTab: 'diets',
+    })
+  );
+  assert(
+    screenDietsHtml.includes('Diet &amp; Nutrition') &&
+      screenDietsHtml.includes('Mediterranean') &&
+      !screenDietsHtml.includes('sm:grid-cols-'),
+    'ActivitiesScreen mind_body diets sub-tab renders Diet & Nutrition list cleanly'
   );
 
   const screenPrisonHtml = renderToStaticMarkup(

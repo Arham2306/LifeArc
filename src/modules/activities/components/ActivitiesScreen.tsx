@@ -110,12 +110,14 @@ import type {
 } from '../types';
 
 export type ActivitiesTabId = 'mind_body' | 'surgery' | 'travel' | 'nightlife';
+export type MindBodySubTabId = 'routines' | 'dojo' | 'diets';
 
 interface ActivitiesScreenProps {
   character: CharacterProfile;
   onUpdateCharacter: (character: CharacterProfile) => void;
   onBackToMenu: () => void;
   initialTab?: ActivitiesTabId | null;
+  initialMindBodySubTab?: MindBodySubTabId;
 }
 
 interface OutcomeModalState {
@@ -147,8 +149,10 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
   onUpdateCharacter,
   onBackToMenu,
   initialTab = null,
+  initialMindBodySubTab = 'routines',
 }) => {
   const [activeTab, setActiveTab] = useState<ActivitiesTabId | null>(initialTab);
+  const [mindBodySubTab, setMindBodySubTab] = useState<MindBodySubTabId>(initialMindBodySubTab);
   const [outcome, setOutcome] = useState<OutcomeModalState | null>(null);
   const [selectedTier, setSelectedTier] = useState<SurgeryClinicTierId>('board_certified');
   const [selectedCabin, setSelectedCabin] = useState<VacationCabinClassId>('economy');
@@ -437,7 +441,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
         </div>
 
         {(activeTab === null || activeTab === 'mind_body') && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+          <div className="grid grid-cols-2 gap-2 mt-3">
             <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
               <div className="text-[10px] font-black uppercase text-slate-400">Active Diet</div>
               <div className="text-xs font-black text-slate-900 truncate mt-0.5">
@@ -495,7 +499,12 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  if (item.id === 'mind_body') {
+                    setMindBodySubTab('routines');
+                  }
+                  setActiveTab(item.id);
+                }}
                 className="w-full text-left p-3.5 rounded-2xl border-2 border-slate-900 bg-white hover:bg-amber-50/70 transition-all shadow-[2px_2.5px_0_#0f172a] hover:translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 cursor-pointer flex items-center justify-between group"
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -557,289 +566,331 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
 
           {activeTab === 'mind_body' && (
             <>
-              {/* Section 1: Mind & Body Routines */}
-          <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-sky-600" />
-                Mind &amp; Body Routines
-              </h3>
-              {character.age >= MINOR_FREE_CUTOFF_AGE && (
-                <CartoonButton
-                  variant={activities.gymMembershipActive ? 'rose' : 'sky'}
-                  size="sm"
-                  icon={<Dumbbell className="w-3.5 h-3.5" />}
-                  onClick={handleToggleGymPass}
-                >
-                  {activities.gymMembershipActive
-                    ? 'Cancel Gym Pass'
-                    : `Buy Gym Pass ($${GYM_MEMBERSHIP_ANNUAL_FEE}/yr)`}
-                </CartoonButton>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {MIND_BODY_ACTIONS.map((action) => {
-                const ageLocked = character.age < action.minAge;
-                const remaining = getRemainingActivityUses(character, action.id);
-                const fee =
-                  action.id === 'gym_workout'
-                    ? getEffectiveGymWorkoutFee(character, action.baseCost)
-                    : getEffectiveActivityFee(character, action.baseCost);
-                const canAfford = character.cash >= fee;
-                const feeLabel =
-                  fee > 0
-                    ? `$${fee}`
-                    : action.baseCost > 0 && character.age < MINOR_FREE_CUTOFF_AGE
-                      ? 'Free (Parents)'
-                      : action.id === 'gym_workout' && activities.gymMembershipActive
-                        ? 'Free (Pass)'
-                        : 'Free';
-                const chips = formatStatBadges(action.effects);
-
-                return (
-                  <div
-                    key={action.id}
-                    className="border-2 border-slate-200 rounded-xl p-3 flex flex-col justify-between gap-2.5 bg-slate-50/70"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-black text-slate-900">
-                          {action.name}
-                        </span>
-                        <Badge
-                          variant={
-                            action.category === 'Mind'
-                              ? 'purple'
-                              : action.category === 'Body'
-                                ? 'emerald'
-                                : 'amber'
-                          }
-                          size="xs"
-                        >
-                          {action.category}
-                        </Badge>
-                      </div>
-                      <p className="text-[11px] font-semibold text-slate-600 mt-1">
-                        {action.description}
-                      </p>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {chips.map((chip) => (
-                          <span
-                            key={chip.label}
-                            className={`text-[10px] font-black px-1.5 py-0.5 rounded-md border ${
-                              chip.positive
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : 'bg-rose-50 text-rose-800 border-rose-200'
-                            }`}
-                          >
-                            {chip.label}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200">
-                      <span className="text-[11px] font-black text-slate-500">
-                        {feeLabel} • {remaining}/{action.annualLimit} left
-                      </span>
-                      <CartoonButton
-                        variant={ageLocked || remaining === 0 || !canAfford ? 'white' : 'emerald'}
-                        size="sm"
-                        disabled={ageLocked || remaining === 0 || !canAfford}
-                        onClick={() => handleRoutineClick(action.id)}
-                      >
-                        {ageLocked
-                          ? `Age ${action.minAge}`
-                          : remaining === 0
-                            ? 'Done'
-                            : !canAfford
-                              ? `Need $${fee}`
-                              : 'Do Activity'}
-                      </CartoonButton>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Section 2: Martial Arts Dojo */}
-          <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div>
-                <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                  <Shield className="w-4 h-4 text-amber-600" />
-                  Martial Arts Dojo
-                </h3>
-                <p className="text-[11px] font-semibold text-slate-500">
-                  Earn belts across 5 disciplines (+4 Health, +2 Happiness, +1 Smarts per lesson).
-                </p>
-              </div>
-              <Badge variant="amber" size="xs">
-                {martialSessionsLeft}/{MAX_MARTIAL_ARTS_SESSIONS_PER_YEAR} sessions left this yr
-              </Badge>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {MARTIAL_ARTS_CATALOG.map((discipline) => {
-                const progress = activities.martialArts[discipline.id];
-                const beltRank = progress?.beltRank ?? 0;
-                const beltMeta = BELT_RANKS[beltRank];
-                const trainedThisYear = progress?.lastTrainedAge === character.age;
-                const mastered = beltRank >= 7;
-                const canAfford = character.cash >= martialLessonFee;
-                const disabled =
-                  mastered || trainedThisYear || martialSessionsLeft === 0 || !canAfford;
-
-                return (
-                  <div
-                    key={discipline.id}
-                    className="border-2 border-slate-200 rounded-xl p-3 flex flex-col justify-between gap-2 bg-slate-50/70"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <span className="text-sm font-black text-slate-900">
-                            {discipline.name}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-400 ml-1.5">
-                            {discipline.origin}
-                          </span>
-                        </div>
-                        <span
-                          className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${beltMeta.colorClass}`}
-                        >
-                          {beltMeta.label}
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-semibold text-slate-600 mt-1">
-                        {discipline.description}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200">
-                      <span className="text-[11px] font-black text-slate-500">
-                        {martialLessonFee === 0
-                          ? 'Free (Parents)'
-                          : `$${martialLessonFee}/lesson`}
-                      </span>
-                      <CartoonButton
-                        variant={disabled ? 'white' : 'amber'}
-                        size="sm"
-                        disabled={disabled}
-                        onClick={() => handleTrainMartialArt(discipline.id)}
-                      >
-                        {mastered
-                          ? 'Black Belt'
-                          : trainedThisYear
-                            ? 'Trained'
-                            : martialSessionsLeft === 0
-                              ? 'Yr Cap'
-                              : !canAfford
-                                ? `Need $${martialLessonFee}`
-                                : 'Train Lesson'}
-                      </CartoonButton>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Section 3: Diet & Nutrition */}
-          <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div>
-                <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                  <Utensils className="w-4 h-4 text-emerald-600" />
-                  Diet &amp; Nutrition
-                </h3>
-                <p className="text-[11px] font-semibold text-slate-500">
-                  Your diet applies yearly stat changes and annual grocery cost on Age Up.
-                </p>
-              </div>
-              {character.age < DIET_MIN_AGE && (
-                <Badge variant="slate" size="xs">
-                  Unlocks at Age {DIET_MIN_AGE}
-                </Badge>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {DIET_CATALOG.map((diet) => {
-                const isSelected = activities.diet === diet.id;
-                const dietAgeLocked = character.age < DIET_MIN_AGE;
-                const effectiveAnnualCost = getEffectiveActivityFee(
-                  character,
-                  diet.annualCost
-                );
-                const statChips = formatStatBadges({
-                  health: diet.healthDelta,
-                  happiness: diet.happinessDelta,
-                  looks: diet.looksDelta,
-                  karma: diet.karmaDelta,
-                });
-
-                return (
-                  <div
-                    key={diet.id}
-                    className={`border-2 rounded-xl p-3 flex flex-col justify-between gap-2 ${
-                      isSelected
-                        ? 'border-emerald-600 bg-emerald-50/70'
-                        : 'border-slate-200 bg-slate-50/70'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-black text-slate-900">{diet.name}</span>
-                        <Badge variant={isSelected ? 'emerald' : 'slate'} size="xs">
-                          {diet.annualCost === 0
-                            ? '$0/yr'
-                            : effectiveAnnualCost === 0
-                              ? 'Free (<16)'
-                              : `$${effectiveAnnualCost}/yr`}
-                        </Badge>
-                      </div>
-                      <p className="text-[11px] font-semibold text-slate-600 mt-1">
-                        {diet.description}
-                      </p>
-                      {statChips.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {statChips.map((chip) => (
-                            <span
-                              key={chip.label}
-                              className={`text-[10px] font-black px-1.5 py-0.5 rounded-md border ${
-                                chip.positive
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                  : 'bg-rose-50 text-rose-800 border-rose-200'
-                              }`}
-                            >
-                              {chip.label}/yr
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <CartoonButton
-                      variant={isSelected || dietAgeLocked ? 'white' : 'emerald'}
-                      size="sm"
-                      fullWidth
-                      disabled={isSelected || dietAgeLocked}
-                      onClick={() => handleSelectDiet(diet.id)}
+              <div
+                role="tablist"
+                aria-label="Mind & Body categories"
+                className="grid grid-cols-3 gap-1.5 bg-slate-100 border-[2.5px] border-slate-900 rounded-2xl p-1 shadow-[0_3px_0_#0f172a]"
+              >
+                {(
+                  [
+                    { id: 'routines', label: 'Routines', icon: <Sparkles className="w-3.5 h-3.5 shrink-0" /> },
+                    { id: 'dojo', label: 'Dojo', icon: <Shield className="w-3.5 h-3.5 shrink-0" /> },
+                    { id: 'diets', label: 'Diets', icon: <Utensils className="w-3.5 h-3.5 shrink-0" /> },
+                  ] as const
+                ).map((subTab) => {
+                  const selected = mindBodySubTab === subTab.id;
+                  return (
+                    <button
+                      key={subTab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      onClick={() => setMindBodySubTab(subTab.id)}
+                      className={`py-2 px-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                        selected
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                      }`}
                     >
-                      {dietAgeLocked
-                        ? `Age ${DIET_MIN_AGE}`
-                        : isSelected
-                          ? 'Active Diet'
-                          : 'Select Diet'}
-                    </CartoonButton>
+                      {subTab.icon}
+                      <span>{subTab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {mindBodySubTab === 'routines' && (
+                /* Section 1: Mind & Body Routines */
+                <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-sky-600 shrink-0" />
+                      Mind &amp; Body Routines
+                    </h3>
+                    {character.age >= MINOR_FREE_CUTOFF_AGE && (
+                      <CartoonButton
+                        variant={activities.gymMembershipActive ? 'rose' : 'sky'}
+                        size="sm"
+                        className="whitespace-nowrap"
+                        icon={<Dumbbell className="w-3.5 h-3.5" />}
+                        onClick={handleToggleGymPass}
+                      >
+                        {activities.gymMembershipActive
+                          ? 'Cancel Gym Pass'
+                          : `Buy Gym Pass ($${GYM_MEMBERSHIP_ANNUAL_FEE}/yr)`}
+                      </CartoonButton>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    {MIND_BODY_ACTIONS.map((action) => {
+                      const ageLocked = character.age < action.minAge;
+                      const remaining = getRemainingActivityUses(character, action.id);
+                      const fee =
+                        action.id === 'gym_workout'
+                          ? getEffectiveGymWorkoutFee(character, action.baseCost)
+                          : getEffectiveActivityFee(character, action.baseCost);
+                      const canAfford = character.cash >= fee;
+                      const feeLabel =
+                        fee > 0
+                          ? `$${fee}`
+                          : action.baseCost > 0 && character.age < MINOR_FREE_CUTOFF_AGE
+                            ? 'Free (Parents)'
+                            : action.id === 'gym_workout' && activities.gymMembershipActive
+                              ? 'Free (Pass)'
+                              : 'Free';
+                      const chips = formatStatBadges(action.effects);
+
+                      return (
+                        <div
+                          key={action.id}
+                          className="border-2 border-slate-200 rounded-xl p-3.5 flex flex-col gap-2.5 bg-slate-50/70"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-black text-slate-900">
+                              {action.name}
+                            </span>
+                            <Badge
+                              variant={
+                                action.category === 'Mind'
+                                  ? 'purple'
+                                  : action.category === 'Body'
+                                    ? 'emerald'
+                                    : 'amber'
+                              }
+                              size="xs"
+                              className="shrink-0"
+                            >
+                              {action.category}
+                            </Badge>
+                          </div>
+                          <p className="text-xs font-semibold text-slate-600 leading-snug">
+                            {action.description}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {chips.map((chip) => (
+                              <span
+                                key={chip.label}
+                                className={`text-[10px] font-black px-1.5 py-0.5 rounded-md border ${
+                                  chip.positive
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : 'bg-rose-50 text-rose-800 border-rose-200'
+                                }`}
+                              >
+                                {chip.label}
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                            <span className="text-xs font-black text-slate-600">
+                              {feeLabel} • {remaining}/{action.annualLimit} left
+                            </span>
+                            <CartoonButton
+                              variant={ageLocked || remaining === 0 || !canAfford ? 'white' : 'emerald'}
+                              size="sm"
+                              className="shrink-0 whitespace-nowrap"
+                              disabled={ageLocked || remaining === 0 || !canAfford}
+                              onClick={() => handleRoutineClick(action.id)}
+                            >
+                              {ageLocked
+                                ? `Age ${action.minAge}`
+                                : remaining === 0
+                                  ? 'Done'
+                                  : !canAfford
+                                    ? `Need $${fee}`
+                                    : 'Do Activity'}
+                            </CartoonButton>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {mindBodySubTab === 'dojo' && (
+                /* Section 2: Martial Arts Dojo */
+                <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-amber-600 shrink-0" />
+                        Martial Arts Dojo
+                      </h3>
+                      <p className="text-[11px] font-semibold text-slate-500">
+                        Earn belts across 5 disciplines (+4 Health, +2 Happiness, +1 Smarts per lesson).
+                      </p>
+                    </div>
+                    <Badge variant="amber" size="xs">
+                      {martialSessionsLeft}/{MAX_MARTIAL_ARTS_SESSIONS_PER_YEAR} sessions left this yr
+                    </Badge>
+                  </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    {MARTIAL_ARTS_CATALOG.map((discipline) => {
+                      const progress = activities.martialArts[discipline.id];
+                      const beltRank = progress?.beltRank ?? 0;
+                      const beltMeta = BELT_RANKS[beltRank];
+                      const trainedThisYear = progress?.lastTrainedAge === character.age;
+                      const mastered = beltRank >= 7;
+                      const canAfford = character.cash >= martialLessonFee;
+                      const disabled =
+                        mastered || trainedThisYear || martialSessionsLeft === 0 || !canAfford;
+
+                      return (
+                        <div
+                          key={discipline.id}
+                          className="border-2 border-slate-200 rounded-xl p-3.5 flex flex-col gap-2.5 bg-slate-50/70"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="text-sm font-black text-slate-900">
+                                {discipline.name}
+                              </span>
+                              <span className="text-[11px] font-bold text-slate-400 ml-1.5">
+                                {discipline.origin}
+                              </span>
+                            </div>
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-full border shrink-0 ${beltMeta.colorClass}`}
+                            >
+                              {beltMeta.label}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold text-slate-600 leading-snug">
+                            {discipline.description}
+                          </p>
+
+                          <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                            <span className="text-xs font-black text-slate-600">
+                              {martialLessonFee === 0
+                                ? 'Free (Parents)'
+                                : `$${martialLessonFee}/lesson`}
+                            </span>
+                            <CartoonButton
+                              variant={disabled ? 'white' : 'amber'}
+                              size="sm"
+                              className="shrink-0 whitespace-nowrap"
+                              disabled={disabled}
+                              onClick={() => handleTrainMartialArt(discipline.id)}
+                            >
+                              {mastered
+                                ? 'Black Belt'
+                                : trainedThisYear
+                                  ? 'Trained'
+                                  : martialSessionsLeft === 0
+                                    ? 'Yr Cap'
+                                    : !canAfford
+                                      ? `Need $${martialLessonFee}`
+                                      : 'Train Lesson'}
+                            </CartoonButton>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {mindBodySubTab === 'diets' && (
+                /* Section 3: Diet & Nutrition */
+                <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
+                        <Utensils className="w-4 h-4 text-emerald-600 shrink-0" />
+                        Diet &amp; Nutrition
+                      </h3>
+                      <p className="text-[11px] font-semibold text-slate-500">
+                        Your diet applies yearly stat changes and annual grocery cost on Age Up.
+                      </p>
+                    </div>
+                    {character.age < DIET_MIN_AGE && (
+                      <Badge variant="slate" size="xs">
+                        Unlocks at Age {DIET_MIN_AGE}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    {DIET_CATALOG.map((diet) => {
+                      const isSelected = activities.diet === diet.id;
+                      const dietAgeLocked = character.age < DIET_MIN_AGE;
+                      const effectiveAnnualCost = getEffectiveActivityFee(
+                        character,
+                        diet.annualCost
+                      );
+                      const statChips = formatStatBadges({
+                        health: diet.healthDelta,
+                        happiness: diet.happinessDelta,
+                        looks: diet.looksDelta,
+                        karma: diet.karmaDelta,
+                      });
+
+                      return (
+                        <div
+                          key={diet.id}
+                          className={`border-2 rounded-xl p-3.5 flex flex-col gap-2.5 ${
+                            isSelected
+                              ? 'border-emerald-600 bg-emerald-50/70'
+                              : 'border-slate-200 bg-slate-50/70'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-black text-slate-900">{diet.name}</span>
+                            <Badge variant={isSelected ? 'emerald' : 'slate'} size="xs" className="shrink-0">
+                              {diet.annualCost === 0
+                                ? '$0/yr'
+                                : effectiveAnnualCost === 0
+                                  ? 'Free (<16)'
+                                  : `$${effectiveAnnualCost}/yr`}
+                            </Badge>
+                          </div>
+                          <p className="text-xs font-semibold text-slate-600 leading-snug">
+                            {diet.description}
+                          </p>
+                          {statChips.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {statChips.map((chip) => (
+                                <span
+                                  key={chip.label}
+                                  className={`text-[10px] font-black px-1.5 py-0.5 rounded-md border ${
+                                    chip.positive
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                                  }`}
+                                >
+                                  {chip.label}/yr
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                            <span className="text-xs font-bold text-slate-500">
+                              {isSelected ? 'Current meal plan' : 'Yearly Age-Up effect'}
+                            </span>
+                            <CartoonButton
+                              variant={isSelected || dietAgeLocked ? 'white' : 'emerald'}
+                              size="sm"
+                              className="shrink-0 whitespace-nowrap"
+                              disabled={isSelected || dietAgeLocked}
+                              onClick={() => handleSelectDiet(diet.id)}
+                            >
+                              {dietAgeLocked
+                                ? `Age ${DIET_MIN_AGE}`
+                                : isSelected
+                                  ? 'Active Diet'
+                                  : 'Select Diet'}
+                            </CartoonButton>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -848,7 +899,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                    <Scissors className="w-4 h-4 text-rose-600" />
+                    <Scissors className="w-4 h-4 text-rose-600 shrink-0" />
                     Cosmetic &amp; Plastic Surgery
                   </h3>
                   <p className="text-[11px] font-semibold text-slate-500">
@@ -862,27 +913,27 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="flex flex-col gap-2">
                 {SURGERY_CLINIC_TIERS.map((tier) => (
                   <button
                     key={tier.id}
                     type="button"
                     onClick={() => setSelectedTier(tier.id)}
-                    className={`text-left border-2 rounded-xl p-2.5 cursor-pointer transition-colors ${
+                    className={`text-left border-2 rounded-xl px-3 py-2.5 cursor-pointer transition-colors flex items-center justify-between gap-2 ${
                       selectedTier === tier.id
                         ? 'border-slate-900 bg-amber-50'
                         : 'border-slate-200 bg-slate-50/70'
                     }`}
                   >
                     <div className="text-xs font-black text-slate-900">{tier.name}</div>
-                    <div className="text-[11px] font-bold text-slate-500 mt-0.5">
+                    <div className="text-[11px] font-bold text-slate-600 shrink-0 whitespace-nowrap">
                       {tier.priceMultiplier}x fee • {Math.round(tier.botchChance * 100)}% risk
                     </div>
                   </button>
                 ))}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="flex flex-col gap-2.5">
                 {PLASTIC_SURGERY_CATALOG.map((proc) => {
                   const ageLocked = character.age < PLASTIC_SURGERY_MIN_AGE;
                   const cost = getPlasticSurgeryCost(proc.id, selectedTier);
@@ -891,19 +942,19 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                   return (
                     <div
                       key={proc.id}
-                      className="border-2 border-slate-200 rounded-xl p-3 flex flex-col justify-between gap-2 bg-slate-50/70"
+                      className="border-2 border-slate-200 rounded-xl p-3.5 flex flex-col gap-2.5 bg-slate-50/70"
                     >
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-black text-slate-900">{proc.name}</span>
-                          <Badge variant="amber" size="xs">
-                            ${cost.toLocaleString()}
-                          </Badge>
-                        </div>
-                        <p className="text-[11px] font-semibold text-slate-600 mt-1">
-                          {proc.description}
-                        </p>
-                        <div className="flex gap-1 mt-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-black text-slate-900">{proc.name}</span>
+                        <Badge variant="amber" size="xs">
+                          ${cost.toLocaleString()}
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-600 leading-snug">
+                        {proc.description}
+                      </p>
+                      <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                        <div className="flex flex-wrap gap-1.5">
                           <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md border bg-emerald-50 text-emerald-800 border-emerald-200">
                             +{proc.looksGain} Looks
                           </span>
@@ -911,20 +962,21 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                             +{proc.happinessGain} Happy
                           </span>
                         </div>
-                      </div>
 
-                      <CartoonButton
-                        variant={ageLocked || !canAfford ? 'white' : 'rose'}
-                        size="sm"
-                        disabled={ageLocked || !canAfford}
-                        onClick={() => handlePlasticSurgery(proc.id)}
-                      >
-                        {ageLocked
-                          ? `Age ${PLASTIC_SURGERY_MIN_AGE}`
-                          : !canAfford
-                            ? `Need $${cost.toLocaleString()}`
-                            : 'Book Procedure'}
-                      </CartoonButton>
+                        <CartoonButton
+                          variant={ageLocked || !canAfford ? 'white' : 'rose'}
+                          size="sm"
+                          className="shrink-0 whitespace-nowrap"
+                          disabled={ageLocked || !canAfford}
+                          onClick={() => handlePlasticSurgery(proc.id)}
+                        >
+                          {ageLocked
+                            ? `Age ${PLASTIC_SURGERY_MIN_AGE}`
+                            : !canAfford
+                              ? `Need $${cost.toLocaleString()}`
+                              : 'Book Procedure'}
+                        </CartoonButton>
+                      </div>
                     </div>
                   );
                 })}
@@ -937,10 +989,10 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
               {/* Licenses */}
               <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
                 <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                  <IdCard className="w-4 h-4 text-sky-600" />
+                  <IdCard className="w-4 h-4 text-sky-600 shrink-0" />
                   Licenses &amp; Certifications
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="flex flex-col gap-2.5">
                   {LICENSE_CATALOG.map((lic) => {
                     const owned = hasLicense(character, lic.id);
                     const ageLocked = character.age < lic.minAge;
@@ -956,44 +1008,48 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                     return (
                       <div
                         key={lic.id}
-                        className="border-2 border-slate-200 rounded-xl p-3 flex flex-col justify-between gap-2 bg-slate-50/70"
+                        className="border-2 border-slate-200 rounded-xl p-3.5 flex flex-col gap-2.5 bg-slate-50/70"
                       >
-                        <div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-black text-slate-900">{lic.name}</span>
-                            <Badge variant={owned ? 'emerald' : 'slate'} size="xs">
-                              {owned ? 'Licensed' : `$${lic.fee.toLocaleString()}`}
-                            </Badge>
-                          </div>
-                          <p className="text-[11px] font-semibold text-slate-600 mt-1">
-                            {lic.description}
-                          </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-black text-slate-900">{lic.name}</span>
+                          <Badge variant={owned ? 'emerald' : 'slate'} size="xs">
+                            {owned ? 'Licensed' : `$${lic.fee.toLocaleString()}`}
+                          </Badge>
                         </div>
+                        <p className="text-xs font-semibold text-slate-600 leading-snug">
+                          {lic.description}
+                        </p>
 
-                        <CartoonButton
-                          variant={disabled ? 'white' : 'sky'}
-                          size="sm"
-                          disabled={disabled}
-                          onClick={() =>
-                            lic.id === 'drivers'
-                              ? handleOpenDriversQuiz()
-                              : handleTakeLicenseExam(lic.id)
-                          }
-                        >
-                          {owned
-                            ? 'Active'
-                            : ageLocked
-                              ? `Age ${lic.minAge}`
-                              : smartsLocked
-                                ? `${lic.minSmarts} Smarts`
-                                : attemptedThisYear
-                                  ? 'Retry Next Yr'
-                                  : !canAfford
-                                    ? `Need $${lic.fee.toLocaleString()}`
-                                    : lic.id === 'drivers'
-                                      ? 'Take DMV Quiz'
-                                      : 'Take Exam'}
-                        </CartoonButton>
+                        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                          <span className="text-xs font-bold text-slate-500">
+                            Age {lic.minAge}+{lic.minSmarts > 0 ? ` • ${lic.minSmarts}+ Smarts` : ''}
+                          </span>
+                          <CartoonButton
+                            variant={disabled ? 'white' : 'sky'}
+                            size="sm"
+                            className="shrink-0 whitespace-nowrap"
+                            disabled={disabled}
+                            onClick={() =>
+                              lic.id === 'drivers'
+                                ? handleOpenDriversQuiz()
+                                : handleTakeLicenseExam(lic.id)
+                            }
+                          >
+                            {owned
+                              ? 'Active'
+                              : ageLocked
+                                ? `Age ${lic.minAge}`
+                                : smartsLocked
+                                  ? `${lic.minSmarts} Smarts`
+                                  : attemptedThisYear
+                                    ? 'Retry Next Yr'
+                                    : !canAfford
+                                      ? `Need $${lic.fee.toLocaleString()}`
+                                      : lic.id === 'drivers'
+                                        ? 'Take DMV Quiz'
+                                        : 'Take Exam'}
+                          </CartoonButton>
+                        </div>
                       </div>
                     );
                   })}
@@ -1004,7 +1060,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
               <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                    <Plane className="w-4 h-4 text-emerald-600" />
+                    <Plane className="w-4 h-4 text-emerald-600 shrink-0" />
                     Vacations
                   </h3>
                   <Badge variant="slate" size="xs">
@@ -1014,47 +1070,61 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                   </Badge>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="flex gap-1.5 flex-wrap">
-                    {VACATION_CABIN_CLASSES.map((cabin) => (
-                      <CartoonButton
-                        key={cabin.id}
-                        variant={selectedCabin === cabin.id ? 'slate' : 'white'}
-                        size="sm"
-                        onClick={() => setSelectedCabin(cabin.id)}
-                      >
-                        {cabin.name}
-                      </CartoonButton>
-                    ))}
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <div className="text-[10px] font-black uppercase text-slate-400 mb-1">
+                      Cabin Class
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {VACATION_CABIN_CLASSES.map((cabin) => (
+                        <CartoonButton
+                          key={cabin.id}
+                          variant={selectedCabin === cabin.id ? 'slate' : 'white'}
+                          size="sm"
+                          className="whitespace-nowrap"
+                          onClick={() => setSelectedCabin(cabin.id)}
+                        >
+                          {cabin.name}
+                        </CartoonButton>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-1.5 flex-wrap">
-                    <CartoonButton
-                      variant={effectiveCompanion === 'solo' ? 'slate' : 'white'}
-                      size="sm"
-                      onClick={() => setSelectedCompanion('solo')}
-                    >
-                      Solo
-                    </CartoonButton>
-                    <CartoonButton
-                      variant={effectiveCompanion === 'partner' ? 'slate' : 'white'}
-                      size="sm"
-                      disabled={!companions.partner}
-                      onClick={() => setSelectedCompanion('partner')}
-                    >
-                      With Partner
-                    </CartoonButton>
-                    <CartoonButton
-                      variant={effectiveCompanion === 'family' ? 'slate' : 'white'}
-                      size="sm"
-                      disabled={companions.children.length === 0}
-                      onClick={() => setSelectedCompanion('family')}
-                    >
-                      Family ({companions.children.length > 0 ? companions.totalCount : 0})
-                    </CartoonButton>
+                  <div>
+                    <div className="text-[10px] font-black uppercase text-slate-400 mb-1">
+                      Travel Group
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      <CartoonButton
+                        variant={effectiveCompanion === 'solo' ? 'slate' : 'white'}
+                        size="sm"
+                        className="whitespace-nowrap"
+                        onClick={() => setSelectedCompanion('solo')}
+                      >
+                        Solo
+                      </CartoonButton>
+                      <CartoonButton
+                        variant={effectiveCompanion === 'partner' ? 'slate' : 'white'}
+                        size="sm"
+                        className="whitespace-nowrap"
+                        disabled={!companions.partner}
+                        onClick={() => setSelectedCompanion('partner')}
+                      >
+                        With Partner
+                      </CartoonButton>
+                      <CartoonButton
+                        variant={effectiveCompanion === 'family' ? 'slate' : 'white'}
+                        size="sm"
+                        className="whitespace-nowrap"
+                        disabled={companions.children.length === 0}
+                        onClick={() => setSelectedCompanion('family')}
+                      >
+                        Family ({companions.children.length > 0 ? companions.totalCount : 0})
+                      </CartoonButton>
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="flex flex-col gap-2.5">
                   {VACATION_DESTINATIONS.map((dest) => {
                     const ageLocked = character.age < VACATION_MIN_AGE;
                     const usedThisYear = activities.lastVacationAge === character.age;
@@ -1065,38 +1135,54 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                       effectiveCompanion
                     );
                     const canAfford = character.cash >= cost;
+                    const destChips = formatStatBadges({
+                      health: dest.healthGain,
+                      happiness: dest.happinessGain,
+                      looks: dest.looksGain,
+                    });
 
                     return (
                       <div
                         key={dest.id}
-                        className="border-2 border-slate-200 rounded-xl p-3 flex flex-col justify-between gap-2 bg-slate-50/70"
+                        className="border-2 border-slate-200 rounded-xl p-3.5 flex flex-col gap-2.5 bg-slate-50/70"
                       >
-                        <div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-black text-slate-900">{dest.name}</span>
-                            <Badge variant="emerald" size="xs">
-                              ${cost.toLocaleString()}
-                            </Badge>
-                          </div>
-                          <p className="text-[11px] font-semibold text-slate-600 mt-1">
-                            {dest.description}
-                          </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-black text-slate-900">{dest.name}</span>
+                          <Badge variant="emerald" size="xs">
+                            ${cost.toLocaleString()}
+                          </Badge>
                         </div>
+                        <p className="text-xs font-semibold text-slate-600 leading-snug">
+                          {dest.description}
+                        </p>
 
-                        <CartoonButton
-                          variant={ageLocked || usedThisYear || !canAfford ? 'white' : 'emerald'}
-                          size="sm"
-                          disabled={ageLocked || usedThisYear || !canAfford}
-                          onClick={() => handleTakeVacation(dest.id)}
-                        >
-                          {ageLocked
-                            ? `Age ${VACATION_MIN_AGE}`
-                            : usedThisYear
-                              ? 'Traveled This Yr'
-                              : !canAfford
-                                ? `Need $${cost.toLocaleString()}`
-                                : 'Book Trip'}
-                        </CartoonButton>
+                        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                          <div className="flex flex-wrap gap-1.5">
+                            {destChips.map((chip) => (
+                              <span
+                                key={chip.label}
+                                className="text-[10px] font-black px-1.5 py-0.5 rounded-md border bg-emerald-50 text-emerald-800 border-emerald-200"
+                              >
+                                {chip.label}
+                              </span>
+                            ))}
+                          </div>
+                          <CartoonButton
+                            variant={ageLocked || usedThisYear || !canAfford ? 'white' : 'emerald'}
+                            size="sm"
+                            className="shrink-0 whitespace-nowrap"
+                            disabled={ageLocked || usedThisYear || !canAfford}
+                            onClick={() => handleTakeVacation(dest.id)}
+                          >
+                            {ageLocked
+                              ? `Age ${VACATION_MIN_AGE}`
+                              : usedThisYear
+                                ? 'Traveled This Yr'
+                                : !canAfford
+                                  ? `Need $${cost.toLocaleString()}`
+                                  : 'Book Trip'}
+                          </CartoonButton>
+                        </div>
                       </div>
                     );
                   })}
@@ -1108,7 +1194,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                      <Compass className="w-4 h-4 text-amber-600" />
+                      <Compass className="w-4 h-4 text-amber-600 shrink-0" />
                       Emigration ({character.flag || '🌐'} {character.city}, {character.country})
                     </h3>
                     <p className="text-[11px] font-semibold text-slate-500">
@@ -1122,7 +1208,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="flex flex-col gap-2.5">
                   {EMIGRATION_DESTINATIONS.map((dest) => {
                     const evalResult = evaluateEmigrationEligibility(character, dest.country);
                     const canAfford = character.cash >= dest.movingCost;
@@ -1131,39 +1217,41 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                     return (
                       <div
                         key={dest.country}
-                        className="border-2 border-slate-200 rounded-xl p-3 flex flex-col justify-between gap-2 bg-slate-50/70"
+                        className="border-2 border-slate-200 rounded-xl p-3.5 flex flex-col gap-2.5 bg-slate-50/70"
                       >
-                        <div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-black text-slate-900">
-                              {dest.flag} {dest.country} ({dest.city})
-                            </span>
-                            <Badge variant="amber" size="xs">
-                              ${dest.movingCost.toLocaleString()}
-                            </Badge>
-                          </div>
-                          <div className="text-[11px] font-bold text-slate-500 mt-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-black text-slate-900">
+                            {dest.flag} {dest.country} ({dest.city})
+                          </span>
+                          <Badge variant="amber" size="xs">
+                            ${dest.movingCost.toLocaleString()}
+                          </Badge>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                          <div className="text-xs font-bold text-slate-500">
                             {isCurrent
                               ? 'Current residence'
                               : evalResult.blockedReason ??
                                 `Visa odds: ${Math.round(evalResult.approvalChance * 100)}% • ${dest.strictnessLabel}`}
                           </div>
-                        </div>
 
-                        <CartoonButton
-                          variant={!evalResult.eligible || !canAfford ? 'white' : 'amber'}
-                          size="sm"
-                          disabled={!evalResult.eligible || !canAfford}
-                          onClick={() => handleAttemptEmigration(dest.country)}
-                        >
-                          {isCurrent
-                            ? 'Home Country'
-                            : !evalResult.eligible
-                              ? 'Restricted'
-                              : !canAfford
-                                ? `Need $${dest.movingCost.toLocaleString()}`
-                                : 'Apply for Visa'}
-                        </CartoonButton>
+                          <CartoonButton
+                            variant={!evalResult.eligible || !canAfford ? 'white' : 'amber'}
+                            size="sm"
+                            className="shrink-0 whitespace-nowrap"
+                            disabled={!evalResult.eligible || !canAfford}
+                            onClick={() => handleAttemptEmigration(dest.country)}
+                          >
+                            {isCurrent
+                              ? 'Home Country'
+                              : !evalResult.eligible
+                                ? 'Restricted'
+                                : !canAfford
+                                  ? `Need $${dest.movingCost.toLocaleString()}`
+                                  : 'Apply for Visa'}
+                          </CartoonButton>
+                        </div>
                       </div>
                     );
                   })}
@@ -1191,10 +1279,10 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                   </Badge>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 border-2 border-slate-200 rounded-xl p-3 bg-slate-50/70">
+                <div className="flex items-center justify-between gap-2 border-2 border-slate-200 rounded-xl p-3.5 bg-slate-50/70">
                   <div>
                     <div className="text-sm font-black text-slate-900">Go Clubbing</div>
-                    <div className="text-[11px] font-semibold text-slate-500">
+                    <div className="text-xs font-semibold text-slate-500">
                       ${CLUBBING_ENTRY_FEE} cover charge • Unlocks at Age {CLUBBING_MIN_AGE}
                     </div>
                   </div>
@@ -1207,6 +1295,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                         : 'purple'
                     }
                     size="sm"
+                    className="shrink-0 whitespace-nowrap"
                     disabled={
                       character.age < CLUBBING_MIN_AGE ||
                       clubbingRemaining === 0 ||
@@ -1230,7 +1319,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                      <Stethoscope className="w-4 h-4 text-rose-600" />
+                      <Stethoscope className="w-4 h-4 text-rose-600 shrink-0" />
                       Addictions &amp; Rehab Center
                     </h3>
                     <p className="text-[11px] font-semibold text-slate-500">
@@ -1244,21 +1333,26 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="flex flex-col gap-2">
                   {REHAB_TIERS.map((tier) => (
                     <button
                       key={tier.id}
                       type="button"
                       onClick={() => setSelectedRehabTier(tier.id)}
-                      className={`text-left border-2 rounded-xl p-2.5 cursor-pointer transition-colors ${
+                      className={`text-left border-2 rounded-xl px-3 py-2.5 cursor-pointer transition-colors space-y-0.5 ${
                         selectedRehabTier === tier.id
                           ? 'border-slate-900 bg-emerald-50'
                           : 'border-slate-200 bg-slate-50/70'
                       }`}
                     >
-                      <div className="text-xs font-black text-slate-900">{tier.name}</div>
-                      <div className="text-[11px] font-bold text-slate-500 mt-0.5">
-                        ${tier.fee.toLocaleString()} • {Math.round(tier.recoveryChance * 100)}% recovery
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-900">{tier.name}</span>
+                        <span className="text-[11px] font-bold text-slate-600 shrink-0 whitespace-nowrap">
+                          ${tier.fee.toLocaleString()} • {Math.round(tier.recoveryChance * 100)}% recovery
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-semibold text-slate-500">
+                        {tier.description}
                       </div>
                     </button>
                   ))}
@@ -1290,6 +1384,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                           <CartoonButton
                             variant={ageLocked || rehabUsed || !canAfford ? 'white' : 'emerald'}
                             size="sm"
+                            className="shrink-0 whitespace-nowrap"
                             disabled={ageLocked || rehabUsed || !canAfford}
                             onClick={() => handleAttendRehab(item.id)}
                           >
@@ -1312,7 +1407,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
               <div className="bg-white border-[2.5px] border-slate-900 rounded-2xl p-4 shadow-[0_3px_0_#0f172a] space-y-3">
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-wide text-slate-900 flex items-center gap-1.5">
-                    <Gavel className="w-4 h-4 text-amber-600" />
+                    <Gavel className="w-4 h-4 text-amber-600 shrink-0" />
                     Civil Lawsuits &amp; Open Claims
                   </h3>
                   <p className="text-[11px] font-semibold text-slate-500">
@@ -1320,21 +1415,26 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="flex flex-col gap-2">
                   {CIVIL_ATTORNEY_TIERS.map((tier) => (
                     <button
                       key={tier.id}
                       type="button"
                       onClick={() => setSelectedAttorneyTier(tier.id)}
-                      className={`text-left border-2 rounded-xl p-2.5 cursor-pointer transition-colors ${
+                      className={`text-left border-2 rounded-xl px-3 py-2.5 cursor-pointer transition-colors space-y-0.5 ${
                         selectedAttorneyTier === tier.id
                           ? 'border-slate-900 bg-amber-50'
                           : 'border-slate-200 bg-slate-50/70'
                       }`}
                     >
-                      <div className="text-xs font-black text-slate-900">{tier.name}</div>
-                      <div className="text-[11px] font-bold text-slate-500 mt-0.5">
-                        ${tier.fee.toLocaleString()} fee • {Math.round(tier.winChance * 100)}% win odds
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-900">{tier.name}</span>
+                        <span className="text-[11px] font-bold text-slate-600 shrink-0 whitespace-nowrap">
+                          ${tier.fee.toLocaleString()} fee • {Math.round(tier.winChance * 100)}% win odds
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-semibold text-slate-500">
+                        {tier.description}
                       </div>
                     </button>
                   ))}
@@ -1366,6 +1466,7 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
                           <CartoonButton
                             variant={!canAfford ? 'white' : 'amber'}
                             size="sm"
+                            className="shrink-0 whitespace-nowrap"
                             disabled={!canAfford}
                             onClick={() => handleFileLawsuit(claim.id)}
                           >
