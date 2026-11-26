@@ -1,4 +1,5 @@
-import type { CharacterProfile } from '../../../types/game';
+import type { CharacterProfile, ChildProfile, PersonProfile } from '../../../types/game';
+import { isPartnerProfile } from '../../relationships/services/relationshipService';
 import {
   BELT_RANKS,
   DIET_CATALOG,
@@ -7,12 +8,17 @@ import {
   MINOR_FREE_CUTOFF_AGE,
   getMindBodyActionTemplate,
 } from '../data/activitiesCatalog';
+import { MAX_CLUBBING_PER_YEAR } from '../data/nightlifeLawsuitCatalog';
 import type {
+  ActiveAddiction,
+  AddictionId,
   DietId,
+  LicenseId,
   MartialArtBeltRank,
   MartialArtId,
   MartialArtProgress,
   MindBodyActionId,
+  PendingLawsuitClaim,
   PlayerActivitiesState,
 } from '../types';
 
@@ -20,6 +26,13 @@ const VALID_DIET_IDS = new Set<DietId>(DIET_CATALOG.map((item) => item.id));
 const VALID_MARTIAL_ART_IDS = new Set<MartialArtId>(
   MARTIAL_ARTS_CATALOG.map((item) => item.id)
 );
+const VALID_LICENSE_IDS = new Set<LicenseId>(['drivers', 'boating', 'pilot']);
+const VALID_ADDICTION_IDS = new Set<AddictionId>(['alcohol', 'gambling', 'substances']);
+const VALID_CLAIM_SOURCES = new Set<PendingLawsuitClaim['source']>([
+  'botched_surgery',
+  'nightlife_assault',
+  'defamation',
+]);
 
 function clampBeltRank(value: unknown): MartialArtBeltRank {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
@@ -86,6 +99,21 @@ export function getSanitizedActivitiesState(
     }
   }
 
+  const licenses: Partial<Record<LicenseId, { acquiredAtAge: number }>> = {};
+  if (raw.licenses && typeof raw.licenses === 'object') {
+    for (const [key, entry] of Object.entries(raw.licenses)) {
+      if (
+        VALID_LICENSE_IDS.has(key as LicenseId) &&
+        entry &&
+        typeof entry === 'object' &&
+        typeof entry.acquiredAtAge === 'number' &&
+        Number.isFinite(entry.acquiredAtAge)
+      ) {
+        licenses[key as LicenseId] = { acquiredAtAge: entry.acquiredAtAge };
+      }
+    }
+  }
+
   return {
     diet,
     dietLastProgressedAge:
@@ -103,7 +131,7 @@ export function getSanitizedActivitiesState(
       typeof raw.lastActionAge === 'number' && Number.isFinite(raw.lastActionAge)
         ? raw.lastActionAge
         : null,
-    licenses: raw.licenses && typeof raw.licenses === 'object' ? { ...raw.licenses } : {},
+    licenses,
     lastDriversTestAge:
       typeof raw.lastDriversTestAge === 'number' && Number.isFinite(raw.lastDriversTestAge)
         ? raw.lastDriversTestAge
@@ -120,12 +148,54 @@ export function getSanitizedActivitiesState(
       typeof raw.plasticSurgeryCount === 'number' && Number.isFinite(raw.plasticSurgeryCount)
         ? Math.max(0, Math.floor(raw.plasticSurgeryCount))
         : 0,
-    addictions: Array.isArray(raw.addictions) ? raw.addictions : [],
+    addictions: Array.isArray(raw.addictions)
+      ? raw.addictions
+          .filter(
+            (item): item is ActiveAddiction =>
+              Boolean(item) &&
+              typeof item === 'object' &&
+              VALID_ADDICTION_IDS.has(item.id) &&
+              typeof item.acquiredAtAge === 'number' &&
+              Number.isFinite(item.acquiredAtAge)
+          )
+          .map((item) => ({
+            id: item.id,
+            severity:
+              typeof item.severity === 'number' && Number.isFinite(item.severity)
+                ? Math.max(1, Math.min(100, Math.round(item.severity)))
+                : 35,
+            acquiredAtAge: item.acquiredAtAge,
+            lastProgressedAge:
+              typeof item.lastProgressedAge === 'number' &&
+              Number.isFinite(item.lastProgressedAge)
+                ? item.lastProgressedAge
+                : null,
+          }))
+      : [],
     lastRehabAge:
       typeof raw.lastRehabAge === 'number' && Number.isFinite(raw.lastRehabAge)
         ? raw.lastRehabAge
         : null,
-    pendingClaims: Array.isArray(raw.pendingClaims) ? raw.pendingClaims : [],
+    pendingClaims: Array.isArray(raw.pendingClaims)
+      ? raw.pendingClaims.filter(
+          (claim): claim is PendingLawsuitClaim =>
+            Boolean(claim) &&
+            typeof claim === 'object' &&
+            typeof claim.id === 'string' &&
+            claim.id.length > 0 &&
+            VALID_CLAIM_SOURCES.has(claim.source) &&
+            typeof claim.defendantName === 'string' &&
+            typeof claim.summary === 'string' &&
+            typeof claim.occurredAtAge === 'number' &&
+            Number.isFinite(claim.occurredAtAge) &&
+            typeof claim.expiresAtAge === 'number' &&
+            Number.isFinite(claim.expiresAtAge) &&
+            typeof claim.claimedDamages === 'number' &&
+            Number.isFinite(claim.claimedDamages) &&
+            claim.claimedDamages >= 0 &&
+            typeof claim.resolved === 'boolean'
+        )
+      : [],
   };
 }
 
@@ -241,3 +311,72 @@ export function getSelfDefenseScore(
   const additionalDisciplines = Math.max(0, trainedEntries.length - 1);
   return Math.min(100, highestRank * 12 + additionalDisciplines * 4);
 }
+
+export function hasLicense(
+  character: Pick<CharacterProfile, 'activities'>,
+  licenseId: LicenseId
+): boolean {
+  return Boolean(getSanitizedActivitiesState(character).licenses[licenseId]);
+}
+
+export function hasDriversLicense(character: Pick<CharacterProfile, 'activities'>): boolean {
+  return hasLicense(character, 'drivers');
+}
+
+export function hasBoatingLicense(character: Pick<CharacterProfile, 'activities'>): boolean {
+  return hasLicense(character, 'boating');
+}
+
+export function hasPilotLicense(character: Pick<CharacterProfile, 'activities'>): boolean {
+  return hasLicense(character, 'pilot');
+}
+
+export function getActiveVacationCompanions(
+  character: Pick<CharacterProfile, 'partner' | 'relationships' | 'children'>
+): {
+  partner: PersonProfile | null;
+  children: ChildProfile[];
+  totalCount: number;
+} {
+  const candidatePartner =
+    character.partner ??
+    (character.relationships || []).find((p) => isPartnerProfile(p)) ??
+    null;
+  const partner =
+    candidatePartner && isPartnerProfile(candidatePartner)
+      ? candidatePartner
+      : null;
+  const children = (character.children || []).filter((child) => child.isAlive);
+
+  return {
+    partner,
+    children,
+    totalCount: (partner ? 1 : 0) + children.length,
+  };
+}
+
+export function getClubbingSessionsRemaining(
+  character: Pick<CharacterProfile, 'age' | 'activities'>
+): number {
+  const activities = getSanitizedActivitiesState(character);
+  const used =
+    activities.lastActionAge === character.age
+      ? (activities.annualActionCounts.go_clubbing ?? 0)
+      : 0;
+  return Math.max(0, MAX_CLUBBING_PER_YEAR - used);
+}
+
+export function getActiveAddictions(
+  character: Pick<CharacterProfile, 'activities'>
+): ActiveAddiction[] {
+  return getSanitizedActivitiesState(character).addictions;
+}
+
+export function getOpenLawsuitClaims(
+  character: Pick<CharacterProfile, 'age' | 'activities'>
+): PendingLawsuitClaim[] {
+  return getSanitizedActivitiesState(character).pendingClaims.filter(
+    (claim) => !claim.resolved && claim.expiresAtAge >= character.age
+  );
+}
+

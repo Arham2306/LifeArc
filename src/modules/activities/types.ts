@@ -56,7 +56,7 @@ export interface PendingLawsuitClaim {
 }
 
 export interface PlayerActivitiesState {
-  // Phase 1A
+  // Mind & Body Core
   diet: DietId;
   dietLastProgressedAge: number | null;
   gymMembershipActive: boolean;
@@ -66,14 +66,14 @@ export interface PlayerActivitiesState {
   annualActionCounts: Record<string, number>;
   lastActionAge: number | null;
 
-  // Phase 1B
+  // Surgery, Licenses & Travel
   licenses: Partial<Record<LicenseId, { acquiredAtAge: number }>>;
   lastDriversTestAge: number | null;
   lastVacationAge: number | null;
   lastEmigrationAge: number | null;
   plasticSurgeryCount: number;
 
-  // Phase 1C
+  // Nightlife, Addictions & Lawsuits
   addictions: ActiveAddiction[];
   lastRehabAge: number | null;
   pendingClaims: PendingLawsuitClaim[];
@@ -132,3 +132,128 @@ export interface ActivitiesYearProgress {
   karmaDelta: number;
   events: LifeEvent[];
 }
+
+// Cosmetic Surgery, Licenses & Travel types
+export type PlasticSurgeryId =
+  | 'veneers'
+  | 'rhinoplasty'
+  | 'hair_transplant'
+  | 'liposuction'
+  | 'facelift';
+
+export type SurgeryClinicTierId = 'budget' | 'board_certified' | 'celebrity';
+
+export type VacationDestinationId =
+  | 'coastal_road_trip'
+  | 'tropical_resort'
+  | 'european_capitals'
+  | 'private_island';
+
+export type VacationCabinClassId = 'economy' | 'business' | 'first_class';
+
+export type VacationCompanionMode = 'solo' | 'partner' | 'family';
+
+export interface PlasticSurgeryTemplate {
+  id: PlasticSurgeryId;
+  name: string;
+  description: string;
+  baseCost: number;
+  looksGain: number;
+  happinessGain: number;
+}
+
+export interface SurgeryClinicTier {
+  id: SurgeryClinicTierId;
+  name: string;
+  priceMultiplier: number;
+  botchChance: number;
+  clinicLabel: string;
+}
+
+export interface LicenseTemplate {
+  id: LicenseId;
+  name: string;
+  minAge: number;
+  fee: number;
+  minSmarts: number;
+  description: string;
+}
+
+export interface DriversQuizQuestion {
+  id: string;
+  prompt: string;
+  options: readonly [string, string, string];
+  correctIndex: 0 | 1 | 2;
+}
+
+export interface VacationDestinationTemplate {
+  id: VacationDestinationId;
+  name: string;
+  description: string;
+  baseCost: number;
+  healthGain: number;
+  happinessGain: number;
+  looksGain: number;
+}
+
+export interface VacationCabinClass {
+  id: VacationCabinClassId;
+  name: string;
+  priceMultiplier: number;
+  bonusHappiness: number;
+}
+
+export interface EmigrationDestinationTemplate {
+  country: string;
+  city: string;
+  flag: string;
+  movingCost: number;
+  baseApproval: number;
+  strictnessLabel: 'Moderate' | 'Strict';
+}
+
+// Nightlife, Addictions & Civil Lawsuits types
+export type RehabTierId = 'community' | 'standard' | 'luxury';
+
+export type CivilAttorneyTierId = 'public' | 'private' | 'elite';
+
+export interface AddictionTemplate {
+  id: AddictionId;
+  name: string;
+  temptationTitle: string;
+  temptationPrompt: string;
+  riskChance: number;
+  baseAnnualCost: number;
+  maxAnnualCost: number;
+}
+
+export interface RehabTierTemplate {
+  id: RehabTierId;
+  name: string;
+  description: string;
+  fee: number;
+  recoveryChance: number;
+  bonusHappiness: number;
+  bonusKarma: number;
+}
+
+export interface CivilAttorneyTierTemplate {
+  id: CivilAttorneyTierId;
+  name: string;
+  description: string;
+  fee: number;
+  winChance: number;
+}
+
+export interface ViceTemptationOffer {
+  addictionId: AddictionId;
+  title: string;
+  prompt: string;
+  riskChance: number;
+}
+
+export interface ClubbingActionResult extends ActivityActionResult {
+  temptation?: ViceTemptationOffer;
+}
+
+

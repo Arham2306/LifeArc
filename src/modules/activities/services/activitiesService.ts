@@ -2,6 +2,7 @@ import type { CharacterProfile, LifeEvent } from '../../../types/game';
 import { createId } from '../../../utils/id';
 import { applyEffects } from '../../character/services/statService';
 import { isCurrentlyIncarcerated } from '../../crime/services/crimeSelectors';
+import { progressAddictionsAndClaimsForYear } from './addictionService';
 import {
   ACTIVITIES_MIN_AGE,
   DIET_MIN_AGE,
@@ -33,7 +34,7 @@ import {
   getSanitizedActivitiesState,
 } from './activitiesSelectors';
 
-function makeEvent(
+export function makeActivityEvent(
   character: Pick<CharacterProfile, 'birthYear'>,
   age: number,
   title: string,
@@ -52,7 +53,7 @@ function makeEvent(
   };
 }
 
-function blockedResult(
+export function blockedActivityResult(
   character: CharacterProfile,
   title: string,
   summary: string
@@ -65,6 +66,21 @@ function blockedResult(
     costPaid: 0,
   };
 }
+
+export function checkActivityEligibility(
+  character: Pick<CharacterProfile, 'isAlive' | 'age' | 'crime'>,
+  minAge: number,
+  title: string,
+  prisonMessage: string
+): string | null {
+  if (!character.isAlive) return 'This life has already ended.';
+  if (isCurrentlyIncarcerated(character)) return prisonMessage;
+  if (character.age < minAge) return `${title} unlocks at Age ${minAge}.`;
+  return null;
+}
+
+const makeEvent = makeActivityEvent;
+const blockedResult = blockedActivityResult;
 
 function withUpdatedActivities(
   character: CharacterProfile,
@@ -539,14 +555,21 @@ export function progressActivitiesForYear(
   };
 
   if (options.isIncarceratedForYear) {
+    const prisonClaimSweep = progressAddictionsAndClaimsForYear(
+      character,
+      nextActivities,
+      nextAge,
+      0,
+      true
+    );
     return {
-      activities: nextActivities,
+      activities: prisonClaimSweep.activities,
       cashSpent: 0,
       healthDelta: 0,
       happinessDelta: 0,
       looksDelta: 0,
       karmaDelta: 0,
-      events: [],
+      events: prisonClaimSweep.events,
     };
   }
 
@@ -621,6 +644,20 @@ export function progressActivitiesForYear(
       );
     }
   }
+
+  // 3. Active addictions drain & lawsuit claim expiration
+  const addictionYear = progressAddictionsAndClaimsForYear(
+    character,
+    nextActivities,
+    nextAge,
+    cashAvailable,
+    false
+  );
+  nextActivities = addictionYear.activities;
+  cashSpent += addictionYear.cashSpent;
+  healthDelta += addictionYear.healthDelta;
+  happinessDelta += addictionYear.happinessDelta;
+  events.push(...addictionYear.events);
 
   return {
     activities: nextActivities,
