@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ArrowLeft,
+  ChevronRight,
   Compass,
   Dumbbell,
   Gavel,
@@ -114,7 +115,7 @@ interface ActivitiesScreenProps {
   character: CharacterProfile;
   onUpdateCharacter: (character: CharacterProfile) => void;
   onBackToMenu: () => void;
-  initialTab?: ActivitiesTabId;
+  initialTab?: ActivitiesTabId | null;
 }
 
 interface OutcomeModalState {
@@ -145,9 +146,9 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
   character,
   onUpdateCharacter,
   onBackToMenu,
-  initialTab = 'mind_body',
+  initialTab = null,
 }) => {
-  const [activeTab, setActiveTab] = useState<ActivitiesTabId>(initialTab);
+  const [activeTab, setActiveTab] = useState<ActivitiesTabId | null>(initialTab);
   const [outcome, setOutcome] = useState<OutcomeModalState | null>(null);
   const [selectedTier, setSelectedTier] = useState<SurgeryClinicTierId>('board_certified');
   const [selectedCabin, setSelectedCabin] = useState<VacationCabinClassId>('economy');
@@ -296,16 +297,119 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
     handleOutcomeResult(res, res.appliedEffects);
   };
 
+  const sectionMeta: Record<
+    ActivitiesTabId,
+    { title: string; subtitle: string; icon: React.ReactNode }
+  > = {
+    mind_body: {
+      title: 'Mind & Body',
+      subtitle: 'Daily routines, gym training, martial arts dojo, and meal plans.',
+      icon: <HeartPulse className="w-5 h-5 text-emerald-600" />,
+    },
+    surgery: {
+      title: 'Cosmetic Surgery',
+      subtitle: 'Aesthetic procedures across three clinic safety tiers.',
+      icon: <Scissors className="w-5 h-5 text-rose-600" />,
+    },
+    travel: {
+      title: 'Licenses & Travel',
+      subtitle: 'Certifications, vacations, and permanent emigration.',
+      icon: <Plane className="w-5 h-5 text-sky-600" />,
+    },
+    nightlife: {
+      title: 'Nightlife & Legal',
+      subtitle: 'Clubbing encounters, addiction rehab, and civil lawsuits.',
+      icon: <Martini className="w-5 h-5 text-purple-600" />,
+    },
+  };
+
+  const activeMeta = activeTab ? sectionMeta[activeTab] : null;
+  const surgeryUnlocked = character.age >= PLASTIC_SURGERY_MIN_AGE;
+  const travelUnlocked = character.age >= (LICENSE_CATALOG[0]?.minAge ?? 16);
+  const nightlifeUnlocked =
+    character.age >= CLUBBING_MIN_AGE ||
+    activeAddictions.length > 0 ||
+    openClaims.length > 0;
+
+  const directoryItems: Array<{
+    id: ActivitiesTabId;
+    title: string;
+    subtitle: string;
+    icon: React.ReactNode;
+    iconBg: string;
+    isAvailable: boolean;
+    badgeLabel?: string;
+    badgeVariant?: 'amber' | 'emerald' | 'sky' | 'rose' | 'slate' | 'purple';
+  }> = [
+    {
+      id: 'mind_body',
+      title: 'Mind & Body',
+      subtitle: 'Walk/Jog, meditation, gym, martial arts dojo, salon, spa & diets',
+      icon: <HeartPulse className="w-5 h-5 stroke-[2.5] text-teal-950" />,
+      iconBg: 'bg-teal-400',
+      isAvailable: true,
+      badgeLabel:
+        character.age < MINOR_FREE_CUTOFF_AGE ? 'Free (<16)' : undefined,
+      badgeVariant: 'sky',
+    },
+    {
+      id: 'surgery',
+      title: 'Cosmetic Surgery',
+      subtitle: surgeryUnlocked
+        ? 'Veneers, rhinoplasty, liposuction & clinic tiers'
+        : `Unlocks at age ${PLASTIC_SURGERY_MIN_AGE}`,
+      icon: <Scissors className="w-5 h-5 stroke-[2.5] text-rose-950" />,
+      iconBg: surgeryUnlocked ? 'bg-rose-400' : 'bg-rose-300',
+      isAvailable: surgeryUnlocked,
+      badgeLabel: surgeryUnlocked ? undefined : `Age ${PLASTIC_SURGERY_MIN_AGE}`,
+      badgeVariant: 'slate',
+    },
+    {
+      id: 'travel',
+      title: 'Licenses & Travel',
+      subtitle: travelUnlocked
+        ? "Driver's, Boating & Pilot licenses, vacations & emigration"
+        : 'Unlocks at age 16 (DMV road quiz)',
+      icon: <Plane className="w-5 h-5 stroke-[2.5] text-sky-950" />,
+      iconBg: travelUnlocked ? 'bg-sky-400' : 'bg-sky-300',
+      isAvailable: travelUnlocked,
+      badgeLabel: travelUnlocked ? undefined : 'Age 16',
+      badgeVariant: 'slate',
+    },
+    {
+      id: 'nightlife',
+      title: 'Nightlife & Legal',
+      subtitle: nightlifeUnlocked
+        ? 'Clubbing, addictions & rehab center, and civil lawsuits'
+        : `Unlocks at age ${CLUBBING_MIN_AGE}`,
+      icon: <Martini className="w-5 h-5 stroke-[2.5] text-purple-950" />,
+      iconBg: nightlifeUnlocked ? 'bg-purple-400' : 'bg-purple-300',
+      isAvailable: nightlifeUnlocked,
+      badgeLabel: !nightlifeUnlocked
+        ? `Age ${CLUBBING_MIN_AGE}`
+        : openClaims.length > 0
+          ? `${openClaims.length} ${openClaims.length === 1 ? 'Claim' : 'Claims'}`
+          : activeAddictions.length > 0
+            ? `${activeAddictions.length} ${activeAddictions.length === 1 ? 'Addiction' : 'Addictions'}`
+            : undefined,
+      badgeVariant: !nightlifeUnlocked
+        ? 'slate'
+        : openClaims.length > 0
+          ? 'amber'
+          : 'rose',
+    },
+  ];
+
   return (
-    <div className="space-y-4">
+    <div className="p-4 space-y-4">
       <div className="flex items-center justify-between gap-2">
         <CartoonButton
           variant="white"
           size="sm"
           icon={<ArrowLeft className="w-4 h-4" />}
-          onClick={onBackToMenu}
+          onClick={() => (activeTab ? setActiveTab(null) : onBackToMenu())}
         >
-          Back to Menu
+          {activeTab ? 'Back to Activities' : 'Back to Menu'}
         </CartoonButton>
         <Badge variant="emerald" size="sm">
           Cash: ${character.cash.toLocaleString()}
@@ -316,11 +420,13 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <HeartPulse className="w-5 h-5 text-emerald-600" />
-              Mind &amp; Body
+              {activeMeta ? activeMeta.icon : <Sparkles className="w-5 h-5 text-teal-600" />}
+              {activeMeta ? activeMeta.title : 'Everyday Activities'}
             </h2>
             <p className="text-xs font-bold text-slate-500 mt-0.5">
-              Daily routines, gym training, martial arts dojo, and meal plans.
+              {activeMeta
+                ? activeMeta.subtitle
+                : 'Choose a category to train, travel, socialize, or manage legal claims.'}
             </p>
           </div>
           {character.age < MINOR_FREE_CUTOFF_AGE && unlocked && !incarcerated && (
@@ -330,43 +436,45 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-          <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
-            <div className="text-[10px] font-black uppercase text-slate-400">Active Diet</div>
-            <div className="text-xs font-black text-slate-900 truncate mt-0.5">
-              {activeDiet.name}
+        {(activeTab === null || activeTab === 'mind_body') && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
+              <div className="text-[10px] font-black uppercase text-slate-400">Active Diet</div>
+              <div className="text-xs font-black text-slate-900 truncate mt-0.5">
+                {activeDiet.name}
+              </div>
+            </div>
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
+              <div className="text-[10px] font-black uppercase text-slate-400">Highest Belt</div>
+              <div className="text-xs font-black text-slate-900 truncate mt-0.5">
+                {highestBelt.label}
+              </div>
+            </div>
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
+              <div className="text-[10px] font-black uppercase text-slate-400">Self-Defense</div>
+              <div className="text-xs font-black text-slate-900 mt-0.5">
+                {selfDefenseScore} / 100
+              </div>
+            </div>
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
+              <div className="text-[10px] font-black uppercase text-slate-400">Gym Pass</div>
+              <div className="text-xs font-black text-slate-900 mt-0.5">
+                {character.age < MINOR_FREE_CUTOFF_AGE
+                  ? 'Parents Cover'
+                  : activities.gymMembershipActive
+                    ? 'Active ($200/yr)'
+                    : 'Drop-in ($50)'}
+              </div>
             </div>
           </div>
-          <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
-            <div className="text-[10px] font-black uppercase text-slate-400">Highest Belt</div>
-            <div className="text-xs font-black text-slate-900 truncate mt-0.5">
-              {highestBelt.label}
-            </div>
-          </div>
-          <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
-            <div className="text-[10px] font-black uppercase text-slate-400">Self-Defense</div>
-            <div className="text-xs font-black text-slate-900 mt-0.5">
-              {selfDefenseScore} / 100
-            </div>
-          </div>
-          <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-2.5">
-            <div className="text-[10px] font-black uppercase text-slate-400">Gym Pass</div>
-            <div className="text-xs font-black text-slate-900 mt-0.5">
-              {character.age < MINOR_FREE_CUTOFF_AGE
-                ? 'Parents Cover'
-                : activities.gymMembershipActive
-                  ? 'Active ($200/yr)'
-                  : 'Drop-in ($50)'}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {!unlocked ? (
         <div className="bg-amber-50 border-[2.5px] border-slate-900 rounded-2xl p-6 text-center shadow-[0_3px_0_#0f172a]">
           <Lock className="w-8 h-8 text-amber-700 mx-auto mb-2" />
           <h3 className="text-base font-black text-slate-900">
-            Mind &amp; Body Unlocks at Age {ACTIVITIES_MIN_AGE}
+            Everyday Activities Unlock at Age {ACTIVITIES_MIN_AGE}
           </h3>
           <p className="text-xs font-bold text-slate-600 mt-1">
             Come back at Age {ACTIVITIES_MIN_AGE} to walk, meditate, visit the library, and start martial arts.
@@ -377,30 +485,75 @@ export const ActivitiesScreen: React.FC<ActivitiesScreenProps> = ({
           <Lock className="w-8 h-8 text-rose-600 mx-auto mb-2" />
           <h3 className="text-base font-black text-rose-950">Locked While In Prison</h3>
           <p className="text-xs font-bold text-rose-800 mt-1 max-w-md mx-auto">
-            External Mind &amp; Body routines, dojo lessons, salon visits, and custom diets are suspended while serving your sentence. Active diet and gym billing are paused until release.
+            External routines, dojo lessons, cosmetic surgery, travel, nightlife, and civil filings are suspended while serving your sentence. Active diet, gym, and addiction drains are paused until release.
           </p>
+        </div>
+      ) : activeTab === null ? (
+        <div className="flex flex-col gap-2.5">
+          {directoryItems.map((item) =>
+            item.isAvailable ? (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className="w-full text-left p-3.5 rounded-2xl border-2 border-slate-900 bg-white hover:bg-amber-50/70 transition-all shadow-[2px_2.5px_0_#0f172a] hover:translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 cursor-pointer flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-xl border-2 border-slate-900 flex items-center justify-center flex-shrink-0 shadow-[1.5px_1.5px_0_#0f172a] ${item.iconBg}`}
+                  >
+                    {item.icon}
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-black text-slate-950 group-hover:text-amber-950">
+                      {item.title}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-500 line-clamp-1">
+                      {item.subtitle}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 pl-2 flex-shrink-0">
+                  {item.badgeLabel && (
+                    <Badge variant={item.badgeVariant || 'emerald'} size="xs">
+                      {item.badgeLabel}
+                    </Badge>
+                  )}
+                  <ChevronRight className="w-4 h-4 stroke-[3] text-slate-900 group-hover:translate-x-0.5 transition-transform" />
+                </div>
+              </button>
+            ) : (
+              <div
+                key={item.id}
+                className="w-full text-left p-3.5 rounded-2xl border-2 border-slate-300 bg-slate-50/80 flex items-center justify-between opacity-75"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-xl border-2 border-slate-400 flex items-center justify-center flex-shrink-0 grayscale-[35%] ${item.iconBg}`}
+                  >
+                    {item.icon}
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-black text-slate-600">{item.title}</span>
+                    <span className="text-[11px] font-bold text-slate-400 line-clamp-1">
+                      {item.subtitle}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 pl-2 flex-shrink-0">
+                  {item.badgeLabel && (
+                    <Badge variant={item.badgeVariant || 'slate'} size="xs">
+                      {item.badgeLabel}
+                    </Badge>
+                  )}
+                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                </div>
+              </div>
+            )
+          )}
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(
-              [
-                { id: 'mind_body', label: 'Mind & Body' },
-                { id: 'surgery', label: 'Surgery' },
-                { id: 'travel', label: 'Licenses & Travel' },
-                { id: 'nightlife', label: 'Nightlife & Legal' },
-              ] as const
-            ).map((tab) => (
-              <CartoonButton
-                key={tab.id}
-                variant={activeTab === tab.id ? 'slate' : 'white'}
-                size="sm"
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </CartoonButton>
-            ))}
-          </div>
 
           {activeTab === 'mind_body' && (
             <>

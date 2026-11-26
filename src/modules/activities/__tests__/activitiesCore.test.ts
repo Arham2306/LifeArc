@@ -408,8 +408,8 @@ function makeIncarceratedCharacter(age = 24): CharacterProfile {
     })
   );
   assert(
-    menuYoungHtml.includes('Mind &amp; Body') && menuYoungHtml.includes('Age 8'),
-    'MenuScreen renders Mind & Body locked with Age 8 badge below Age 8'
+    menuYoungHtml.includes('Everyday Activities') && menuYoungHtml.includes('Age 8'),
+    'MenuScreen renders Everyday Activities locked with Age 8 badge below Age 8'
   );
 
   const menuPrisonHtml = renderToStaticMarkup(
@@ -419,11 +419,11 @@ function makeIncarceratedCharacter(age = 24): CharacterProfile {
     })
   );
   assert(
-    menuPrisonHtml.includes('Mind &amp; Body') && menuPrisonHtml.includes('In Prison'),
-    'MenuScreen renders Mind & Body locked with In Prison badge while incarcerated'
+    menuPrisonHtml.includes('Everyday Activities') && menuPrisonHtml.includes('In Prison'),
+    'MenuScreen renders Everyday Activities locked with In Prison badge while incarcerated'
   );
 
-  const screenAdultHtml = renderToStaticMarkup(
+  const directoryHtml = renderToStaticMarkup(
     React.createElement(ActivitiesScreen, {
       character: makeCharacter({ age: 24, cash: 1200 }),
       onUpdateCharacter: () => {},
@@ -431,11 +431,30 @@ function makeIncarceratedCharacter(age = 24): CharacterProfile {
     })
   );
   assert(
-    screenAdultHtml.includes('Mind &amp; Body Routines') &&
+    directoryHtml.includes('Everyday Activities') &&
+      directoryHtml.includes('Mind &amp; Body') &&
+      directoryHtml.includes('Cosmetic Surgery') &&
+      directoryHtml.includes('Licenses &amp; Travel') &&
+      directoryHtml.includes('Nightlife &amp; Legal') &&
+      directoryHtml.includes('Back to Menu'),
+    'ActivitiesScreen default SSR renders the 4-row mobile Everyday Activities directory'
+  );
+
+  const screenAdultHtml = renderToStaticMarkup(
+    React.createElement(ActivitiesScreen, {
+      character: makeCharacter({ age: 24, cash: 1200 }),
+      onUpdateCharacter: () => {},
+      onBackToMenu: () => {},
+      initialTab: 'mind_body',
+    })
+  );
+  assert(
+    screenAdultHtml.includes('Back to Activities') &&
+      screenAdultHtml.includes('Mind &amp; Body Routines') &&
       screenAdultHtml.includes('Martial Arts Dojo') &&
       screenAdultHtml.includes('Diet &amp; Nutrition') &&
       screenAdultHtml.includes('Mediterranean'),
-    'ActivitiesScreen SSR renders routines, martial arts dojo, and diets cleanly'
+    'ActivitiesScreen mind_body drill-down renders Back to Activities, routines, dojo, and diets cleanly'
   );
 
   const screenPrisonHtml = renderToStaticMarkup(

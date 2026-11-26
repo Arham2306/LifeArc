@@ -543,7 +543,7 @@ function makePrisoner(age = 25): CharacterProfile {
       onOpenRelationships: () => {},
     })
   );
-  assert(menuHtml.includes('Mind &amp; Body'), 'MenuScreen renders Mind & Body tile');
+  assert(menuHtml.includes('Everyday Activities'), 'MenuScreen renders Everyday Activities tile');
 }
 
 console.log('surgeryAndTravel.test.ts: All assertions passed.');

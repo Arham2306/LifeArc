@@ -206,12 +206,12 @@ export const MenuScreen: React.FC<MenuScreenProps> = ({
     },
     {
       id: 'activities',
-      title: 'Mind & Body',
+      title: 'Everyday Activities',
       subtitle: !isActivitiesUnlocked
         ? `Unlocks at age ${ACTIVITIES_MIN_AGE} (Fitness, meditation, martial arts, and diet)`
         : isCrimeIncarcerated
           ? 'Unavailable while serving a prison sentence'
-          : 'Gym, martial arts, diet, surgery, travel, nightlife & legal',
+          : 'Mind & body, surgery, licenses, travel, nightlife & legal',
       icon: <HeartPulse className="w-5 h-5 stroke-[2.5] text-teal-950" />,
       iconBg: isActivitiesAccessible ? 'bg-teal-400' : 'bg-teal-300',
       badgeLabel: !isActivitiesUnlocked
